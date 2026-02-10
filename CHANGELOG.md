@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- README restructured with concise, professional copy and clearer install/use/config flow.
+- Branding visuals refreshed:
+  - `assets/branding/social-card.svg` now uses dark social-card styling with OpenAI-style mark.
+  - `assets/branding/project-mark.svg` now matches the dark branding system.
+- Branding documentation wording updated for trademark clarity.
+- Added spec-kit plan:
+  - `plans/20260210-readme-branding-professional-polish/plan.md`
+
 ## [0.2.2] - 2026-02-10
 
 ### Changed

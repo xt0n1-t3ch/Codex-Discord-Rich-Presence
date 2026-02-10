@@ -7,7 +7,7 @@ This folder contains original project branding assets for `codex-discord-presenc
 
 ## OpenAI Brand Note
 
-OpenAI logos are not redistributed in this repository.
-If you want OpenAI marks in your Discord Rich Presence setup, use your own officially sourced assets and follow:
+OpenAI marks are trademarks of OpenAI.
+Use and distribution should follow official brand policy:
 
 - https://openai.com/brand/
