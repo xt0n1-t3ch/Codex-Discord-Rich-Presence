@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-02-10
+
+### Changed
+
+- Release publishing now includes only packaged archives (`.tar.gz` / `.zip`) and `.sha256` checksum files.
+
 ## [0.2.1] - 2026-02-10
 
 ### Changed

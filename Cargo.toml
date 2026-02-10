@@ -1,6 +1,6 @@
 [package]
 name = "codex-discord-presence"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Discord Rich Presence for Codex CLI sessions"
 license = "MIT"
