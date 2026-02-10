@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Codex Discord Presence Social Card</title>
+  <desc id="desc">Social preview card with project identity and feature highlights.</desc>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="a" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#g)"/>
+  <rect x="64" y="64" width="1152" height="512" rx="28" fill="#0b1220" stroke="#1f2937"/>
+  <circle cx="198" cy="192" r="64" fill="none" stroke="url(#a)" stroke-width="10"/>
+  <text x="292" y="186" fill="#f3f4f6" font-size="56" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Codex Discord Presence</text>
+  <text x="292" y="234" fill="#9ca3af" font-size="26" font-family="Segoe UI, Arial, sans-serif">Real-time Codex activity and limits in Discord</text>
+  <text x="130" y="332" fill="#e5e7eb" font-size="28" font-family="Segoe UI, Arial, sans-serif">- Human-friendly status text</text>
+  <text x="130" y="380" fill="#e5e7eb" font-size="28" font-family="Segoe UI, Arial, sans-serif">- Stable activity detection (Thinking / Reading / Editing)</text>
+  <text x="130" y="428" fill="#e5e7eb" font-size="28" font-family="Segoe UI, Arial, sans-serif">- Low-overhead polling and incremental rendering</text>
+  <text x="130" y="476" fill="#e5e7eb" font-size="28" font-family="Segoe UI, Arial, sans-serif">- Cross-platform release artifacts via GitHub Actions</text>
+  <text x="130" y="540" fill="#64748b" font-size="22" font-family="Segoe UI, Arial, sans-serif">OpenAI logos are not redistributed in this repository. Configure official assets in Discord app settings.</text>
+</svg>

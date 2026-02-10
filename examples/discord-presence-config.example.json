@@ -1,0 +1,23 @@
+{
+  "schema_version": 3,
+  "discord_client_id": "1470480085453770854",
+  "discord_public_key": "29e563eeb755ae71d940c1b11d49dd3282a8886cd8b8cab829b2a14fcedad247",
+  "privacy": {
+    "enabled": false,
+    "show_project_name": true,
+    "show_git_branch": true,
+    "show_model": true,
+    "show_tokens": true,
+    "show_limits": true,
+    "show_activity": true,
+    "show_activity_target": true
+  },
+  "display": {
+    "large_image_key": "codex-logo",
+    "large_text": "Codex",
+    "small_image_key": "openai",
+    "small_text": "OpenAI",
+    "terminal_logo_mode": "auto",
+    "terminal_logo_path": null
+  }
+}

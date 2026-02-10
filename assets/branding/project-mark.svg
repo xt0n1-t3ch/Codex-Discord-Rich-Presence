@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Codex Discord Presence Mark</title>
+  <desc id="desc">Project mark for Codex Discord Presence.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="172" fill="none" stroke="url(#ring)" stroke-width="24"/>
+  <path d="M194 170h60c55 0 93 37 93 86s-38 86-93 86h-60z" fill="none" stroke="#e5e7eb" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M222 212h36c24 0 40 16 40 44s-16 44-40 44h-36" fill="none" stroke="#e5e7eb" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            os_name: linux
+            arch: x64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            os_name: macos
+            arch: x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            os_name: macos
+            arch: arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_name: windows
+            arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: codex-discord-presence-release-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=codex-discord-presence
+          OS_NAME="${{ matrix.os_name }}"
+          ARCH="${{ matrix.arch }}"
+          OUT_DIR="dist/${OS_NAME}/${ARCH}"
+          ARCHIVE="${BIN}-${OS_NAME}-${ARCH}.tar.gz"
+          mkdir -p "${OUT_DIR}"
+          cp ".build/target/${{ matrix.target }}/release/${BIN}" "${OUT_DIR}/${BIN}"
+          tar -czf "${OUT_DIR}/${ARCHIVE}" -C "${OUT_DIR}" "${BIN}"
+          SUM="$(shasum -a 256 "${OUT_DIR}/${ARCHIVE}" | awk '{print tolower($1)}')"
+          echo "${SUM}  ${ARCHIVE}" > "${OUT_DIR}/${ARCHIVE}.sha256"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $BIN = "codex-discord-presence.exe"
+          $OS_NAME = "${{ matrix.os_name }}"
+          $ARCH = "${{ matrix.arch }}"
+          $OUT_DIR = "dist/$OS_NAME/$ARCH"
+          $ARCHIVE = "codex-discord-presence-$OS_NAME-$ARCH.zip"
+          New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null
+          Copy-Item ".build/target/${{ matrix.target }}/release/$BIN" "$OUT_DIR/$BIN"
+          Compress-Archive -Path "$OUT_DIR/$BIN" -DestinationPath "$OUT_DIR/$ARCHIVE" -Force
+          Get-FileHash "$OUT_DIR/$ARCHIVE" -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLower())  $ARCHIVE" | Out-File "$OUT_DIR/$ARCHIVE.sha256" -Encoding ascii
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/**
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find dist -type f -maxdepth 8 -exec cp {} release-assets/ \;
+          ls -lah release-assets
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
