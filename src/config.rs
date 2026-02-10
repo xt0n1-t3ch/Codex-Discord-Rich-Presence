@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
+const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
+const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
 const CONFIG_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -59,6 +61,7 @@ pub struct DisplayConfig {
 #[derive(Debug, Clone)]
 pub struct RuntimeSettings {
     pub stale_threshold: Duration,
+    pub active_sticky_window: Duration,
     pub poll_interval: Duration,
 }
 
@@ -204,11 +207,17 @@ impl PresenceConfig {
 }
 
 pub fn runtime_settings() -> RuntimeSettings {
+    let sticky_seconds = env_u64(
+        "CODEX_PRESENCE_ACTIVE_STICKY_SECONDS",
+        DEFAULT_ACTIVE_STICKY_SECONDS,
+    )
+    .max(MIN_ACTIVE_STICKY_SECONDS);
     RuntimeSettings {
         stale_threshold: Duration::from_secs(env_u64(
             "CODEX_PRESENCE_STALE_SECONDS",
             DEFAULT_STALE_SECONDS,
         )),
+        active_sticky_window: Duration::from_secs(sticky_seconds),
         poll_interval: Duration::from_secs(env_u64(
             "CODEX_PRESENCE_POLL_SECONDS",
             DEFAULT_POLL_SECONDS,

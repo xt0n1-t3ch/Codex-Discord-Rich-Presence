@@ -42,6 +42,7 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
     let sessions = collect_active_sessions(
         &config::sessions_path(),
         runtime.stale_threshold,
+        runtime.active_sticky_window,
         &mut cache,
         &mut parse_cache,
     )?;
@@ -159,6 +160,7 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                 sessions = collect_active_sessions(
                     &sessions_root,
                     runtime.stale_threshold,
+                    runtime.active_sticky_window,
                     &mut git_cache,
                     &mut parse_cache,
                 )?;
@@ -238,6 +240,7 @@ fn run_headless_foreground(
         let sessions = collect_active_sessions(
             &sessions_root,
             runtime.stale_threshold,
+            runtime.active_sticky_window,
             &mut git_cache,
             &mut parse_cache,
         )?;
@@ -423,6 +426,7 @@ fn run_codex_wrapper(
         let sessions = collect_active_sessions(
             &sessions_root,
             runtime.stale_threshold,
+            runtime.active_sticky_window,
             &mut git_cache,
             &mut parse_cache,
         )?;

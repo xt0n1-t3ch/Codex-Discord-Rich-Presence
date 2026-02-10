@@ -115,3 +115,6 @@ Behavior:
 - unchanged files reuse cached snapshots without reparsing;
 - changed files parse only appended lines from the cached cursor;
 - truncated/rotated files reset cache state and parse from start.
+- session visibility uses dual thresholds:
+  - strict stale cutoff (`CODEX_PRESENCE_STALE_SECONDS`),
+  - sticky non-idle window (`CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`, default 3600s).

@@ -19,6 +19,7 @@ Behavior:
 - computes real token metrics (`This update | Last response | Session total`),
 - computes limits using **remaining** semantics (`100 - used`),
 - computes live activity with pending-call tracking and idle debounce,
+- keeps non-idle sessions visible with sticky activity window fallback,
 - updates Discord Rich Presence,
 - runs interactive TUI until `q` or `Ctrl+C`.
 
@@ -65,6 +66,7 @@ codex-discord-presence doctor
 - `CODEX_DISCORD_CLIENT_ID`
 - `CODEX_PRESENCE_STALE_SECONDS`
 - `CODEX_PRESENCE_POLL_SECONDS`
+- `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`
 - `CODEX_HOME`
 - `CODEX_PRESENCE_TERMINAL_RELAUNCHED` (internal guard)
 

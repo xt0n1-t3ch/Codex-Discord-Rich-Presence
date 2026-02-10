@@ -14,7 +14,8 @@ Render pipeline is height-budgeted and responsive by mode:
 - Hybrid logo behavior:
   - official OpenAI image when terminal protocol supports inline images and config allows it.
   - deterministic ASCII fallback otherwise.
-- Wordmark/subtitle are centered and constrained by terminal width.
+- Wordmark uses high-legibility block `CODEX` ASCII to avoid glyph ambiguity.
+- Subtitle is centered and constrained by terminal width.
 
 2. Runtime
 - Mode, time, uptime, Discord state.
@@ -36,14 +37,15 @@ Render pipeline is height-budgeted and responsive by mode:
 - Session rows are trimmed to remaining vertical budget.
 - `Full`/`Compact`: header row + detail row.
 - `Minimal`: header row only.
+- Non-idle sessions can stay visible beyond strict stale cutoff via sticky activity window.
 
 5. Footer (fixed bottom anchor)
-- Always rendered in the final terminal rows (non-flow).
-- Responsive credit line:
+- Always rendered on the final terminal row (non-flow).
+- Right-aligned credit line:
   - full: `By XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
   - medium: `By XT0N1.T3CH | @XT0N1.T3CH`
   - narrow: `By XT0N1.T3CH`
-- Quit hint (`q` / `Ctrl+C`) always on last line.
+- Quit hint (`q` / `Ctrl+C`) is left-aligned on the same row.
 
 ## 2. Status Snapshot (`codex-discord-presence status`)
 

@@ -16,28 +16,28 @@ use crate::util::{
     format_time_until, format_token_triplet, human_duration, now_local, progress_bar, truncate,
 };
 
-const FOOTER_ROWS: u16 = 2;
+const FOOTER_ROWS: u16 = 1;
 
 const OPENAI_ASCII: [&str; 8] = [
-    "       .-=========-.       ",
-    "     .'  .-----.    '.     ",
-    "    /   .'  _  '.     \\",
-    "   ;   /  .' '.  \\     ;   ",
-    "   ;   \\  \\_/ /  /     ;   ",
-    "    \\   '._____.'     /    ",
-    "     '.           _ .'     ",
-    "       '-._____.-'         ",
+    "        .-========-.       ",
+    "      .'  .----.    '.     ",
+    "     /   .' __ '.     \\    ",
+    "    ;   /  /  \\  \\     ;   ",
+    "    ;   \\  \\__/  /     ;   ",
+    "     \\   '.____.'     /    ",
+    "      '.          _ .'     ",
+    "        '-.____.-'         ",
 ];
 
 const CODEX_ASCII: [&str; 8] = [
-    "   ______   ____   _____   ______  __   __  ",
-    "  / ____/  / __ \\ / ___/  / ____/  \\ \\ / /  ",
-    " / /      / / / //\\__ \\  / __/      \\ V /   ",
-    "/ /___   / /_/ /___/ /  / /___      / . \\   ",
-    "\\____/   \\____//____/  /_____/     /_/ \\_\\  ",
-    "                                             ",
+    "   _____   ____   _____   ______  __   __   ",
+    "  / ____| / __ \\ |  __ \\ |  ____| \\ \\ / /   ",
+    " | |     | |  | || |  | || |__     \\ V /    ",
+    " | |     | |  | || |  | ||  __|     > <     ",
+    " | |____ | |__| || |__| || |____   / . \\    ",
+    "  \\_____| \\____/ |_____/ |______| /_/ \\_\\   ",
     "       Discord Presence for Codex CLI        ",
-    "      Live activity + limits telemetry       ",
+    "       Live activity + limits telemetry      ",
 ];
 
 const COMPACT_BANNER: [&str; 2] = [
@@ -575,24 +575,36 @@ fn try_draw_logo_image(
 }
 
 fn render_footer(out: &mut impl Write, width: usize, height: u16) -> Result<()> {
-    if height == 0 {
+    if height == 0 || width == 0 {
         return Ok(());
     }
 
-    if height >= 2 {
-        let credit_row = height - 2;
-        execute!(out, MoveTo(0, credit_row), Clear(ClearType::CurrentLine))?;
-        let credit = center_line(&author_credit(width), width).dark_grey();
-        write!(out, "{credit}")?;
+    let row = height - 1;
+    let (left, right) = footer_parts(width);
+    execute!(out, MoveTo(0, row), Clear(ClearType::CurrentLine))?;
+    write!(out, "{left}")?;
 
-        execute!(out, MoveTo(0, height - 1), Clear(ClearType::CurrentLine))?;
-        write!(out, "{}", truncate("Press q or Ctrl+C to quit.", width))?;
-        return Ok(());
+    if !right.is_empty() {
+        let right_col = width.saturating_sub(right.len()) as u16;
+        execute!(out, MoveTo(right_col, row))?;
+        write!(out, "{}", right.dark_grey())?;
     }
-
-    execute!(out, MoveTo(0, 0), Clear(ClearType::CurrentLine))?;
-    write!(out, "{}", truncate("Press q or Ctrl+C to quit.", width))?;
     Ok(())
+}
+
+fn footer_parts(width: usize) -> (String, String) {
+    if width == 0 {
+        return (String::new(), String::new());
+    }
+
+    let left = truncate("Press q or Ctrl+C to quit.", width);
+    if width <= left.len() + 1 {
+        return (left, String::new());
+    }
+
+    let available_right = width - left.len() - 1;
+    let right = truncate(&author_credit(width), available_right);
+    (left, right)
 }
 
 fn write_line(
@@ -769,6 +781,16 @@ mod tests {
     #[test]
     fn frame_budget_reserves_footer() {
         let budget = FrameBudget::new(120, 30);
-        assert_eq!(budget.body_bottom(), 28);
+        assert_eq!(budget.body_bottom(), 29);
+    }
+
+    #[test]
+    fn footer_parts_never_overlap() {
+        let (left, right) = footer_parts(84);
+        assert!(left.len() + 1 + right.len() <= 84);
+
+        let (left_small, right_small) = footer_parts(20);
+        assert_eq!(right_small, "");
+        assert_eq!(left_small, "Press q or Ctrl+C...");
     }
 }

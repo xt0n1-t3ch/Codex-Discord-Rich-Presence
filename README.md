@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?logo=discord&logoColor=white" alt="Discord Rich Presence">
 </p>
 
-Real-time Discord Rich Presence for Codex CLI sessions.
+<p align="center"><strong>Real-time Discord Rich Presence for Codex CLI sessions.</strong></p>
 
 ## Overview
 
@@ -66,12 +66,14 @@ Defaults:
 - `display.large_image_key`: `codex-logo`
 - `display.small_image_key`: `openai`
 - `poll_interval_seconds`: `2`
+- `active_sticky_window_seconds`: `3600` (runtime env)
 
 Environment overrides:
 
 - `CODEX_DISCORD_CLIENT_ID`
 - `CODEX_PRESENCE_STALE_SECONDS`
 - `CODEX_PRESENCE_POLL_SECONDS`
+- `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`
 - `CODEX_HOME`
 
 ## Discord Asset Setup

@@ -171,6 +171,7 @@ impl GitBranchCache {
 pub fn collect_active_sessions(
     sessions_root: &Path,
     stale_threshold: Duration,
+    active_sticky_window: Duration,
     git_cache: &mut GitBranchCache,
     parse_cache: &mut SessionParseCache,
 ) -> Result<Vec<CodexSessionSnapshot>> {
@@ -180,8 +181,11 @@ pub fn collect_active_sessions(
     }
 
     let now = SystemTime::now();
-    let cutoff = now
+    let stale_cutoff = now
         .checked_sub(stale_threshold)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let sticky_cutoff = now
+        .checked_sub(active_sticky_window)
         .unwrap_or(SystemTime::UNIX_EPOCH);
 
     let mut sessions = Vec::new();
@@ -208,14 +212,14 @@ pub fn collect_active_sessions(
             Ok(m) => m,
             Err(_) => continue,
         };
-        if modified < cutoff {
-            continue;
-        }
-
-        if let Some(snapshot) =
+        if let Some(mut snapshot) =
             parse_session_file_cached(path, &metadata, modified, git_cache, parse_cache)?
         {
-            sessions.push(snapshot);
+            let recency = session_recency(&snapshot, modified);
+            snapshot.last_activity = recency;
+            if should_include_session(&snapshot, recency, stale_cutoff, sticky_cutoff) {
+                sessions.push(snapshot);
+            }
         }
     }
 
@@ -246,6 +250,63 @@ pub fn latest_limits_source(sessions: &[CodexSessionSnapshot]) -> Option<&CodexS
 
 pub fn limits_present(limits: &RateLimits) -> bool {
     limits.primary.is_some() || limits.secondary.is_some()
+}
+
+fn should_include_session(
+    snapshot: &CodexSessionSnapshot,
+    recency: SystemTime,
+    stale_cutoff: SystemTime,
+    sticky_cutoff: SystemTime,
+) -> bool {
+    if recency >= stale_cutoff {
+        return true;
+    }
+    if recency < sticky_cutoff {
+        return false;
+    }
+    snapshot
+        .activity
+        .as_ref()
+        .is_some_and(session_activity_is_sticky_active)
+}
+
+fn session_activity_is_sticky_active(activity: &SessionActivitySnapshot) -> bool {
+    !matches!(activity.kind, SessionActivityKind::Idle)
+}
+
+fn session_recency(snapshot: &CodexSessionSnapshot, file_modified: SystemTime) -> SystemTime {
+    let mut newest = file_modified;
+
+    if let Some(ts) = snapshot
+        .last_token_event_at
+        .and_then(datetime_to_system_time)
+        && ts > newest
+    {
+        newest = ts;
+    }
+
+    if let Some(activity) = &snapshot.activity {
+        for candidate in [activity.last_active_at, activity.observed_at] {
+            if let Some(ts) = candidate.and_then(datetime_to_system_time)
+                && ts > newest
+            {
+                newest = ts;
+            }
+        }
+    }
+
+    newest
+}
+
+fn datetime_to_system_time(ts: DateTime<Utc>) -> Option<SystemTime> {
+    if ts.timestamp() < 0 {
+        return None;
+    }
+    let secs = ts.timestamp() as u64;
+    let nanos = ts.timestamp_subsec_nanos() as u64;
+    SystemTime::UNIX_EPOCH
+        .checked_add(Duration::from_secs(secs))?
+        .checked_add(Duration::from_nanos(nanos))
 }
 
 #[derive(Debug, Default)]
@@ -1040,6 +1101,34 @@ mod tests {
             .expect("snapshot")
     }
 
+    fn policy_snapshot(activity_kind: Option<SessionActivityKind>) -> CodexSessionSnapshot {
+        CodexSessionSnapshot {
+            session_id: "policy".to_string(),
+            cwd: PathBuf::from("."),
+            project_name: "policy-project".to_string(),
+            git_branch: None,
+            model: None,
+            approval_policy: None,
+            sandbox_policy: None,
+            session_total_tokens: None,
+            last_turn_tokens: None,
+            session_delta_tokens: None,
+            limits: RateLimits::default(),
+            activity: activity_kind.map(|kind| SessionActivitySnapshot {
+                kind,
+                target: None,
+                observed_at: Some(Utc::now()),
+                last_active_at: Some(Utc::now()),
+                idle_candidate_at: None,
+                pending_calls: 0,
+            }),
+            started_at: None,
+            last_token_event_at: None,
+            last_activity: SystemTime::now(),
+            source_file: PathBuf::from("policy.jsonl"),
+        }
+    }
+
     #[test]
     fn parses_tokens_delta_and_remaining_limits() {
         let snapshot = parse_one(
@@ -1228,6 +1317,103 @@ mod tests {
         let sessions = vec![older, newer];
         let source = latest_limits_source(&sessions).expect("limits source");
         assert_eq!(source.session_id, "newer");
+    }
+
+    #[test]
+    fn sticky_policy_keeps_non_idle_session_within_window() {
+        let now = SystemTime::now();
+        let recency = now
+            .checked_sub(Duration::from_secs(8 * 60))
+            .expect("recency");
+        let stale_cutoff = now.checked_sub(Duration::from_secs(90)).expect("stale");
+        let sticky_cutoff = now
+            .checked_sub(Duration::from_secs(60 * 60))
+            .expect("sticky");
+        let snapshot = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+
+        assert!(should_include_session(
+            &snapshot,
+            recency,
+            stale_cutoff,
+            sticky_cutoff
+        ));
+    }
+
+    #[test]
+    fn sticky_policy_excludes_idle_session_beyond_stale_cutoff() {
+        let now = SystemTime::now();
+        let recency = now
+            .checked_sub(Duration::from_secs(8 * 60))
+            .expect("recency");
+        let stale_cutoff = now.checked_sub(Duration::from_secs(90)).expect("stale");
+        let sticky_cutoff = now
+            .checked_sub(Duration::from_secs(60 * 60))
+            .expect("sticky");
+        let snapshot = policy_snapshot(Some(SessionActivityKind::Idle));
+
+        assert!(!should_include_session(
+            &snapshot,
+            recency,
+            stale_cutoff,
+            sticky_cutoff
+        ));
+    }
+
+    #[test]
+    fn sticky_policy_excludes_session_outside_sticky_window() {
+        let now = SystemTime::now();
+        let recency = now
+            .checked_sub(Duration::from_secs(2 * 60 * 60))
+            .expect("recency");
+        let stale_cutoff = now.checked_sub(Duration::from_secs(90)).expect("stale");
+        let sticky_cutoff = now
+            .checked_sub(Duration::from_secs(60 * 60))
+            .expect("sticky");
+        let snapshot = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+
+        assert!(!should_include_session(
+            &snapshot,
+            recency,
+            stale_cutoff,
+            sticky_cutoff
+        ));
+    }
+
+    #[test]
+    fn strict_stale_cutoff_includes_recent_session_without_activity() {
+        let now = SystemTime::now();
+        let recency = now.checked_sub(Duration::from_secs(30)).expect("recency");
+        let stale_cutoff = now.checked_sub(Duration::from_secs(90)).expect("stale");
+        let sticky_cutoff = now
+            .checked_sub(Duration::from_secs(60 * 60))
+            .expect("sticky");
+        let snapshot = policy_snapshot(None);
+
+        assert!(should_include_session(
+            &snapshot,
+            recency,
+            stale_cutoff,
+            sticky_cutoff
+        ));
+    }
+
+    #[test]
+    fn session_recency_uses_newest_activity_signal() {
+        let file_modified = SystemTime::now()
+            .checked_sub(Duration::from_secs(2 * 60 * 60))
+            .expect("file_modified");
+        let activity_ts = Utc::now() - ChronoDuration::minutes(10);
+        let token_ts = Utc::now() - ChronoDuration::minutes(20);
+        let mut snapshot = policy_snapshot(Some(SessionActivityKind::Thinking));
+        snapshot.last_token_event_at = Some(token_ts);
+        if let Some(activity) = snapshot.activity.as_mut() {
+            activity.observed_at = Some(activity_ts);
+            activity.last_active_at = Some(activity_ts);
+        }
+
+        let recency = session_recency(&snapshot, file_modified);
+        let expected = datetime_to_system_time(activity_ts).expect("expected");
+        assert_eq!(recency, expected);
     }
 
     #[test]

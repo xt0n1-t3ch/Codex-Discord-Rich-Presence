@@ -11,8 +11,17 @@ All notable changes to this project are documented in this file.
   - `assets/branding/social-card.svg` now uses dark social-card styling with OpenAI-style mark.
   - `assets/branding/project-mark.svg` now matches the dark branding system.
 - Branding documentation wording updated for trademark clarity.
+- Session visibility now supports sticky non-idle window fallback beyond strict stale cutoff.
+- TUI header ASCII wordmark updated to clear block `CODEX`.
+- TUI footer is now anchored on the last row:
+  - left: quit hint,
+  - right: author credit.
+- README subtitle is now centered.
+- Added runtime env override:
+  - `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` (default `3600`, min clamp).
 - Added spec-kit plan:
   - `plans/20260210-readme-branding-professional-polish/plan.md`
+  - `plans/20260210-session-stability-header-footer-svg-fixes/plan.md`
 
 ## [0.2.2] - 2026-02-10
 
