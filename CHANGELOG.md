@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-02-10
+
+### Changed
+
+- Release workflow macOS x64 runner updated to `macos-15-intel` for current GitHub Actions compatibility.
+
 ## [0.2.0] - 2026-02-10
 
 ### Added
