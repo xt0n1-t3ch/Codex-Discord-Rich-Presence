@@ -19,7 +19,7 @@ use crate::util::{
 const FOOTER_ROWS: u16 = 1;
 const FULL_RECENT_RESERVED_ROWS: u16 = 5;
 const COMPACT_RECENT_RESERVED_ROWS: u16 = 3;
-const MINIMAL_RECENT_RESERVED_ROWS: u16 = 2;
+const MINIMAL_RECENT_RESERVED_ROWS: u16 = 1;
 
 const OPENAI_ASCII: [&str; 8] = [
     "        .-========-.       ",
@@ -299,28 +299,12 @@ fn render_active_section(
         return Ok(());
     }
 
-    if matches!(layout, UiLayoutMode::Full) {
-        let path_text = truncate(&active.cwd.display().to_string(), width.saturating_sub(13));
-        if !write_line(out, row, max_body_row, width, &kv_line("Path", &path_text))? {
-            return Ok(());
-        }
-    }
-
     if !write_line(
         out,
         row,
         max_body_row,
         width,
         &kv_line("Model", active.model.as_deref().unwrap_or("unknown")),
-    )? {
-        return Ok(());
-    }
-    if !write_line(
-        out,
-        row,
-        max_body_row,
-        width,
-        &kv_line("Branch", active.git_branch.as_deref().unwrap_or("n/a")),
     )? {
         return Ok(());
     }
@@ -352,20 +336,43 @@ fn render_active_section(
     }
 
     let limits = data.effective_limits.unwrap_or(&active.limits);
+    if max_body_row.saturating_sub(*row) == 1 {
+        let summary = render_compact_limits_row(limits);
+        let _ = write_line(out, row, max_body_row, width, &summary);
+        return Ok(());
+    }
+
     if let Some(primary) = &limits.primary {
         let line = render_limit_row("5h", primary, width);
         if !write_line_unchecked(out, row, max_body_row, &line)? {
             return Ok(());
         }
-    } else {
-        let _ = write_line(out, row, max_body_row, width, "5h remaining: n/a");
+    } else if !write_line(out, row, max_body_row, width, "5h remaining: n/a")? {
+        return Ok(());
     }
 
     if let Some(secondary) = &limits.secondary {
         let line = render_limit_row("7d", secondary, width);
-        let _ = write_line_unchecked(out, row, max_body_row, &line)?;
-    } else {
-        let _ = write_line(out, row, max_body_row, width, "7d remaining: n/a");
+        if !write_line_unchecked(out, row, max_body_row, &line)? {
+            return Ok(());
+        }
+    } else if !write_line(out, row, max_body_row, width, "7d remaining: n/a")? {
+        return Ok(());
+    }
+
+    if !write_line(
+        out,
+        row,
+        max_body_row,
+        width,
+        &kv_line("Branch", active.git_branch.as_deref().unwrap_or("n/a")),
+    )? {
+        return Ok(());
+    }
+
+    if matches!(layout, UiLayoutMode::Full) {
+        let path_text = truncate(&active.cwd.display().to_string(), width.saturating_sub(13));
+        let _ = write_line(out, row, max_body_row, width, &kv_line("Path", &path_text));
     }
 
     Ok(())
@@ -706,6 +713,18 @@ fn render_limit_row(label: &str, window: &UsageWindow, width: usize) -> String {
     format!("{label} remaining [{pct}] {bar} reset {reset}")
 }
 
+fn render_compact_limits_row(limits: &RateLimits) -> String {
+    let primary = limit_percent_text(limits.primary.as_ref());
+    let secondary = limit_percent_text(limits.secondary.as_ref());
+    format!("Usage: 5h {primary} | 7d {secondary}")
+}
+
+fn limit_percent_text(window: Option<&UsageWindow>) -> String {
+    window
+        .map(|item| format!("{:.0}%", item.remaining_percent.clamp(0.0, 100.0)))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
 fn limit_bar_width(width: usize) -> usize {
     if width >= 140 {
         30
@@ -746,9 +765,9 @@ fn hr(title: &str, width: usize) -> String {
 }
 
 fn select_layout_mode(width: u16, height: u16) -> UiLayoutMode {
-    if width >= 104 && height >= 28 {
+    if width >= 112 && height >= 32 {
         UiLayoutMode::Full
-    } else if width >= 76 && height >= 18 {
+    } else if width >= 80 && height >= 18 {
         UiLayoutMode::Compact
     } else {
         UiLayoutMode::Minimal
@@ -757,8 +776,11 @@ fn select_layout_mode(width: u16, height: u16) -> UiLayoutMode {
 
 fn reserved_recent_rows(layout: UiLayoutMode, max_body_row: u16) -> u16 {
     let preferred = match layout {
-        UiLayoutMode::Full => FULL_RECENT_RESERVED_ROWS,
-        UiLayoutMode::Compact => COMPACT_RECENT_RESERVED_ROWS,
+        UiLayoutMode::Full if max_body_row >= 34 => FULL_RECENT_RESERVED_ROWS,
+        UiLayoutMode::Full if max_body_row >= 28 => 3,
+        UiLayoutMode::Full => 2,
+        UiLayoutMode::Compact if max_body_row >= 22 => COMPACT_RECENT_RESERVED_ROWS,
+        UiLayoutMode::Compact => 2,
         UiLayoutMode::Minimal => MINIMAL_RECENT_RESERVED_ROWS,
     };
     preferred.min(max_body_row)
@@ -827,7 +849,8 @@ mod tests {
 
     #[test]
     fn layout_mode_switches_by_terminal_size() {
-        assert_eq!(select_layout_mode(120, 32), UiLayoutMode::Full);
+        assert_eq!(select_layout_mode(120, 34), UiLayoutMode::Full);
+        assert_eq!(select_layout_mode(110, 30), UiLayoutMode::Compact);
         assert_eq!(select_layout_mode(90, 22), UiLayoutMode::Compact);
         assert_eq!(select_layout_mode(60, 16), UiLayoutMode::Minimal);
     }
@@ -850,9 +873,12 @@ mod tests {
 
     #[test]
     fn reserved_recent_rows_by_layout() {
-        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 20), 5);
-        assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 20), 3);
-        assert_eq!(reserved_recent_rows(UiLayoutMode::Minimal, 20), 2);
-        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 3), 3);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 34), 5);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 28), 3);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 24), 2);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 24), 3);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 20), 2);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Minimal, 20), 1);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 3), 2);
     }
 }
