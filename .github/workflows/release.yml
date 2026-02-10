@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-assets
-          find dist -type f -maxdepth 8 -exec cp {} release-assets/ \;
+          find dist -type f -maxdepth 8 \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
           ls -lah release-assets
 
       - name: Create release
