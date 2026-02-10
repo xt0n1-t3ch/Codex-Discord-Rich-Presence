@@ -6,6 +6,21 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Active session ranking now prioritizes:
+  - pending tool calls,
+  - non-idle sessions,
+  - recency.
+- Anti-false-idle logic now tracks effective activity signals and prevents stale idle transitions.
+- `Recent Sessions` is now guaranteed visible with reserved layout rows and compact fallback rendering.
+- Discord state text is cleaner (prefers `Last response` + `Session total`; omits noisy delta when redundant).
+- Added optional per-activity Discord small-image mapping:
+  - `display.activity_small_image_keys.{thinking,reading,editing,running,waiting,idle}`
+- Credits format unified across TUI/README/social assets:
+  - `XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
+- README refreshed with cleaner structure and a dedicated credits ribbon SVG.
+- Social card typography reflowed to avoid clipping in repository preview.
+- Added spec-kit plan:
+  - `plans/20260210-recent-sessions-premium-presence-polish/plan.md`
 - README restructured with concise, professional copy and clearer install/use/config flow.
 - Branding visuals refreshed:
   - `assets/branding/social-card.svg` now uses dark social-card styling with OpenAI-style mark.

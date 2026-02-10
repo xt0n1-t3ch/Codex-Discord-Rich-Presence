@@ -5,7 +5,7 @@ use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use std::time::{Duration, Instant};
 
 use crate::config::PresenceConfig;
-use crate::session::{CodexSessionSnapshot, RateLimits};
+use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind};
 use crate::util::format_tokens;
 
 pub struct DiscordPresence {
@@ -66,7 +66,16 @@ impl DiscordPresence {
                     return Ok(());
                 }
 
-                let activity = build_activity(&details, &state, session, config);
+                let (small_image_key, small_text) = small_asset_for_activity(session, config);
+                let activity = build_activity(
+                    &details,
+                    &state,
+                    session,
+                    &config.display.large_image_key,
+                    &config.display.large_text,
+                    &small_image_key,
+                    &small_text,
+                );
                 let client = self
                     .client
                     .as_mut()
@@ -157,7 +166,10 @@ fn build_activity<'a>(
     details: &'a str,
     state: &'a str,
     session: &'a CodexSessionSnapshot,
-    config: &'a PresenceConfig,
+    large_image_key: &'a str,
+    large_text: &'a str,
+    small_image_key: &'a str,
+    small_text: &'a str,
 ) -> Activity<'a> {
     let start = session
         .started_at
@@ -166,10 +178,10 @@ fn build_activity<'a>(
         .max(0);
 
     let assets = Assets::new()
-        .large_image(&config.display.large_image_key)
-        .large_text(&config.display.large_text)
-        .small_image(&config.display.small_image_key)
-        .small_text(&config.display.small_text);
+        .large_image(large_image_key)
+        .large_text(large_text)
+        .small_image(small_image_key)
+        .small_text(small_text);
 
     Activity::new()
         .details(details)
@@ -258,10 +270,40 @@ fn token_state_parts(session: &CodexSessionSnapshot) -> Vec<String> {
     if let Some(total) = session.session_total_tokens {
         parts.push(format!("Session total {}", format_tokens(total)));
     }
-    if let Some(delta) = session.session_delta_tokens {
+    if parts.is_empty()
+        && let Some(delta) = session.session_delta_tokens
+    {
         parts.push(format!("This update {}", format_tokens(delta)));
     }
     parts
+}
+
+fn small_asset_for_activity(
+    session: &CodexSessionSnapshot,
+    config: &PresenceConfig,
+) -> (String, String) {
+    let fallback_key = config.display.small_image_key.clone();
+    let fallback_text = config.display.small_text.clone();
+    let Some(activity) = &session.activity else {
+        return (fallback_key, fallback_text);
+    };
+
+    let mapped_key = match activity.kind {
+        SessionActivityKind::Thinking => &config.display.activity_small_image_keys.thinking,
+        SessionActivityKind::ReadingFile => &config.display.activity_small_image_keys.reading,
+        SessionActivityKind::EditingFile => &config.display.activity_small_image_keys.editing,
+        SessionActivityKind::RunningCommand => &config.display.activity_small_image_keys.running,
+        SessionActivityKind::WaitingInput => &config.display.activity_small_image_keys.waiting,
+        SessionActivityKind::Idle => &config.display.activity_small_image_keys.idle,
+    }
+    .as_ref()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+    .unwrap_or(fallback_key);
+
+    let mapped_text =
+        truncate_for_limit(&activity.to_text(config.privacy.show_activity_target), 128);
+    (mapped_key, mapped_text)
 }
 
 fn compact_join_prioritized(parts: &[String], max: usize, fallback: &str) -> String {
@@ -355,6 +397,7 @@ mod tests {
         assert!(state.contains("7d left 18%"));
         assert!(state.contains("Last response 1.7K"));
         assert!(state.contains("Session total 30.0K"));
+        assert!(!state.contains("This update"));
         assert!(!state.contains("tok "));
         assert!(!state.contains(" l "));
         assert!(!state.contains(" t "));
@@ -379,6 +422,7 @@ mod tests {
             target: Some("src/ui.rs".to_string()),
             observed_at: None,
             last_active_at: None,
+            last_effective_signal_at: None,
             idle_candidate_at: None,
             pending_calls: 0,
         });
@@ -387,5 +431,33 @@ mod tests {
         assert!(details.starts_with("Editing"));
         assert!(details.contains("project-alpha"));
         assert!(state.contains("gpt-5.3-codex"));
+    }
+
+    #[test]
+    fn small_asset_falls_back_to_default_when_activity_key_is_missing() {
+        let session = sample_session();
+        let config = PresenceConfig::default();
+        let (key, text) = small_asset_for_activity(&session, &config);
+        assert_eq!(key, config.display.small_image_key);
+        assert_eq!(text, config.display.small_text);
+    }
+
+    #[test]
+    fn small_asset_uses_activity_mapping_when_configured() {
+        let mut session = sample_session();
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: crate::session::SessionActivityKind::Thinking,
+            target: None,
+            observed_at: None,
+            last_active_at: None,
+            last_effective_signal_at: None,
+            idle_candidate_at: None,
+            pending_calls: 0,
+        });
+        let mut config = PresenceConfig::default();
+        config.display.activity_small_image_keys.thinking = Some("thinking-icon".to_string());
+        let (key, text) = small_asset_for_activity(&session, &config);
+        assert_eq!(key, "thinking-icon");
+        assert_eq!(text, "Thinking");
     }
 }

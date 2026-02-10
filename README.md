@@ -16,14 +16,15 @@
 
 ## Overview
 
-`codex-discord-presence` reads local Codex JSONL sessions (`~/.codex/sessions`), classifies live activity (`Thinking`, `Reading`, `Editing`, `Running`, `Waiting for input`), renders a terminal dashboard, and publishes updates to Discord with low overhead.
+`codex-discord-presence` reads local Codex session JSONL files (`~/.codex/sessions`), detects live activity (`Thinking`, `Reading`, `Editing`, `Running`, `Waiting for input`), renders an adaptive terminal dashboard, and updates Discord Rich Presence with low overhead.
 
 ## Core Capabilities
 
-- Live activity tracking with false-idle protection.
-- Adaptive terminal layout (`Full`, `Compact`, `Minimal`) with semantic limit bars.
-- Action-first Discord status lines with deterministic truncation.
-- Incremental session parsing and render/update dedupe for low CPU and memory pressure.
+- Stable multi-session detection with anti-false-idle behavior.
+- Always-visible `Recent Sessions` section with adaptive compact fallback.
+- Action-first Discord details/state with deterministic truncation.
+- Semantic remaining-limit bars (`5h`, `7d`) with color thresholds.
+- Incremental parse cache and render/publish dedupe for low CPU and memory use.
 
 ## Install
 
@@ -79,16 +80,10 @@ Environment overrides:
 ## Discord Asset Setup
 
 1. Open Discord desktop app.
-2. In Discord Developer Portal, configure image assets used by your application:
-   - `codex-logo` for large image
-   - `openai` for small image
-3. Keep keys in sync with `display.large_image_key` and `display.small_image_key`.
-
-## CI/CD and Releases
-
-- CI runs formatting, linting, tests, and release build checks.
-- Tagging `vX.Y.Z` publishes compressed artifacts and checksums.
-- Release note categories are configured in `.github/release.yml`.
+2. In Discord Developer Portal, configure image assets:
+   - `codex-logo` (large image)
+   - `openai` (small image fallback)
+3. Optional: add per-activity small image keys in config (`display.activity_small_image_keys`).
 
 ## Documentation
 
@@ -98,14 +93,14 @@ Environment overrides:
 
 ## Credits
 
-- By **XT0N1.T3CH**
-- Discord: `@XT0N1.T3CH`
-- User ID: `211189703641268224`
+<p align="center">
+  <img src="assets/branding/credits-ribbon.svg" alt="Project credits" width="900" />
+</p>
 
 ## OpenAI Brand Notice
 
 - OpenAI marks and logos are trademarks of OpenAI.
-- Follow official brand guidelines when distributing or configuring assets:
+- Follow official guidelines when distributing or configuring assets:
   - https://openai.com/brand/
 
 ## Security and Privacy

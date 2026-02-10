@@ -17,6 +17,9 @@ use crate::util::{
 };
 
 const FOOTER_ROWS: u16 = 1;
+const FULL_RECENT_RESERVED_ROWS: u16 = 5;
+const COMPACT_RECENT_RESERVED_ROWS: u16 = 3;
+const MINIMAL_RECENT_RESERVED_ROWS: u16 = 2;
 
 const OPENAI_ASCII: [&str; 8] = [
     "        .-========-.       ",
@@ -116,6 +119,8 @@ pub fn draw(data: &RenderData<'_>) -> Result<()> {
     let max_body_row = budget.body_bottom();
     let layout = select_layout_mode(width, height);
     let w = width as usize;
+    let reserved_recent = reserved_recent_rows(layout, max_body_row);
+    let top_body_limit = max_body_row.saturating_sub(reserved_recent);
 
     execute!(out, MoveTo(0, 0), Clear(ClearType::All))?;
 
@@ -123,20 +128,23 @@ pub fn draw(data: &RenderData<'_>) -> Result<()> {
     draw_banner(
         &mut out,
         &mut row,
-        max_body_row,
+        top_body_limit,
         w,
         layout,
         &data.logo_mode,
         data.logo_path,
     )?;
-    let _ = write_line(&mut out, &mut row, max_body_row, w, "");
+    let _ = write_line(&mut out, &mut row, top_body_limit, w, "");
 
-    render_runtime_section(&mut out, &mut row, max_body_row, w, layout, data)?;
-    let _ = write_line(&mut out, &mut row, max_body_row, w, "");
+    render_runtime_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
+    let _ = write_line(&mut out, &mut row, top_body_limit, w, "");
 
-    render_active_section(&mut out, &mut row, max_body_row, w, layout, data)?;
-    let _ = write_line(&mut out, &mut row, max_body_row, w, "");
+    render_active_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
+    let _ = write_line(&mut out, &mut row, top_body_limit, w, "");
 
+    if row < top_body_limit {
+        row = top_body_limit;
+    }
     render_recent_section(&mut out, &mut row, max_body_row, w, layout, data)?;
     render_footer(&mut out, w, height)?;
 
@@ -386,7 +394,11 @@ fn render_recent_section(
         return Ok(());
     }
 
-    let per_session_lines = if matches!(layout, UiLayoutMode::Minimal) {
+    let available_lines = max_body_row.saturating_sub(*row);
+    if available_lines == 0 {
+        return Ok(());
+    }
+    let per_session_lines = if matches!(layout, UiLayoutMode::Minimal) || available_lines < 2 {
         1u16
     } else {
         2u16
@@ -429,6 +441,28 @@ fn render_recent_section(
                 detail = format!("{} | {detail}", activity);
             }
             if !write_line(out, row, max_body_row, width, &format!("  {}", detail))? {
+                break;
+            }
+        } else {
+            let activity = session
+                .activity
+                .as_ref()
+                .map(|item| item.to_text(data.show_activity_target))
+                .unwrap_or_else(|| "Idle".to_string());
+            let compact = format!(
+                "{} | {} | Last {} | Total {}",
+                truncate(&session.project_name, 22),
+                truncate(&activity, 26),
+                session
+                    .last_turn_tokens
+                    .map(crate::util::format_tokens)
+                    .unwrap_or_else(|| "n/a".to_string()),
+                session
+                    .session_total_tokens
+                    .map(crate::util::format_tokens)
+                    .unwrap_or_else(|| "n/a".to_string())
+            );
+            if !write_line(out, row, max_body_row, width, &format!("  {}", compact))? {
                 break;
             }
         }
@@ -710,6 +744,15 @@ fn select_layout_mode(width: u16, height: u16) -> UiLayoutMode {
     }
 }
 
+fn reserved_recent_rows(layout: UiLayoutMode, max_body_row: u16) -> u16 {
+    let preferred = match layout {
+        UiLayoutMode::Full => FULL_RECENT_RESERVED_ROWS,
+        UiLayoutMode::Compact => COMPACT_RECENT_RESERVED_ROWS,
+        UiLayoutMode::Minimal => MINIMAL_RECENT_RESERVED_ROWS,
+    };
+    preferred.min(max_body_row)
+}
+
 fn terminal_supports_logo_image() -> bool {
     viuer::is_iterm_supported() || viuer::get_kitty_support() != KittySupport::None
 }
@@ -739,11 +782,11 @@ fn center_line(text: &str, width: usize) -> String {
 
 fn author_credit(width: usize) -> String {
     if width >= 92 {
-        "By XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224".to_string()
+        "XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224".to_string()
     } else if width >= 54 {
-        "By XT0N1.T3CH | @XT0N1.T3CH".to_string()
+        "XT0N1.T3CH | @XT0N1.T3CH".to_string()
     } else {
-        "By XT0N1.T3CH".to_string()
+        "XT0N1.T3CH".to_string()
     }
 }
 
@@ -767,8 +810,8 @@ mod tests {
     #[test]
     fn author_credit_is_responsive() {
         assert!(author_credit(120).contains("ID 211189703641268224"));
-        assert_eq!(author_credit(60), "By XT0N1.T3CH | @XT0N1.T3CH");
-        assert_eq!(author_credit(20), "By XT0N1.T3CH");
+        assert_eq!(author_credit(60), "XT0N1.T3CH | @XT0N1.T3CH");
+        assert_eq!(author_credit(20), "XT0N1.T3CH");
     }
 
     #[test]
@@ -792,5 +835,13 @@ mod tests {
         let (left_small, right_small) = footer_parts(20);
         assert_eq!(right_small, "");
         assert_eq!(left_small, "Press q or Ctrl+C...");
+    }
+
+    #[test]
+    fn reserved_recent_rows_by_layout() {
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 20), 5);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 20), 3);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Minimal, 20), 2);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 3), 3);
     }
 }

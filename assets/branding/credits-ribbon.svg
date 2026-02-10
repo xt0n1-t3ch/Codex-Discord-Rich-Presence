@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 180" role="img" aria-labelledby="title desc">
+  <title id="title">Credits Ribbon</title>
+  <desc id="desc">Project credits with Discord identity.</desc>
+  <defs>
+    <linearGradient id="ribbonBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a1428"/>
+      <stop offset="100%" stop-color="#111826"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="1264" height="164" rx="22" fill="url(#ribbonBg)" stroke="#263248"/>
+  <g transform="translate(76 52)">
+    <rect width="76" height="76" rx="20" fill="#5865F2"/>
+    <path d="M20 52c5-3 9-4 18-4s13 1 18 4c1-2 3-5 5-8-5-4-11-6-17-7l-2 4c-2 0-4 0-6 0l-2-4c-6 1-12 3-17 7 2 3 4 6 5 8zm14-12a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm20 0a4 4 0 1 1 0 8 4 4 0 0 1 0-8z" fill="#fff"/>
+  </g>
+  <text x="188" y="93" fill="#ffffff" font-size="40" font-family="Segoe UI, Arial, sans-serif" font-weight="700">XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224</text>
+  <text x="188" y="130" fill="#9fb1d6" font-size="24" font-family="Segoe UI, Arial, sans-serif">Codex Discord Presence by XT0N1.T3CH</text>
+</svg>

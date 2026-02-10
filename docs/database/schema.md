@@ -7,32 +7,33 @@ This project has no relational database.
 ### 1) Config file
 
 - Path: `~/.codex/discord-presence-config.json`
-- Schema version: `3`
+- Schema version: `3` (non-breaking additions only)
 - Fields:
   - `schema_version: number`
   - `discord_client_id: string | null`
-  - `discord_public_key: string | null` (metadata only, not used for IPC auth)
+  - `discord_public_key: string | null` (metadata only)
   - `privacy: object`
-    - `enabled: bool`
-    - `show_project_name: bool`
-    - `show_git_branch: bool`
-    - `show_model: bool`
-    - `show_tokens: bool`
-    - `show_limits: bool`
-    - `show_activity: bool`
-    - `show_activity_target: bool`
+    - `enabled`, `show_project_name`, `show_git_branch`, `show_model`
+    - `show_tokens`, `show_limits`, `show_activity`, `show_activity_target`
   - `display: object`
     - `large_image_key: string`
     - `large_text: string`
     - `small_image_key: string`
     - `small_text: string`
+    - `activity_small_image_keys: object` (optional)
+      - `thinking?: string`
+      - `reading?: string`
+      - `editing?: string`
+      - `running?: string`
+      - `waiting?: string`
+      - `idle?: string`
     - `terminal_logo_mode: "auto" | "ascii" | "image"`
     - `terminal_logo_path: string | null`
 
 ### 2) Lock file
 
 - Path: `~/.codex/codex-discord-presence.lock`
-- Purpose: single-instance lock.
+- Purpose: single-instance guard.
 
 ### 3) Instance metadata file
 
@@ -40,81 +41,65 @@ This project has no relational database.
 - Fields:
   - `pid: number`
   - `exe_path: string | null`
-- Purpose:
-  - status visibility under lock contention,
-  - takeover of prior instance.
 
-## External Read-Only Session Input (`~/.codex/sessions/**/*.jsonl`)
+## External Read-Only Input
 
-Primary fields consumed:
+- Session logs: `~/.codex/sessions/**/*.jsonl`
+- Main consumed event families:
+  - `session_meta`
+  - `turn_context`
+  - `event_msg` (`token_count`, `agent_reasoning`, `agent_message`, `user_message`)
+  - `response_item` (`reasoning`, `function_call`, `custom_tool_call`, outputs, messages)
 
-- `session_meta.payload.id`
-- `session_meta.payload.timestamp`
-- `session_meta.payload.cwd`
-- `turn_context.payload.model`
-- `turn_context.payload.approval_policy`
-- `turn_context.payload.sandbox_policy`
-- `event_msg.payload.type == "token_count"`
-- `event_msg.payload.type == "agent_reasoning"`
-- `response_item.payload.type == "reasoning"`
-- `response_item.payload.type == "function_call"`
-- `response_item.payload.type == "custom_tool_call"`
-- `response_item.payload.call_id`
-- `response_item.payload.arguments`
-- `response_item.payload.input`
-- `event_msg.payload.info.total_token_usage.total_tokens`
-- `event_msg.payload.info.last_token_usage.total_tokens`
-- `event_msg.payload.rate_limits.primary.used_percent`
-- `event_msg.payload.rate_limits.secondary.used_percent`
+## Derived Runtime Session Snapshot
 
-## Derived Runtime Metrics
-
-Per active session:
+Per session:
 
 - `session_total_tokens`
 - `last_turn_tokens`
 - `session_delta_tokens`
 - `last_token_event_at`
+- `last_activity`
 - `activity.kind`
 - `activity.target`
 - `activity.observed_at`
 - `activity.last_active_at`
+- `activity.last_effective_signal_at` (new non-breaking runtime field)
 - `activity.idle_candidate_at`
 - `activity.pending_calls`
 
-Activity lifecycle notes:
+## Activity Lifecycle Rules
 
-- Tool output events no longer force immediate `Idle`.
+- Tool output events do not force immediate `Idle`.
 - `Idle` is derived only when:
-  - there are no pending tool calls, and
-  - no active signal has been observed for 45 seconds.
-- `Waiting for input` remains explicit after assistant message completion.
+  - there are no pending calls, and
+  - debounce window elapsed since latest effective signal reference.
+- Effective signals include reasoning, tool call/outputs, and assistant messaging signals.
 
-Per usage window:
+## Session Visibility + Ranking
 
-- `used_percent` (raw from Codex event)
-- `remaining_percent = clamp(100 - used_percent, 0..100)` (display semantics)
+Visibility uses dual thresholds:
 
-Global effective limits:
+- strict stale cutoff (`CODEX_PRESENCE_STALE_SECONDS`),
+- sticky non-idle window (`CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`, default 3600s).
 
-- selected from the most recent token event among active sessions.
+Active session ranking:
+
+1. pending calls (higher first),
+2. non-idle over idle,
+3. latest recency.
 
 ## Runtime Parse Cache (In-memory)
 
-To reduce CPU usage, session file parsing uses an in-memory incremental cache:
+Incremental parser cache stores:
 
-- cache key: session JSONL file path
-- cached values:
-  - cursor offset (byte position)
-  - file length and modified time
-  - accumulated parsed state for metrics/activity
-  - last derived snapshot
+- cursor offset per JSONL,
+- file length + modified timestamp,
+- accumulated parsed state,
+- last built snapshot.
 
 Behavior:
 
-- unchanged files reuse cached snapshots without reparsing;
-- changed files parse only appended lines from the cached cursor;
-- truncated/rotated files reset cache state and parse from start.
-- session visibility uses dual thresholds:
-  - strict stale cutoff (`CODEX_PRESENCE_STALE_SECONDS`),
-  - sticky non-idle window (`CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`, default 3600s).
+- unchanged files reuse cached snapshots,
+- changed files parse appended lines only,
+- truncated/rotated files reset and reparse from start.

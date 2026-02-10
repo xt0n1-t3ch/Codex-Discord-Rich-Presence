@@ -15,7 +15,7 @@ use crate::discord::DiscordPresence;
 use crate::process_guard::{self, RunningState};
 use crate::session::{
     CodexSessionSnapshot, GitBranchCache, RateLimits, SessionParseCache, collect_active_sessions,
-    latest_limits_source,
+    latest_limits_source, preferred_active_session,
 };
 use crate::ui::{self, RenderData};
 use crate::util::{format_time_until, format_token_triplet};
@@ -68,7 +68,7 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         }
     );
     println!("active_sessions: {}", sessions.len());
-    if let Some(active) = sessions.first() {
+    if let Some(active) = preferred_active_session(&sessions) {
         let limits_source = latest_limits_source(&sessions);
         if let Some(source) = limits_source {
             println!("limits_source_session: {}", source.session_id);
@@ -164,7 +164,7 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                     &mut git_cache,
                     &mut parse_cache,
                 )?;
-                let active = sessions.first();
+                let active = preferred_active_session(&sessions);
                 let effective_limits = latest_limits_source(&sessions).map(|source| &source.limits);
                 if let Err(err) = discord.update(active, effective_limits, &config) {
                     debug!(error = %err, "discord presence update failed");
@@ -244,7 +244,7 @@ fn run_headless_foreground(
             &mut git_cache,
             &mut parse_cache,
         )?;
-        let active = sessions.first();
+        let active = preferred_active_session(&sessions);
         let effective_limits = latest_limits_source(&sessions).map(|source| &source.limits);
         if let Err(err) = discord.update(active, effective_limits, &config) {
             debug!(error = %err, "discord presence update failed");
@@ -430,7 +430,7 @@ fn run_codex_wrapper(
             &mut git_cache,
             &mut parse_cache,
         )?;
-        let active = sessions.first();
+        let active = preferred_active_session(&sessions);
         let effective_limits = latest_limits_source(&sessions).map(|source| &source.limits);
         if let Err(err) = discord.update(active, effective_limits, &config) {
             debug!(error = %err, "discord presence update failed");

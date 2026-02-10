@@ -2,74 +2,67 @@
 
 ## 1. Smart Foreground Dashboard (`codex-discord-presence`)
 
-Render pipeline is height-budgeted and responsive by mode:
+Render pipeline is responsive by mode:
 
-- `Full` (wide/tall terminals): full OpenAI+CODEX banner, richer runtime/active details.
-- `Compact` (medium terminals): condensed banner and metadata.
-- `Minimal` (small terminals): essentials only, no overflow.
+- `Full` (wide/tall): full OpenAI + CODEX banner, richer runtime/active context.
+- `Compact` (medium): condensed banner and metadata.
+- `Minimal` (small): essentials only, compact session summaries.
 
-### Render order (top -> bottom)
+## 2. Layout Budgeting
+
+- Frame body excludes footer row (`height - 1`).
+- `Recent Sessions` has reserved rows in every mode:
+  - `Full`: 5 rows (header + minimum useful entries).
+  - `Compact`: 3 rows.
+  - `Minimal`: 2 rows.
+- Runtime/active sections collapse first when height is constrained.
+
+This guarantees `Recent Sessions` visibility (or explicit compact fallback) instead of disappearing.
+
+## 3. Render Order (Top -> Bottom)
 
 1. Banner
-- Hybrid logo behavior:
-  - official OpenAI image when terminal protocol supports inline images and config allows it.
+- Hybrid behavior:
+  - inline image when terminal supports it and config allows it.
   - deterministic ASCII fallback otherwise.
-- Wordmark uses high-legibility block `CODEX` ASCII to avoid glyph ambiguity.
-- Subtitle is centered and constrained by terminal width.
+- High-legibility `CODEX` wordmark and centered subtitle.
 
 2. Runtime
-- Mode, time, uptime, Discord state.
-- Client ID + polling/stale data in `Full`/`Compact`.
-- Limits semantic label in `Full`.
+- Mode, current time, uptime, Discord state.
+- Client ID + polling/stale details in `Full`/`Compact`.
 
 3. Active Session
-- Project, model, branch (+ path in `Full`).
-- Live activity (privacy-aware): `Thinking`, `Reading <file>`, `Editing <file>`, `Running command`, `Waiting for input`, `Idle`.
-- Token summary with natural labels:
-  - `Tokens: This update X | Last response Y | Session total Z`
-- Colored remaining bars.
-- Color thresholds:
-  - green `>=60%`
-  - yellow `>=30%`
-  - red `<30%`
+- Project, path (full mode), model, branch.
+- Activity line (privacy-aware).
+- Token triplet (`This update | Last response | Session total`).
+- Remaining limit bars (`5h`, `7d`) with semantic color.
 
 4. Recent Sessions
-- Session rows are trimmed to remaining vertical budget.
-- `Full`/`Compact`: header row + detail row.
-- `Minimal`: header row only.
-- Non-idle sessions can stay visible beyond strict stale cutoff via sticky activity window.
+- Always rendered in reserved space.
+- Two-line entries when enough space.
+- Automatic one-line compact entries in constrained space.
 
-5. Footer (fixed bottom anchor)
-- Always rendered on the final terminal row (non-flow).
-- Right-aligned credit line:
-  - full: `By XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
-  - medium: `By XT0N1.T3CH | @XT0N1.T3CH`
-  - narrow: `By XT0N1.T3CH`
-- Quit hint (`q` / `Ctrl+C`) is left-aligned on the same row.
+5. Footer
+- Bottom-left: quit hint (`Press q or Ctrl+C to quit.`).
+- Bottom-right credits:
+  - full: `XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
+  - medium: `XT0N1.T3CH | @XT0N1.T3CH`
+  - narrow: `XT0N1.T3CH`
 
-## 2. Status Snapshot (`codex-discord-presence status`)
+## 4. Activity Surface Rules
 
-One-shot textual output:
+- Priority labels: `Thinking`, `Reading <target>`, `Editing <target>`, `Running command`, `Waiting for input`, `Idle`.
+- `Idle` is debounced and shown only when no pending calls and no recent effective activity signal.
+- Active session selection favors:
+  1. pending calls,
+  2. non-idle sessions,
+  3. newest recency.
 
-- running state (+ PID when available)
-- config/sessions paths
-- active session summary
-- activity summary (when enabled)
-- token summary and remaining limits
-- limits source session ID (when available)
+## 5. Visual Constraints
 
-## 3. Doctor (`codex-discord-presence doctor`)
-
-Diagnostics view:
-
-- Codex sessions path existence
-- Discord client ID configuration
-- `codex` command availability
-- `git` command availability
-
-## 4. Non-TTY Bootstrap
-
-If launched without interactive TTY:
-
-1. Attempt terminal relaunch (platform-native).
-2. If relaunch fails, continue headless foreground mode.
+- No line overflow by width truncation.
+- Footer remains anchored on terminal resize.
+- Progress bars preserve semantic thresholds:
+  - green `>= 60%`
+  - yellow `>= 30%`
+  - red `< 30%`

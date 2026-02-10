@@ -54,8 +54,20 @@ pub struct DisplayConfig {
     pub large_text: String,
     pub small_image_key: String,
     pub small_text: String,
+    pub activity_small_image_keys: ActivitySmallImageKeys,
     pub terminal_logo_mode: TerminalLogoMode,
     pub terminal_logo_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ActivitySmallImageKeys {
+    pub thinking: Option<String>,
+    pub reading: Option<String>,
+    pub editing: Option<String>,
+    pub running: Option<String>,
+    pub waiting: Option<String>,
+    pub idle: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +111,7 @@ impl Default for DisplayConfig {
             large_text: "Codex".to_string(),
             small_image_key: "openai".to_string(),
             small_text: "OpenAI".to_string(),
+            activity_small_image_keys: ActivitySmallImageKeys::default(),
             terminal_logo_mode: TerminalLogoMode::Auto,
             terminal_logo_path: None,
         }
@@ -192,6 +205,18 @@ impl PresenceConfig {
             self.display.small_text = DisplayConfig::default().small_text;
             changed = true;
         }
+        for item in [
+            &mut self.display.activity_small_image_keys.thinking,
+            &mut self.display.activity_small_image_keys.reading,
+            &mut self.display.activity_small_image_keys.editing,
+            &mut self.display.activity_small_image_keys.running,
+            &mut self.display.activity_small_image_keys.waiting,
+            &mut self.display.activity_small_image_keys.idle,
+        ] {
+            if normalize_optional_string(item) {
+                changed = true;
+            }
+        }
         if self
             .display
             .terminal_logo_path
@@ -264,6 +289,21 @@ fn env_u64(name: &str, default: u64) -> u64 {
 
 fn is_missing(value: &Option<String>) -> bool {
     value.as_ref().map(|v| v.trim().is_empty()).unwrap_or(true)
+}
+
+fn normalize_optional_string(value: &mut Option<String>) -> bool {
+    if let Some(item) = value.as_mut() {
+        let trimmed = item.trim().to_string();
+        if trimmed.is_empty() {
+            *value = None;
+            return true;
+        }
+        if *item != trimmed {
+            *item = trimmed;
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

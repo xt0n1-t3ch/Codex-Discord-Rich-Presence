@@ -19,13 +19,13 @@
   </g>
 
   <text x="792" y="200" fill="#ffffff" font-size="58" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">Codex Discord Presence</text>
-  <text x="792" y="248" fill="#b8b8b8" font-size="28" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Realtime activity and limits for Codex CLI</text>
+  <text x="792" y="246" fill="#b8b8b8" font-size="26" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Real-time activity and limits for Codex CLI</text>
 
   <line x1="476" y1="284" x2="1108" y2="284" stroke="#2a2a2a"/>
 
-  <text x="792" y="344" fill="#ececec" font-size="28" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Live activity: Thinking, Reading, Editing, Running</text>
-  <text x="792" y="392" fill="#ececec" font-size="28" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Stable multi-session detection with sticky active window</text>
-  <text x="792" y="440" fill="#ececec" font-size="28" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Cross-platform binaries with CI/CD release automation</text>
+  <text x="792" y="340" fill="#ececec" font-size="25" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Live activity: Thinking, Reading, Editing, Running</text>
+  <text x="792" y="384" fill="#ececec" font-size="25" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Always-visible recent sessions in adaptive terminal layouts</text>
+  <text x="792" y="428" fill="#ececec" font-size="25" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Cross-platform binaries with optimized low-overhead runtime</text>
 
-  <text x="792" y="520" fill="#8f8f8f" font-size="21" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">By XT0N1.T3CH  •  Discord @XT0N1.T3CH  •  ID 211189703641268224</text>
+  <text x="792" y="514" fill="#8f8f8f" font-size="19" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">XT0N1.T3CH | @XT0N1.T3CH | ID 211189703641268224</text>
 </svg>

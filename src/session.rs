@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -43,6 +44,7 @@ pub struct SessionActivitySnapshot {
     pub target: Option<String>,
     pub observed_at: Option<DateTime<Utc>>,
     pub last_active_at: Option<DateTime<Utc>>,
+    pub last_effective_signal_at: Option<DateTime<Utc>>,
     pub idle_candidate_at: Option<DateTime<Utc>>,
     pub pending_calls: usize,
 }
@@ -226,7 +228,7 @@ pub fn collect_active_sessions(
     parse_cache
         .entries
         .retain(|path, _| seen_paths.contains(path));
-    sessions.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+    sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
     Ok(sessions)
 }
 
@@ -246,6 +248,14 @@ pub fn latest_limits_source(sessions: &[CodexSessionSnapshot]) -> Option<&CodexS
                 .as_secs();
             (observed, activity)
         })
+}
+
+pub fn preferred_active_session(
+    sessions: &[CodexSessionSnapshot],
+) -> Option<&CodexSessionSnapshot> {
+    sessions
+        .iter()
+        .max_by_key(|session| session_rank_key(session))
 }
 
 pub fn limits_present(limits: &RateLimits) -> bool {
@@ -272,6 +282,21 @@ fn should_include_session(
 
 fn session_activity_is_sticky_active(activity: &SessionActivitySnapshot) -> bool {
     !matches!(activity.kind, SessionActivityKind::Idle)
+}
+
+fn session_rank_key(snapshot: &CodexSessionSnapshot) -> (usize, u8, SystemTime) {
+    let (pending_calls, non_idle) = snapshot
+        .activity
+        .as_ref()
+        .map_or((0usize, 0u8), |activity| {
+            let non_idle = if matches!(activity.kind, SessionActivityKind::Idle) {
+                0
+            } else {
+                1
+            };
+            (activity.pending_calls, non_idle)
+        });
+    (pending_calls, non_idle, snapshot.last_activity)
 }
 
 fn session_recency(snapshot: &CodexSessionSnapshot, file_modified: SystemTime) -> SystemTime {
@@ -338,12 +363,22 @@ struct ActivityTracker {
     snapshot: Option<SessionActivitySnapshot>,
     pending_calls: HashMap<String, PendingActivity>,
     last_event_at: Option<DateTime<Utc>>,
+    last_effective_signal_at: Option<DateTime<Utc>>,
 }
 
 impl ActivityTracker {
     fn observe_timestamp(&mut self, observed_at: Option<DateTime<Utc>>) {
         if let Some(ts) = observed_at {
-            self.last_event_at = Some(ts);
+            self.last_event_at = max_datetime(self.last_event_at, Some(ts));
+        }
+    }
+
+    fn observe_effective_signal(&mut self, observed_at: Option<DateTime<Utc>>) {
+        self.observe_timestamp(observed_at);
+        self.last_effective_signal_at = max_datetime(self.last_effective_signal_at, observed_at);
+        if let Some(snapshot) = self.snapshot.as_mut() {
+            snapshot.last_effective_signal_at =
+                max_datetime(snapshot.last_effective_signal_at, observed_at);
         }
     }
 
@@ -353,9 +388,9 @@ impl ActivityTracker {
         target: Option<String>,
         observed_at: Option<DateTime<Utc>>,
     ) {
-        self.observe_timestamp(observed_at);
+        self.observe_effective_signal(observed_at);
         let previous_active = self.snapshot.as_ref().and_then(|item| item.last_active_at);
-        let last_active_at = observed_at.or(previous_active);
+        let last_active_at = max_datetime(previous_active, observed_at);
         let idle_candidate_at = if self.pending_calls.is_empty()
             && !matches!(
                 kind,
@@ -371,6 +406,7 @@ impl ActivityTracker {
             target,
             observed_at,
             last_active_at,
+            last_effective_signal_at: self.last_effective_signal_at,
             idle_candidate_at,
             pending_calls: self.pending_calls.len(),
         });
@@ -389,7 +425,7 @@ impl ActivityTracker {
     }
 
     fn complete_call(&mut self, call_id: Option<String>, observed_at: Option<DateTime<Utc>>) {
-        self.observe_timestamp(observed_at);
+        self.observe_effective_signal(observed_at);
         if let Some(call_id) = call_id {
             self.pending_calls.remove(&call_id);
         }
@@ -412,7 +448,11 @@ impl ActivityTracker {
         snapshot.pending_calls = self.pending_calls.len();
 
         if snapshot.last_active_at.is_none() {
-            snapshot.last_active_at = snapshot.observed_at.or(self.last_event_at);
+            snapshot.last_active_at = snapshot
+                .observed_at
+                .or(snapshot.last_effective_signal_at)
+                .or(self.last_effective_signal_at)
+                .or(self.last_event_at);
         }
 
         if snapshot.pending_calls > 0 {
@@ -435,10 +475,18 @@ impl ActivityTracker {
             .or(snapshot.last_active_at)
             .or(snapshot.observed_at)
             .or(self.last_event_at);
-        snapshot.idle_candidate_at = idle_candidate;
+        let effective_signal = snapshot
+            .last_effective_signal_at
+            .or(self.last_effective_signal_at)
+            .or(snapshot.last_active_at)
+            .or(snapshot.observed_at)
+            .or(self.last_event_at);
+        let idle_reference = max_datetime(idle_candidate, effective_signal);
+        snapshot.idle_candidate_at = idle_reference;
+        snapshot.last_effective_signal_at = effective_signal;
 
-        if let Some(idle_candidate) = idle_candidate
-            && now.signed_duration_since(idle_candidate).num_seconds() >= IDLE_DEBOUNCE_SECS
+        if let Some(idle_reference) = idle_reference
+            && now.signed_duration_since(idle_reference).num_seconds() >= IDLE_DEBOUNCE_SECS
         {
             snapshot.kind = SessionActivityKind::Idle;
             snapshot.target = None;
@@ -503,6 +551,13 @@ impl SessionAccumulator {
                 Some("agent_reasoning") => {
                     self.activity_tracker.mark_activity(
                         SessionActivityKind::Thinking,
+                        None,
+                        event_timestamp,
+                    );
+                }
+                Some("agent_message") => {
+                    self.activity_tracker.mark_activity(
+                        SessionActivityKind::WaitingInput,
                         None,
                         event_timestamp,
                     );
@@ -1007,6 +1062,18 @@ fn clamp_percent(value: f64) -> f64 {
     value.clamp(0.0, 100.0)
 }
 
+fn max_datetime(
+    left: Option<DateTime<Utc>>,
+    right: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
+    match (left, right) {
+        (Some(a), Some(b)) => Some(if a >= b { a } else { b }),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
 fn parse_utc_timestamp(text: String) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(&text)
         .map(|dt| dt.with_timezone(&Utc))
@@ -1119,6 +1186,7 @@ mod tests {
                 target: None,
                 observed_at: Some(Utc::now()),
                 last_active_at: Some(Utc::now()),
+                last_effective_signal_at: Some(Utc::now()),
                 idle_candidate_at: None,
                 pending_calls: 0,
             }),
@@ -1234,6 +1302,24 @@ mod tests {
             r#"{{"type":"session_meta","payload":{{"id":"active","cwd":"C:\\repo\\app"}}}}
 {{"timestamp":"{ts}","type":"response_item","payload":{{"type":"function_call","name":"shell_command","arguments":"{{\"command\":\"Get-Content src/ui.rs\"}}","call_id":"call_1"}}}}
 {{"timestamp":"{ts}","type":"response_item","payload":{{"type":"function_call_output","call_id":"call_1"}}}}"#
+        );
+        let snapshot = parse_one(&json);
+
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::ReadingFile);
+        assert_eq!(activity.pending_calls, 0);
+    }
+
+    #[test]
+    fn recent_tool_output_signal_prevents_idle_transition() {
+        let old = Utc::now() - ChronoDuration::seconds(120);
+        let recent = Utc::now() - ChronoDuration::seconds(5);
+        let old_ts = old.to_rfc3339();
+        let recent_ts = recent.to_rfc3339();
+        let json = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"active","cwd":"C:\\repo\\app"}}}}
+{{"timestamp":"{old_ts}","type":"response_item","payload":{{"type":"function_call","name":"shell_command","arguments":"{{\"command\":\"Get-Content src/ui.rs\"}}","call_id":"call_1"}}}}
+{{"timestamp":"{recent_ts}","type":"response_item","payload":{{"type":"function_call_output","call_id":"call_1"}}}}"#
         );
         let snapshot = parse_one(&json);
 
@@ -1414,6 +1500,37 @@ mod tests {
         let recency = session_recency(&snapshot, file_modified);
         let expected = datetime_to_system_time(activity_ts).expect("expected");
         assert_eq!(recency, expected);
+    }
+
+    #[test]
+    fn session_ranking_prioritizes_pending_then_non_idle_then_recency() {
+        let now = SystemTime::now();
+
+        let mut pending = policy_snapshot(Some(SessionActivityKind::RunningCommand));
+        pending.session_id = "pending".to_string();
+        pending.last_activity = now
+            .checked_sub(Duration::from_secs(600))
+            .expect("pending recency");
+        if let Some(activity) = pending.activity.as_mut() {
+            activity.pending_calls = 2;
+        }
+
+        let mut non_idle = policy_snapshot(Some(SessionActivityKind::Thinking));
+        non_idle.session_id = "non_idle".to_string();
+        non_idle.last_activity = now
+            .checked_sub(Duration::from_secs(120))
+            .expect("non_idle recency");
+
+        let mut idle_recent = policy_snapshot(Some(SessionActivityKind::Idle));
+        idle_recent.session_id = "idle_recent".to_string();
+        idle_recent.last_activity = now;
+
+        let mut sessions = [idle_recent, non_idle, pending];
+        sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
+
+        assert_eq!(sessions[0].session_id, "pending");
+        assert_eq!(sessions[1].session_id, "non_idle");
+        assert_eq!(sessions[2].session_id, "idle_recent");
     }
 
     #[test]

@@ -4,6 +4,7 @@ This folder contains original project branding assets for `codex-discord-presenc
 
 - `project-mark.svg`: repository/project icon.
 - `social-card.svg`: suggested social preview artwork.
+- `credits-ribbon.svg`: credits banner for README/profile sections.
 
 ## OpenAI Brand Note
 
