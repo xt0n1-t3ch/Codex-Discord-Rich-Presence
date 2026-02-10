@@ -506,30 +506,41 @@ fn draw_banner(
         return Ok(());
     }
 
-    match layout {
-        UiLayoutMode::Full if width >= 92 => {
-            let left_width = OPENAI_ASCII
-                .iter()
-                .map(|line| line.len())
-                .max()
-                .unwrap_or(0);
-            let right_width = CODEX_ASCII.iter().map(|line| line.len()).max().unwrap_or(0);
-            let spacing = 4usize;
-            let banner_width = left_width + spacing + right_width;
-            let left_pad = " ".repeat(width.saturating_sub(banner_width) / 2);
-            let spacer = " ".repeat(spacing);
+    let left_width = OPENAI_ASCII
+        .iter()
+        .map(|line| line.len())
+        .max()
+        .unwrap_or(0);
+    let right_width = CODEX_ASCII.iter().map(|line| line.len()).max().unwrap_or(0);
+    let spacing = 4usize;
+    let banner_width = left_width + spacing + right_width;
+    let full_banner_min_width = banner_width + 4;
 
-            for idx in 0..OPENAI_ASCII.len().max(CODEX_ASCII.len()) {
-                if *row >= max_body_row {
-                    break;
+    match layout {
+        UiLayoutMode::Full => {
+            if width >= full_banner_min_width {
+                let left_pad = " ".repeat(width.saturating_sub(banner_width) / 2);
+                let spacer = " ".repeat(spacing);
+
+                for idx in 0..OPENAI_ASCII.len().max(CODEX_ASCII.len()) {
+                    if *row >= max_body_row {
+                        break;
+                    }
+                    let left = OPENAI_ASCII.get(idx).copied().unwrap_or("");
+                    let right = CODEX_ASCII.get(idx).copied().unwrap_or("");
+                    let line = format!(
+                        "{left_pad}{left:<left_width$}{spacer}{right}",
+                        left_width = left_width
+                    );
+                    let _ = write_line(out, row, max_body_row, width, &line)?;
                 }
-                let left = OPENAI_ASCII.get(idx).copied().unwrap_or("");
-                let right = CODEX_ASCII.get(idx).copied().unwrap_or("");
-                let line = format!(
-                    "{left_pad}{left:<left_width$}{spacer}{right}",
-                    left_width = left_width
-                );
-                let _ = write_line(out, row, max_body_row, width, &line)?;
+            } else {
+                for text in COMPACT_BANNER {
+                    let centered = center_line(text, width);
+                    if !write_line(out, row, max_body_row, width, &centered)? {
+                        break;
+                    }
+                }
             }
         }
         UiLayoutMode::Compact => {
@@ -621,7 +632,7 @@ fn render_footer(out: &mut impl Write, width: usize, height: u16) -> Result<()> 
     if !right.is_empty() {
         let right_col = width.saturating_sub(right.len()) as u16;
         execute!(out, MoveTo(right_col, row))?;
-        write!(out, "{}", right.dark_grey())?;
+        write!(out, "{}", right.with(Color::Grey))?;
     }
     Ok(())
 }
