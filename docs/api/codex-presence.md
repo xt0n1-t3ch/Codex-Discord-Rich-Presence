@@ -83,6 +83,8 @@ Update behavior:
 
 - deduplicates identical payloads,
 - rate-limits publish bursts via minimum interval.
+- validates configured image keys against Discord app assets when available.
+- skips invalid image keys and falls back to safe icon payload (avoids `?` placeholder on Discord mobile).
 
 ## Environment Variables
 
@@ -105,6 +107,9 @@ Update behavior:
   - `display.small_image_key`
   - `display.activity_small_image_keys` (optional per-activity small image keys)
     - `thinking`, `reading`, `editing`, `running`, `waiting`, `idle`
+  - image keys accept either:
+    - uploaded Discord asset keys, or
+    - `https://...` external image URLs
   - `display.terminal_logo_mode`
   - `display.terminal_logo_path`
 

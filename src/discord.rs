@@ -2,6 +2,8 @@ use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
+use serde::Deserialize;
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use crate::config::PresenceConfig;
@@ -14,9 +16,13 @@ pub struct DiscordPresence {
     last_status: String,
     last_sent: Option<(String, String)>,
     last_publish_at: Option<Instant>,
+    known_asset_keys: Option<HashSet<String>>,
+    last_asset_refresh_at: Option<Instant>,
 }
 
 const DISCORD_MIN_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
+const DISCORD_ASSET_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+const DISCORD_ASSET_FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl DiscordPresence {
     pub fn new(client_id: Option<String>) -> Self {
@@ -31,6 +37,8 @@ impl DiscordPresence {
             last_status,
             last_sent: None,
             last_publish_at: None,
+            known_asset_keys: None,
+            last_asset_refresh_at: None,
         }
     }
 
@@ -50,6 +58,7 @@ impl DiscordPresence {
         }
 
         self.ensure_connected()?;
+        self.refresh_asset_keys_if_needed();
 
         match active_session {
             Some(session) => {
@@ -67,14 +76,22 @@ impl DiscordPresence {
                 }
 
                 let (small_image_key, small_text) = small_asset_for_activity(session, config);
+                let resolved_large_key = resolve_image_key(
+                    &config.display.large_image_key,
+                    self.known_asset_keys.as_ref(),
+                );
+                let resolved_small_key =
+                    resolve_image_key(&small_image_key, self.known_asset_keys.as_ref());
+                let (large_image_key, small_image_key) =
+                    normalize_asset_pair(resolved_large_key, resolved_small_key);
                 let activity = build_activity(
                     &details,
                     &state,
                     session,
-                    &config.display.large_image_key,
-                    &config.display.large_text,
-                    &small_image_key,
-                    &small_text,
+                    large_image_key.as_deref(),
+                    non_empty_trimmed(&config.display.large_text),
+                    small_image_key.as_deref(),
+                    non_empty_trimmed(&small_text),
                 );
                 let client = self
                     .client
@@ -110,6 +127,7 @@ impl DiscordPresence {
         self.client = None;
         self.last_sent = None;
         self.last_publish_at = None;
+        self.last_asset_refresh_at = None;
         if self.client_id.is_some() {
             self.last_status = "Disconnected".to_string();
         }
@@ -148,6 +166,22 @@ impl DiscordPresence {
         Ok(())
     }
 
+    fn refresh_asset_keys_if_needed(&mut self) {
+        let Some(client_id) = self.client_id.as_deref() else {
+            return;
+        };
+        if let Some(last_refresh) = self.last_asset_refresh_at
+            && last_refresh.elapsed() < DISCORD_ASSET_REFRESH_INTERVAL
+        {
+            return;
+        }
+
+        self.last_asset_refresh_at = Some(Instant::now());
+        if let Ok(asset_keys) = fetch_discord_asset_keys(client_id) {
+            self.known_asset_keys = Some(asset_keys);
+        }
+    }
+
     fn handle_ipc_error(&mut self, message: &str) {
         self.client = None;
         self.last_status = format!("Discord error: {}", compact_error(message));
@@ -166,10 +200,10 @@ fn build_activity<'a>(
     details: &'a str,
     state: &'a str,
     session: &'a CodexSessionSnapshot,
-    large_image_key: &'a str,
-    large_text: &'a str,
-    small_image_key: &'a str,
-    small_text: &'a str,
+    large_image_key: Option<&'a str>,
+    large_text: Option<&'a str>,
+    small_image_key: Option<&'a str>,
+    small_text: Option<&'a str>,
 ) -> Activity<'a> {
     let start = session
         .started_at
@@ -177,17 +211,35 @@ fn build_activity<'a>(
         .timestamp()
         .max(0);
 
-    let assets = Assets::new()
-        .large_image(large_image_key)
-        .large_text(large_text)
-        .small_image(small_image_key)
-        .small_text(small_text);
-
-    Activity::new()
+    let mut activity = Activity::new()
         .details(details)
         .state(state)
-        .assets(assets)
-        .timestamps(Timestamps::new().start(start))
+        .timestamps(Timestamps::new().start(start));
+
+    let mut assets = Assets::new();
+    let mut has_assets = false;
+
+    if let Some(image_key) = large_image_key {
+        assets = assets.large_image(image_key);
+        has_assets = true;
+        if let Some(text) = large_text {
+            assets = assets.large_text(text);
+        }
+    }
+
+    if let Some(image_key) = small_image_key {
+        assets = assets.small_image(image_key);
+        has_assets = true;
+        if let Some(text) = small_text {
+            assets = assets.small_text(text);
+        }
+    }
+
+    if has_assets {
+        activity = activity.assets(assets);
+    }
+
+    activity
 }
 
 fn presence_lines(
@@ -304,6 +356,85 @@ fn small_asset_for_activity(
     let mapped_text =
         truncate_for_limit(&activity.to_text(config.privacy.show_activity_target), 128);
     (mapped_key, mapped_text)
+}
+
+fn resolve_image_key(
+    configured_key: &str,
+    known_asset_keys: Option<&HashSet<String>>,
+) -> Option<String> {
+    let key = configured_key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    if looks_like_image_url(key) {
+        return Some(key.to_string());
+    }
+    if let Some(keys) = known_asset_keys {
+        return keys.contains(key).then(|| key.to_string());
+    }
+    Some(key.to_string())
+}
+
+fn normalize_asset_pair(
+    large_image_key: Option<String>,
+    small_image_key: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if large_image_key.is_none() {
+        return (small_image_key, None);
+    }
+
+    if large_image_key == small_image_key {
+        return (large_image_key, None);
+    }
+
+    (large_image_key, small_image_key)
+}
+
+fn looks_like_image_url(value: &str) -> bool {
+    value.starts_with("https://") || value.starts_with("http://") || value.starts_with("mp:")
+}
+
+fn non_empty_trimmed(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+#[derive(Deserialize)]
+struct DiscordAssetResponse {
+    name: String,
+}
+
+fn fetch_discord_asset_keys(client_id: &str) -> Result<HashSet<String>> {
+    let url = format!("https://discord.com/api/v10/oauth2/applications/{client_id}/assets");
+    let agent = ureq::AgentBuilder::new()
+        .timeout(DISCORD_ASSET_FETCH_TIMEOUT)
+        .build();
+    let body = agent
+        .get(&url)
+        .call()
+        .with_context(|| {
+            format!(
+                "failed to fetch Discord assets for application {}",
+                client_id
+            )
+        })?
+        .into_string()
+        .context("failed to decode Discord assets response as UTF-8")?;
+    parse_discord_asset_keys(&body)
+}
+
+fn parse_discord_asset_keys(body: &str) -> Result<HashSet<String>> {
+    let parsed: Vec<DiscordAssetResponse> =
+        serde_json::from_str(body).context("failed to parse Discord assets response JSON")?;
+    Ok(parsed
+        .into_iter()
+        .map(|asset| asset.name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect())
 }
 
 fn compact_join_prioritized(parts: &[String], max: usize, fallback: &str) -> String {
@@ -459,5 +590,37 @@ mod tests {
         let (key, text) = small_asset_for_activity(&session, &config);
         assert_eq!(key, "thinking-icon");
         assert_eq!(text, "Thinking");
+    }
+
+    #[test]
+    fn invalid_asset_key_is_removed_when_catalog_is_known() {
+        let key = resolve_image_key("missing-key", Some(&HashSet::new()));
+        assert_eq!(key, None);
+    }
+
+    #[test]
+    fn https_image_url_is_accepted_without_asset_catalog() {
+        let key = resolve_image_key("https://example.com/logo.png", Some(&HashSet::new()));
+        assert_eq!(key.as_deref(), Some("https://example.com/logo.png"));
+    }
+
+    #[test]
+    fn normalize_asset_pair_promotes_small_when_large_is_missing() {
+        let (large, small) = normalize_asset_pair(None, Some("openai".to_string()));
+        assert_eq!(large.as_deref(), Some("openai"));
+        assert_eq!(small, None);
+    }
+
+    #[test]
+    fn parse_discord_asset_keys_reads_names() {
+        let json = r#"
+            [
+                {"id":"1","name":"codex-logo","type":1},
+                {"id":"2","name":"openai","type":1}
+            ]
+        "#;
+        let keys = parse_discord_asset_keys(json).expect("keys");
+        assert!(keys.contains("codex-logo"));
+        assert!(keys.contains("openai"));
     }
 }

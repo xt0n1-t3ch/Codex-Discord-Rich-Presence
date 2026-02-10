@@ -16,9 +16,9 @@ This project has no relational database.
     - `enabled`, `show_project_name`, `show_git_branch`, `show_model`
     - `show_tokens`, `show_limits`, `show_activity`, `show_activity_target`
   - `display: object`
-    - `large_image_key: string`
+    - `large_image_key: string` (asset key or `https://` URL)
     - `large_text: string`
-    - `small_image_key: string`
+    - `small_image_key: string` (asset key or `https://` URL)
     - `small_text: string`
     - `activity_small_image_keys: object` (optional)
       - `thinking?: string`
@@ -103,3 +103,9 @@ Behavior:
 - unchanged files reuse cached snapshots,
 - changed files parse appended lines only,
 - truncated/rotated files reset and reparse from start.
+
+## Discord Asset Validation (Runtime)
+
+- The app periodically checks `https://discord.com/api/v10/oauth2/applications/{app_id}/assets`.
+- If configured image keys are missing from the catalog, invalid keys are omitted from payload.
+- Omitted invalid keys prevent `?` placeholders on Discord mobile and fall back to standard app icon rendering.

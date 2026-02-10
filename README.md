@@ -80,10 +80,12 @@ Environment overrides:
 ## Discord Asset Setup
 
 1. Open Discord desktop app.
-2. In Discord Developer Portal, configure image assets:
+2. In Discord Developer Portal, configure image assets for the same `discord_client_id`:
    - `codex-logo` (large image)
    - `openai` (small image fallback)
 3. Optional: add per-activity small image keys in config (`display.activity_small_image_keys`).
+4. `display.*_image_key` can be an uploaded asset key or an `https://` image URL.
+5. If a configured key does not exist in the app asset catalog, the app now falls back to a safe icon payload (prevents `?` placeholder on Discord mobile).
 
 ## Documentation
 

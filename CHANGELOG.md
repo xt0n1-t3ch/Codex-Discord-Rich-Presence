@@ -34,6 +34,12 @@ All notable changes to this project are documented in this file.
 - README subtitle is now centered.
 - Added runtime env override:
   - `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` (default `3600`, min clamp).
+- Discord asset reliability improvements:
+  - runtime asset-key validation against Discord app asset catalog,
+  - invalid/missing image keys are omitted from payload,
+  - fallback avoids `?` placeholder icon on Discord mobile.
+- Added spec-kit plan:
+  - `plans/20260210-discord-mobile-assets-fallback/plan.md`
 - Added spec-kit plan:
   - `plans/20260210-readme-branding-professional-polish/plan.md`
   - `plans/20260210-session-stability-header-footer-svg-fixes/plan.md`

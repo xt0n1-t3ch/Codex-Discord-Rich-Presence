@@ -21,6 +21,7 @@ serde_json = "1.0.145"
 thiserror = "2.0.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "time"] }
+ureq = { version = "2.12.1", default-features = true }
 walkdir = "2.5.0"
 viuer = { version = "0.11.0", features = ["print-file"] }
 
