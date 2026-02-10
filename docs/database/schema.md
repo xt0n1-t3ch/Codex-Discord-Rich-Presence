@@ -49,7 +49,7 @@ This project has no relational database.
   - `session_meta`
   - `turn_context`
   - `event_msg` (`token_count`, `agent_reasoning`, `agent_message`, `user_message`)
-  - `response_item` (`reasoning`, `function_call`, `custom_tool_call`, outputs, messages)
+  - `response_item` (`reasoning`, `function_call`, `custom_tool_call`, outputs, messages, `web_search_call`, `web_search_result`)
 
 ## Derived Runtime Session Snapshot
 
@@ -74,19 +74,29 @@ Per session:
 - `Idle` is derived only when:
   - there are no pending calls, and
   - debounce window elapsed since latest effective signal reference.
-- Effective signals include reasoning, tool call/outputs, and assistant messaging signals.
+- Effective signals include reasoning, tool call/outputs, web search signals, and assistant messaging signals.
+- Assistant activity interpretation:
+  - `phase=commentary`: live progress signal (secondary), does not replace active working label.
+  - `phase=final_answer`: `Waiting for input`.
+  - unknown/missing phase: conservative fallback to `Waiting for input`.
+- `event_msg.agent_message` is treated as progress commentary, not immediate waiting state.
 
 ## Session Visibility + Ranking
 
 Visibility uses dual thresholds:
 
 - strict stale cutoff (`CODEX_PRESENCE_STALE_SECONDS`),
-- sticky non-idle window (`CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`, default 3600s).
+- sticky working-activity window (`CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`, default 3600s).
+  - sticky applies to: `Thinking`, `Reading`, `Editing`, `Running`.
+  - `Waiting for input` is excluded from sticky extension.
 
 Active session ranking:
 
 1. pending calls (higher first),
-2. non-idle over idle,
+2. activity class priority:
+   - working (`Thinking`, `Reading`, `Editing`, `Running command`)
+   - `Waiting for input`
+   - `Idle`
 3. latest recency.
 
 ## Runtime Parse Cache (In-memory)

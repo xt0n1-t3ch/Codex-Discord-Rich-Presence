@@ -6,10 +6,10 @@
 
 <p align="center">
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases"><img src="https://img.shields.io/github/v/release/xt0n1-t3ch/Codex-Discord-Rich-Presence?display_name=tag&style=flat" alt="Release"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases"><img src="https://img.shields.io/github/v/release/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=flat" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=flat" alt="License"></a>
   <img src="https://img.shields.io/badge/Rust-2024-black?logo=rust" alt="Rust 2024">
-  <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?logo=discord&logoColor=white" alt="Discord Rich Presence">
+  <img src="https://img.shields.io/badge/Discord-Rich%20Presence-5865F2?logo=discord" alt="Discord Rich Presence">
 </p>
 
 <p align="center"><strong>Real-time Discord Rich Presence for Codex CLI sessions.</strong></p>

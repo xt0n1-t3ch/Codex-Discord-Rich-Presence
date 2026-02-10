@@ -57,10 +57,23 @@ codex-discord-presence doctor
 When multiple sessions exist, active-session selection is deterministic:
 
 1. higher `pending_calls`,
-2. non-idle over idle,
+2. activity class priority:
+   - working (`Thinking`, `Reading`, `Editing`, `Running command`)
+   - `Waiting for input`
+   - `Idle`
 3. newest `last_activity`.
 
 This ranking is used for both TUI primary card and Discord presence source.
+
+## Activity Interpretation Contract
+
+- `response_item.message` with `role = assistant` and `phase = commentary` is treated as a live-progress signal.
+  - it does not overwrite an existing working activity.
+  - it reactivates `Waiting for input` / `Idle` to `Thinking`.
+- `response_item.message` with `role = assistant` and `phase = final_answer` maps to `Waiting for input`.
+- assistant messages without a known phase fall back to `Waiting for input`.
+- `event_msg.agent_message` is treated as commentary progress (not immediate waiting).
+- `response_item.web_search_call` / `response_item.web_search_result` are treated as working activity signals.
 
 ## Discord Presence Payload Contract
 

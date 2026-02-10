@@ -52,11 +52,19 @@ This guarantees `Recent Sessions` visibility (or explicit compact fallback) inst
 ## 4. Activity Surface Rules
 
 - Priority labels: `Thinking`, `Reading <target>`, `Editing <target>`, `Running command`, `Waiting for input`, `Idle`.
+- Commentary handling:
+  - assistant `phase=commentary` is a progress signal and does not overwrite active working labels.
+  - commentary can reactivate `Waiting for input` / `Idle` into `Thinking`.
+  - assistant `phase=final_answer` maps to `Waiting for input`.
 - `Idle` is debounced and shown only when no pending calls and no recent effective activity signal.
 - Active session selection favors:
   1. pending calls,
-  2. non-idle sessions,
+  2. activity class priority:
+     - working (`Thinking`, `Reading`, `Editing`, `Running command`)
+     - `Waiting for input`
+     - `Idle`,
   3. newest recency.
+- Sticky session extension applies only to working activity kinds; `Waiting for input` is excluded from sticky long-window visibility.
 
 ## 5. Visual Constraints
 

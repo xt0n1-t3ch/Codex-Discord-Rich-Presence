@@ -6,10 +6,22 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Activity parsing is now phase-aware for assistant messages:
+  - `phase=commentary` acts as a progress signal and no longer forces `Waiting for input`.
+  - `phase=final_answer` maps to `Waiting for input`.
+- `event_msg.agent_message` now behaves as commentary progress instead of immediate waiting state.
+- Added working-signal handling for `response_item.web_search_call` / `response_item.web_search_result`.
+- Sticky visibility now excludes `Waiting for input`; sticky extension applies only to working activity kinds.
 - Active session ranking now prioritizes:
   - pending tool calls,
-  - non-idle sessions,
+  - working activity (`Thinking`, `Reading`, `Editing`, `Running command`),
+  - `Waiting for input`,
+  - `Idle`,
   - recency.
+- `assets/branding/credits-ribbon.svg` redesigned with premium dark Discord-style tactical grid visuals.
+- README release badge URL hardened with a simplified dynamic query for more reliable rendering.
+- Added spec-kit plan:
+  - `plans/20260210-activity-credits-release-hardening/plan.md`
 - Anti-false-idle logic now tracks effective activity signals and prevents stale idle transitions.
 - `Recent Sessions` is now guaranteed visible with reserved layout rows and compact fallback rendering.
 - Discord state text is cleaner (prefers `Last response` + `Session total`; omits noisy delta when redundant).
@@ -26,7 +38,7 @@ All notable changes to this project are documented in this file.
   - `assets/branding/social-card.svg` now uses dark social-card styling with OpenAI-style mark.
   - `assets/branding/project-mark.svg` now matches the dark branding system.
 - Branding documentation wording updated for trademark clarity.
-- Session visibility now supports sticky non-idle window fallback beyond strict stale cutoff.
+- Session visibility now supports sticky activity-window fallback beyond strict stale cutoff.
 - TUI header ASCII wordmark updated to clear block `CODEX`.
 - TUI footer is now anchored on the last row:
   - left: quit hint,

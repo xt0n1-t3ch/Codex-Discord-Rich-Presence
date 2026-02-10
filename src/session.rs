@@ -281,22 +281,45 @@ fn should_include_session(
 }
 
 fn session_activity_is_sticky_active(activity: &SessionActivitySnapshot) -> bool {
-    !matches!(activity.kind, SessionActivityKind::Idle)
+    if activity.pending_calls > 0 {
+        return true;
+    }
+    is_working_activity_kind(&activity.kind)
 }
 
 fn session_rank_key(snapshot: &CodexSessionSnapshot) -> (usize, u8, SystemTime) {
-    let (pending_calls, non_idle) = snapshot
-        .activity
-        .as_ref()
-        .map_or((0usize, 0u8), |activity| {
-            let non_idle = if matches!(activity.kind, SessionActivityKind::Idle) {
-                0
-            } else {
-                1
-            };
-            (activity.pending_calls, non_idle)
-        });
-    (pending_calls, non_idle, snapshot.last_activity)
+    let (pending_calls, activity_priority) =
+        snapshot
+            .activity
+            .as_ref()
+            .map_or((0usize, 0u8), |activity| {
+                (
+                    activity.pending_calls,
+                    session_activity_priority(&activity.kind),
+                )
+            });
+    (pending_calls, activity_priority, snapshot.last_activity)
+}
+
+fn session_activity_priority(kind: &SessionActivityKind) -> u8 {
+    match kind {
+        SessionActivityKind::Thinking
+        | SessionActivityKind::ReadingFile
+        | SessionActivityKind::EditingFile
+        | SessionActivityKind::RunningCommand => 3,
+        SessionActivityKind::WaitingInput => 2,
+        SessionActivityKind::Idle => 1,
+    }
+}
+
+fn is_working_activity_kind(kind: &SessionActivityKind) -> bool {
+    matches!(
+        kind,
+        SessionActivityKind::Thinking
+            | SessionActivityKind::ReadingFile
+            | SessionActivityKind::EditingFile
+            | SessionActivityKind::RunningCommand
+    )
 }
 
 fn session_recency(snapshot: &CodexSessionSnapshot, file_modified: SystemTime) -> SystemTime {
@@ -410,6 +433,33 @@ impl ActivityTracker {
             idle_candidate_at,
             pending_calls: self.pending_calls.len(),
         });
+    }
+
+    fn note_commentary(&mut self, observed_at: Option<DateTime<Utc>>) {
+        self.observe_effective_signal(observed_at);
+        let should_promote = self.snapshot.as_ref().is_none_or(|snapshot| {
+            matches!(
+                snapshot.kind,
+                SessionActivityKind::Idle | SessionActivityKind::WaitingInput
+            )
+        });
+        if should_promote {
+            self.mark_activity(SessionActivityKind::Thinking, None, observed_at);
+            return;
+        }
+
+        if let Some(snapshot) = self.snapshot.as_mut() {
+            snapshot.observed_at = max_datetime(snapshot.observed_at, observed_at);
+            snapshot.last_active_at = max_datetime(snapshot.last_active_at, observed_at);
+            snapshot.last_effective_signal_at = max_datetime(
+                snapshot.last_effective_signal_at,
+                self.last_effective_signal_at,
+            );
+            snapshot.pending_calls = self.pending_calls.len();
+            if snapshot.pending_calls == 0 && is_working_activity_kind(&snapshot.kind) {
+                snapshot.idle_candidate_at = snapshot.last_active_at;
+            }
+        }
     }
 
     fn start_call(
@@ -556,11 +606,7 @@ impl SessionAccumulator {
                     );
                 }
                 Some("agent_message") => {
-                    self.activity_tracker.mark_activity(
-                        SessionActivityKind::WaitingInput,
-                        None,
-                        event_timestamp,
-                    );
+                    self.activity_tracker.note_commentary(event_timestamp);
                 }
                 _ => {}
             },
@@ -596,13 +642,24 @@ impl SessionAccumulator {
                     self.activity_tracker
                         .complete_call(str_at(payload, &["call_id"]), event_timestamp);
                 }
+                Some("web_search_call") | Some("web_search_result") => {
+                    self.activity_tracker.mark_activity(
+                        SessionActivityKind::RunningCommand,
+                        web_search_target(payload),
+                        event_timestamp,
+                    );
+                }
                 Some("message") => {
                     if str_at(payload, &["role"]).as_deref() == Some("assistant") {
-                        self.activity_tracker.mark_activity(
-                            SessionActivityKind::WaitingInput,
-                            None,
-                            event_timestamp,
-                        );
+                        if str_at(payload, &["phase"]).as_deref() == Some("commentary") {
+                            self.activity_tracker.note_commentary(event_timestamp);
+                        } else {
+                            self.activity_tracker.mark_activity(
+                                SessionActivityKind::WaitingInput,
+                                None,
+                                event_timestamp,
+                            );
+                        }
                     }
                 }
                 _ => {}
@@ -722,6 +779,24 @@ fn classify_custom_tool_call(name: &str, input: &str) -> PendingActivity {
             target: None,
         },
     }
+}
+
+fn web_search_target(payload: &Value) -> Option<String> {
+    if let Some(query) = str_at(payload, &["action", "query"]) {
+        return Some(truncate_activity_target(format!("web search: {query}"), 72));
+    }
+
+    if let Some(query) = payload
+        .get("action")
+        .and_then(|value| value.get("queries"))
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(Value::as_str)
+    {
+        return Some(truncate_activity_target(format!("web search: {query}"), 72));
+    }
+
+    Some("web search".to_string())
 }
 
 fn shell_command_text(arguments: &str) -> String {
@@ -1295,6 +1370,66 @@ mod tests {
     }
 
     #[test]
+    fn commentary_keeps_existing_working_activity() {
+        let call_ts = Utc::now().to_rfc3339();
+        let commentary_ts = (Utc::now() + ChronoDuration::seconds(1)).to_rfc3339();
+        let json = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"commentary-keep","cwd":"C:\\repo\\app"}}}}
+{{"timestamp":"{call_ts}","type":"response_item","payload":{{"type":"function_call","name":"shell_command","arguments":"{{\"command\":\"Get-Content src/ui.rs\"}}","call_id":"call_1"}}}}
+{{"timestamp":"{call_ts}","type":"response_item","payload":{{"type":"function_call_output","call_id":"call_1"}}}}
+{{"timestamp":"{commentary_ts}","type":"response_item","payload":{{"type":"message","role":"assistant","phase":"commentary","content":[{{"type":"output_text","text":"working..."}}]}}}}"#
+        );
+        let snapshot = parse_one(&json);
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::ReadingFile);
+        assert_eq!(activity.target.as_deref(), Some("src/ui.rs"));
+    }
+
+    #[test]
+    fn commentary_reactivates_waiting_to_thinking() {
+        let waiting_ts = Utc::now().to_rfc3339();
+        let commentary_ts = (Utc::now() + ChronoDuration::seconds(1)).to_rfc3339();
+        let json = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"commentary-reactivate","cwd":"C:\\repo\\app"}}}}
+{{"timestamp":"{waiting_ts}","type":"response_item","payload":{{"type":"message","role":"assistant","phase":"final_answer","content":[{{"type":"output_text","text":"done"}}]}}}}
+{{"timestamp":"{commentary_ts}","type":"response_item","payload":{{"type":"message","role":"assistant","phase":"commentary","content":[{{"type":"output_text","text":"still working"}}]}}}}"#
+        );
+        let snapshot = parse_one(&json);
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::Thinking);
+    }
+
+    #[test]
+    fn final_answer_message_marks_waiting_input() {
+        let ts = Utc::now().to_rfc3339();
+        let json = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"final-answer","cwd":"C:\\repo\\app"}}}}
+{{"timestamp":"{ts}","type":"response_item","payload":{{"type":"message","role":"assistant","phase":"final_answer","content":[{{"type":"output_text","text":"done"}}]}}}}"#
+        );
+        let snapshot = parse_one(&json);
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::WaitingInput);
+    }
+
+    #[test]
+    fn web_search_call_counts_as_running_activity() {
+        let ts = Utc::now().to_rfc3339();
+        let json = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"search","cwd":"C:\\repo\\app"}}}}
+{{"timestamp":"{ts}","type":"response_item","payload":{{"type":"web_search_call","status":"completed","action":{{"type":"search","query":"rust serde flatten examples"}}}}}}"#
+        );
+        let snapshot = parse_one(&json);
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::RunningCommand);
+        assert!(
+            activity
+                .target
+                .as_deref()
+                .is_some_and(|target| target.contains("web search"))
+        );
+    }
+
+    #[test]
     fn does_not_mark_idle_immediately_after_tool_output() {
         let now = Utc::now() - ChronoDuration::seconds(10);
         let ts = now.to_rfc3339();
@@ -1406,7 +1541,7 @@ mod tests {
     }
 
     #[test]
-    fn sticky_policy_keeps_non_idle_session_within_window() {
+    fn sticky_policy_keeps_working_session_within_window() {
         let now = SystemTime::now();
         let recency = now
             .checked_sub(Duration::from_secs(8 * 60))
@@ -1415,7 +1550,7 @@ mod tests {
         let sticky_cutoff = now
             .checked_sub(Duration::from_secs(60 * 60))
             .expect("sticky");
-        let snapshot = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+        let snapshot = policy_snapshot(Some(SessionActivityKind::Thinking));
 
         assert!(should_include_session(
             &snapshot,
@@ -1446,6 +1581,26 @@ mod tests {
     }
 
     #[test]
+    fn sticky_policy_excludes_waiting_session_beyond_stale_cutoff() {
+        let now = SystemTime::now();
+        let recency = now
+            .checked_sub(Duration::from_secs(8 * 60))
+            .expect("recency");
+        let stale_cutoff = now.checked_sub(Duration::from_secs(90)).expect("stale");
+        let sticky_cutoff = now
+            .checked_sub(Duration::from_secs(60 * 60))
+            .expect("sticky");
+        let snapshot = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+
+        assert!(!should_include_session(
+            &snapshot,
+            recency,
+            stale_cutoff,
+            sticky_cutoff
+        ));
+    }
+
+    #[test]
     fn sticky_policy_excludes_session_outside_sticky_window() {
         let now = SystemTime::now();
         let recency = now
@@ -1455,7 +1610,7 @@ mod tests {
         let sticky_cutoff = now
             .checked_sub(Duration::from_secs(60 * 60))
             .expect("sticky");
-        let snapshot = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+        let snapshot = policy_snapshot(Some(SessionActivityKind::Thinking));
 
         assert!(!should_include_session(
             &snapshot,
@@ -1503,7 +1658,7 @@ mod tests {
     }
 
     #[test]
-    fn session_ranking_prioritizes_pending_then_non_idle_then_recency() {
+    fn session_ranking_prioritizes_pending_then_working_then_waiting_then_idle() {
         let now = SystemTime::now();
 
         let mut pending = policy_snapshot(Some(SessionActivityKind::RunningCommand));
@@ -1515,22 +1670,29 @@ mod tests {
             activity.pending_calls = 2;
         }
 
-        let mut non_idle = policy_snapshot(Some(SessionActivityKind::Thinking));
-        non_idle.session_id = "non_idle".to_string();
-        non_idle.last_activity = now
+        let mut working = policy_snapshot(Some(SessionActivityKind::Thinking));
+        working.session_id = "working".to_string();
+        working.last_activity = now
             .checked_sub(Duration::from_secs(120))
-            .expect("non_idle recency");
+            .expect("working recency");
+
+        let mut waiting_recent = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+        waiting_recent.session_id = "waiting_recent".to_string();
+        waiting_recent.last_activity = now
+            .checked_sub(Duration::from_secs(20))
+            .expect("waiting recency");
 
         let mut idle_recent = policy_snapshot(Some(SessionActivityKind::Idle));
         idle_recent.session_id = "idle_recent".to_string();
         idle_recent.last_activity = now;
 
-        let mut sessions = [idle_recent, non_idle, pending];
+        let mut sessions = [idle_recent, waiting_recent, working, pending];
         sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
 
         assert_eq!(sessions[0].session_id, "pending");
-        assert_eq!(sessions[1].session_id, "non_idle");
-        assert_eq!(sessions[2].session_id, "idle_recent");
+        assert_eq!(sessions[1].session_id, "working");
+        assert_eq!(sessions[2].session_id, "waiting_recent");
+        assert_eq!(sessions[3].session_id, "idle_recent");
     }
 
     #[test]
