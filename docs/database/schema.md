@@ -75,6 +75,7 @@ Per session:
   - there are no pending calls, and
   - debounce window elapsed since latest effective signal reference.
 - Effective signals include reasoning, tool call/outputs, web search signals, and assistant messaging signals.
+- `Idle` transitions do not rewrite timestamps to `now`; recency stays tied to real observed/effective signals.
 - Assistant activity interpretation:
   - `phase=commentary`: live progress signal (secondary), does not replace active working label.
   - `phase=final_answer`: `Waiting for input`.
@@ -87,17 +88,17 @@ Visibility uses dual thresholds:
 
 - strict stale cutoff (`CODEX_PRESENCE_STALE_SECONDS`),
 - sticky working-activity window (`CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`, default 3600s).
-  - sticky applies to: `Thinking`, `Reading`, `Editing`, `Running`.
-  - `Waiting for input` is excluded from sticky extension.
+  - sticky applies to: `Thinking`, `Reading`, `Editing`, `Running`, `Waiting for input`.
 
 Active session ranking:
 
-1. pending calls (higher first),
-2. activity class priority:
+1. latest recency (`last_activity`),
+2. pending calls (higher first),
+3. activity class priority:
    - working (`Thinking`, `Reading`, `Editing`, `Running command`)
    - `Waiting for input`
    - `Idle`
-3. latest recency.
+4. stable `session_id` tiebreak.
 
 ## Runtime Parse Cache (In-memory)
 

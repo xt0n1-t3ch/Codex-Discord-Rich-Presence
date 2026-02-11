@@ -52,16 +52,29 @@ codex-discord-presence doctor
 
 - exits `0` healthy, `1` when warnings/issues are found.
 
+## Build/Release Artifact Layout Contract
+
+All generated build and release outputs are written under `releases/`:
+
+- Cargo target cache/output root: `releases/.cargo-target`
+- Windows executable output: `releases/windows/x64/executables/codex-discord-presence.exe`
+- Linux executable output: `releases/linux/distros/x64/executables/codex-discord-presence`
+- macOS executable outputs:
+  - `releases/macos/x64/executables/codex-discord-presence`
+  - `releases/macos/arm64/executables/codex-discord-presence`
+- Packaged archives/checksums are emitted into sibling `archives/` directories for each OS/arch path.
+
 ## Session Selection Contract
 
 When multiple sessions exist, active-session selection is deterministic:
 
-1. higher `pending_calls`,
-2. activity class priority:
+1. newest `last_activity`,
+2. higher `pending_calls`,
+3. activity class priority:
    - working (`Thinking`, `Reading`, `Editing`, `Running command`)
    - `Waiting for input`
    - `Idle`
-3. newest `last_activity`.
+4. stable `session_id` tiebreak.
 
 This ranking is used for both TUI primary card and Discord presence source.
 
@@ -74,6 +87,9 @@ This ranking is used for both TUI primary card and Discord presence source.
 - assistant messages without a known phase fall back to `Waiting for input`.
 - `event_msg.agent_message` is treated as commentary progress (not immediate waiting).
 - `response_item.web_search_call` / `response_item.web_search_result` are treated as working activity signals.
+- Sticky visibility extends sessions within `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` for:
+  - working activity kinds
+  - `Waiting for input`.
 
 ## Discord Presence Payload Contract
 

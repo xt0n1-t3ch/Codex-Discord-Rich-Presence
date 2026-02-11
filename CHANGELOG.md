@@ -6,18 +6,25 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Build/release output layout is now standardized under `releases/` only.
+- Cargo target output root moved from `dist/target` / `.build/target` to `releases/.cargo-target`.
+- Release packaging paths updated:
+  - Windows: `releases/windows/x64/{executables,archives}`
+  - Linux: `releases/linux/distros/x64/{executables,archives}`
+  - macOS: `releases/macos/<arch>/{executables,archives}`
+- CI and release workflows now upload artifacts from `releases/**`.
+- Active-session selection is now recency-first (`last_activity`) with deterministic tie-breaks:
+  - `pending_calls`,
+  - activity class (`Working` > `Waiting for input` > `Idle`),
+  - `session_id`.
+- Sticky-window visibility now includes `Waiting for input` sessions.
+- Idle transition no longer rewrites activity timestamps to `now`, preventing synthetic recency inflation.
+- Session recency now considers `last_effective_signal_at` before fallback to file modified time.
 - Activity parsing is now phase-aware for assistant messages:
   - `phase=commentary` acts as a progress signal and no longer forces `Waiting for input`.
   - `phase=final_answer` maps to `Waiting for input`.
 - `event_msg.agent_message` now behaves as commentary progress instead of immediate waiting state.
 - Added working-signal handling for `response_item.web_search_call` / `response_item.web_search_result`.
-- Sticky visibility now excludes `Waiting for input`; sticky extension applies only to working activity kinds.
-- Active session ranking now prioritizes:
-  - pending tool calls,
-  - working activity (`Thinking`, `Reading`, `Editing`, `Running command`),
-  - `Waiting for input`,
-  - `Idle`,
-  - recency.
 - `assets/branding/credits-ribbon.svg` redesigned with premium dark Discord-style tactical grid visuals.
 - README release badge URL hardened with a simplified dynamic query for more reliable rendering.
 - Added spec-kit plan:

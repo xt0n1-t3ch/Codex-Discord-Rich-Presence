@@ -49,6 +49,16 @@ const COMPACT_BANNER: [&str; 2] = [
 ];
 
 const MINIMAL_BANNER: &str = "CODEX Presence";
+const BANNER_TEXT_ROWS: u16 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BannerVariant {
+    Image,
+    AsciiDual,
+    AsciiCodex,
+    CompactText,
+    MinimalText,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiLayoutMode {
@@ -134,13 +144,13 @@ pub fn draw(data: &RenderData<'_>) -> Result<()> {
         &data.logo_mode,
         data.logo_path,
     )?;
-    let _ = write_line(&mut out, &mut row, top_body_limit, w, "");
+    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
 
     render_runtime_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
-    let _ = write_line(&mut out, &mut row, top_body_limit, w, "");
+    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
 
     render_active_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
-    let _ = write_line(&mut out, &mut row, top_body_limit, w, "");
+    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
 
     if row < top_body_limit {
         row = top_body_limit;
@@ -491,80 +501,148 @@ fn draw_banner(
         return Ok(());
     }
 
-    if matches!(layout, UiLayoutMode::Full)
-        && let Some(used_rows) =
-            try_draw_logo_image(out, *row, max_body_row, width, logo_mode, logo_path)?
-    {
-        *row = row.saturating_add(used_rows);
-        let _ = write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &center_line("CODEX DISCORD PRESENCE", width),
-        )?;
-        let _ = write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &center_line("Live activity + limits telemetry", width),
-        )?;
-        return Ok(());
-    }
+    let available_rows = max_body_row.saturating_sub(*row);
+    let mut allow_image = matches!(layout, UiLayoutMode::Full)
+        && !matches!(logo_mode, TerminalLogoMode::Ascii)
+        && logo_path.is_some();
 
-    let left_width = OPENAI_ASCII
-        .iter()
-        .map(|line| line.len())
-        .max()
-        .unwrap_or(0);
-    let right_width = CODEX_ASCII.iter().map(|line| line.len()).max().unwrap_or(0);
+    loop {
+        match select_banner_variant(width, available_rows, layout, allow_image) {
+            BannerVariant::Image => {
+                if let Some(used_rows) =
+                    try_draw_logo_image(out, *row, max_body_row, width, logo_mode, logo_path)?
+                {
+                    *row = row.saturating_add(used_rows);
+                    let _ = write_line(
+                        out,
+                        row,
+                        max_body_row,
+                        width,
+                        &center_line("CODEX DISCORD PRESENCE", width),
+                    )?;
+                    let _ = write_line(
+                        out,
+                        row,
+                        max_body_row,
+                        width,
+                        &center_line("Live activity + limits telemetry", width),
+                    )?;
+                    return Ok(());
+                }
+                allow_image = false;
+            }
+            BannerVariant::AsciiDual => {
+                draw_dual_ascii_banner(out, row, max_body_row, width)?;
+                return Ok(());
+            }
+            BannerVariant::AsciiCodex => {
+                draw_codex_ascii_banner(out, row, max_body_row, width)?;
+                return Ok(());
+            }
+            BannerVariant::CompactText => {
+                for text in COMPACT_BANNER {
+                    if !write_line(out, row, max_body_row, width, &center_line(text, width))? {
+                        break;
+                    }
+                }
+                return Ok(());
+            }
+            BannerVariant::MinimalText => {
+                let _ = write_line(
+                    out,
+                    row,
+                    max_body_row,
+                    width,
+                    &center_line(MINIMAL_BANNER, width),
+                )?;
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn draw_dual_ascii_banner(
+    out: &mut impl Write,
+    row: &mut u16,
+    max_body_row: u16,
+    width: usize,
+) -> Result<()> {
+    let left_width = banner_ascii_width(&OPENAI_ASCII);
+    let right_width = banner_ascii_width(&CODEX_ASCII);
     let spacing = 4usize;
     let banner_width = left_width + spacing + right_width;
-    let full_banner_min_width = banner_width + 4;
+    let left_pad = " ".repeat(width.saturating_sub(banner_width) / 2);
+    let spacer = " ".repeat(spacing);
 
-    match layout {
-        UiLayoutMode::Full => {
-            if width >= full_banner_min_width {
-                let left_pad = " ".repeat(width.saturating_sub(banner_width) / 2);
-                let spacer = " ".repeat(spacing);
-
-                for idx in 0..OPENAI_ASCII.len().max(CODEX_ASCII.len()) {
-                    if *row >= max_body_row {
-                        break;
-                    }
-                    let left = OPENAI_ASCII.get(idx).copied().unwrap_or("");
-                    let right = CODEX_ASCII.get(idx).copied().unwrap_or("");
-                    let line = format!(
-                        "{left_pad}{left:<left_width$}{spacer}{right}",
-                        left_width = left_width
-                    );
-                    let _ = write_line(out, row, max_body_row, width, &line)?;
-                }
-            } else {
-                for text in COMPACT_BANNER {
-                    let centered = center_line(text, width);
-                    if !write_line(out, row, max_body_row, width, &centered)? {
-                        break;
-                    }
-                }
-            }
-        }
-        UiLayoutMode::Compact => {
-            for text in COMPACT_BANNER {
-                let centered = center_line(text, width);
-                if !write_line(out, row, max_body_row, width, &centered)? {
-                    break;
-                }
-            }
-        }
-        _ => {
-            let centered = center_line(MINIMAL_BANNER, width);
-            let _ = write_line(out, row, max_body_row, width, &centered)?;
+    for idx in 0..OPENAI_ASCII.len().max(CODEX_ASCII.len()) {
+        let left = OPENAI_ASCII.get(idx).copied().unwrap_or("");
+        let right = CODEX_ASCII.get(idx).copied().unwrap_or("");
+        let line = format!(
+            "{left_pad}{left:<left_width$}{spacer}{right}",
+            left_width = left_width
+        );
+        if !write_line(out, row, max_body_row, width, &line)? {
+            break;
         }
     }
 
     Ok(())
+}
+
+fn draw_codex_ascii_banner(
+    out: &mut impl Write,
+    row: &mut u16,
+    max_body_row: u16,
+    width: usize,
+) -> Result<()> {
+    let codex_width = banner_ascii_width(&CODEX_ASCII);
+    let left_pad = " ".repeat(width.saturating_sub(codex_width) / 2);
+    for text in CODEX_ASCII {
+        let line = format!("{left_pad}{text}");
+        if !write_line(out, row, max_body_row, width, &line)? {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn select_banner_variant(
+    width: usize,
+    available_rows: u16,
+    layout: UiLayoutMode,
+    allow_image: bool,
+) -> BannerVariant {
+    let left_width = banner_ascii_width(&OPENAI_ASCII);
+    let right_width = banner_ascii_width(&CODEX_ASCII);
+    let dual_width = left_width + 4 + right_width;
+    let dual_min_width = dual_width + 4;
+    let codex_min_width = right_width + 2;
+    let dual_rows = OPENAI_ASCII.len().max(CODEX_ASCII.len()) as u16;
+    let codex_rows = CODEX_ASCII.len() as u16;
+    let compact_rows = COMPACT_BANNER.len() as u16;
+    let image_rows = logo_image_rows(logo_image_width_cells(width)) + BANNER_TEXT_ROWS;
+
+    if allow_image && available_rows >= image_rows {
+        return BannerVariant::Image;
+    }
+    if matches!(layout, UiLayoutMode::Full)
+        && width >= dual_min_width
+        && available_rows >= dual_rows
+    {
+        return BannerVariant::AsciiDual;
+    }
+    if width >= codex_min_width && available_rows >= codex_rows {
+        return BannerVariant::AsciiCodex;
+    }
+    if available_rows >= compact_rows {
+        return BannerVariant::CompactText;
+    }
+
+    BannerVariant::MinimalText
+}
+
+fn banner_ascii_width(lines: &[&str]) -> usize {
+    lines.iter().map(|line| line.len()).max().unwrap_or(0)
 }
 
 fn try_draw_logo_image(
@@ -587,22 +665,13 @@ fn try_draw_logo_image(
         return Ok(None);
     }
 
-    let image_width_cells = if width >= 132 {
-        44u32
-    } else if width >= 112 {
-        38u32
-    } else {
-        30u32
-    };
-    let approx_rows = if image_width_cells >= 44 {
-        12u16
-    } else if image_width_cells >= 38 {
-        10u16
-    } else {
-        8u16
-    };
-
-    if start_row + approx_rows >= max_body_row {
+    let image_width_cells = logo_image_width_cells(width);
+    let approx_rows = logo_image_rows(image_width_cells);
+    if start_row
+        .saturating_add(approx_rows)
+        .saturating_add(BANNER_TEXT_ROWS)
+        > max_body_row
+    {
         return Ok(None);
     }
 
@@ -624,6 +693,26 @@ fn try_draw_logo_image(
     }
 
     Ok(None)
+}
+
+fn logo_image_width_cells(width: usize) -> u32 {
+    if width >= 132 {
+        44u32
+    } else if width >= 112 {
+        38u32
+    } else {
+        30u32
+    }
+}
+
+fn logo_image_rows(image_width_cells: u32) -> u16 {
+    if image_width_cells >= 44 {
+        12u16
+    } else if image_width_cells >= 38 {
+        10u16
+    } else {
+        8u16
+    }
 }
 
 fn render_footer(out: &mut impl Write, width: usize, height: u16) -> Result<()> {
@@ -657,6 +746,19 @@ fn footer_parts(width: usize) -> (String, String) {
     let available_right = width - left.len() - 1;
     let right = truncate(&author_credit(width), available_right);
     (left, right)
+}
+
+fn write_section_gap(
+    out: &mut impl Write,
+    row: &mut u16,
+    max_body_row: u16,
+    width: usize,
+    layout: UiLayoutMode,
+) -> Result<()> {
+    if matches!(layout, UiLayoutMode::Full) {
+        let _ = write_line(out, row, max_body_row, width, "")?;
+    }
+    Ok(())
 }
 
 fn write_line(
@@ -775,6 +877,10 @@ fn select_layout_mode(width: u16, height: u16) -> UiLayoutMode {
 }
 
 fn reserved_recent_rows(layout: UiLayoutMode, max_body_row: u16) -> u16 {
+    if max_body_row <= 12 {
+        return 0;
+    }
+
     let preferred = match layout {
         UiLayoutMode::Full if max_body_row >= 34 => FULL_RECENT_RESERVED_ROWS,
         UiLayoutMode::Full if max_body_row >= 28 => 3,
@@ -879,6 +985,35 @@ mod tests {
         assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 24), 3);
         assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 20), 2);
         assert_eq!(reserved_recent_rows(UiLayoutMode::Minimal, 20), 1);
-        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 3), 2);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 12), 0);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 10), 0);
+    }
+
+    #[test]
+    fn banner_variant_targets_requested_window_sizes() {
+        assert_eq!(
+            select_banner_variant(80, 17, UiLayoutMode::Compact, false),
+            BannerVariant::AsciiCodex
+        );
+        assert_eq!(
+            select_banner_variant(100, 24, UiLayoutMode::Compact, false),
+            BannerVariant::AsciiCodex
+        );
+        assert_eq!(
+            select_banner_variant(120, 28, UiLayoutMode::Full, false),
+            BannerVariant::AsciiDual
+        );
+    }
+
+    #[test]
+    fn banner_variant_falls_back_when_space_is_constrained() {
+        assert_eq!(
+            select_banner_variant(80, 7, UiLayoutMode::Compact, false),
+            BannerVariant::CompactText
+        );
+        assert_eq!(
+            select_banner_variant(60, 1, UiLayoutMode::Minimal, false),
+            BannerVariant::MinimalText
+        );
     }
 }

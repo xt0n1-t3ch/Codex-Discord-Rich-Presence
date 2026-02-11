@@ -14,6 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TERM_COLOR: always
+      CARGO_TARGET_DIR: releases/.cargo-target
     strategy:
       fail-fast: false
       matrix:
@@ -60,13 +61,19 @@ jobs:
           BIN=codex-discord-presence
           OS_NAME="${{ matrix.os_name }}"
           ARCH="${{ matrix.arch }}"
-          OUT_DIR="dist/${OS_NAME}/${ARCH}"
+          if [ "${OS_NAME}" = "linux" ]; then
+            OUT_DIR="releases/linux/distros/${ARCH}"
+          else
+            OUT_DIR="releases/${OS_NAME}/${ARCH}"
+          fi
+          EXECUTABLES_DIR="${OUT_DIR}/executables"
+          ARCHIVES_DIR="${OUT_DIR}/archives"
           ARCHIVE="${BIN}-${OS_NAME}-${ARCH}.tar.gz"
-          mkdir -p "${OUT_DIR}"
-          cp ".build/target/${{ matrix.target }}/release/${BIN}" "${OUT_DIR}/${BIN}"
-          tar -czf "${OUT_DIR}/${ARCHIVE}" -C "${OUT_DIR}" "${BIN}"
-          SUM="$(shasum -a 256 "${OUT_DIR}/${ARCHIVE}" | awk '{print tolower($1)}')"
-          echo "${SUM}  ${ARCHIVE}" > "${OUT_DIR}/${ARCHIVE}.sha256"
+          mkdir -p "${EXECUTABLES_DIR}" "${ARCHIVES_DIR}"
+          cp "releases/.cargo-target/${{ matrix.target }}/release/${BIN}" "${EXECUTABLES_DIR}/${BIN}"
+          tar -czf "${ARCHIVES_DIR}/${ARCHIVE}" -C "${EXECUTABLES_DIR}" "${BIN}"
+          SUM="$(shasum -a 256 "${ARCHIVES_DIR}/${ARCHIVE}" | awk '{print tolower($1)}')"
+          echo "${SUM}  ${ARCHIVE}" > "${ARCHIVES_DIR}/${ARCHIVE}.sha256"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -75,20 +82,24 @@ jobs:
           $BIN = "codex-discord-presence.exe"
           $OS_NAME = "${{ matrix.os_name }}"
           $ARCH = "${{ matrix.arch }}"
-          $OUT_DIR = "dist/$OS_NAME/$ARCH"
+          $OUT_DIR = "releases/$OS_NAME/$ARCH"
+          $EXECUTABLES_DIR = "$OUT_DIR/executables"
+          $ARCHIVES_DIR = "$OUT_DIR/archives"
           $ARCHIVE = "codex-discord-presence-$OS_NAME-$ARCH.zip"
-          New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null
-          Copy-Item ".build/target/${{ matrix.target }}/release/$BIN" "$OUT_DIR/$BIN"
-          Compress-Archive -Path "$OUT_DIR/$BIN" -DestinationPath "$OUT_DIR/$ARCHIVE" -Force
-          Get-FileHash "$OUT_DIR/$ARCHIVE" -Algorithm SHA256 | ForEach-Object {
-            "$($_.Hash.ToLower())  $ARCHIVE" | Out-File "$OUT_DIR/$ARCHIVE.sha256" -Encoding ascii
+          New-Item -ItemType Directory -Force -Path $EXECUTABLES_DIR | Out-Null
+          New-Item -ItemType Directory -Force -Path $ARCHIVES_DIR | Out-Null
+          Copy-Item "releases/.cargo-target/${{ matrix.target }}/release/$BIN" "$EXECUTABLES_DIR/$BIN"
+          Copy-Item "$EXECUTABLES_DIR/$BIN" "releases/windows/$BIN" -Force
+          Compress-Archive -Path "$EXECUTABLES_DIR/$BIN" -DestinationPath "$ARCHIVES_DIR/$ARCHIVE" -Force
+          Get-FileHash "$ARCHIVES_DIR/$ARCHIVE" -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLower())  $ARCHIVE" | Out-File "$ARCHIVES_DIR/$ARCHIVE.sha256" -Encoding ascii
           }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: dist/**
+          path: releases/**
 
   publish:
     name: Publish GitHub Release
@@ -98,13 +109,13 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist
+          path: releases
 
       - name: Flatten artifacts
         shell: bash
         run: |
           mkdir -p release-assets
-          find dist -type f -maxdepth 8 \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
+          find releases -type f -maxdepth 10 \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
           ls -lah release-assets
 
       - name: Create release

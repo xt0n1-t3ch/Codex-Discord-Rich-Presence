@@ -34,12 +34,30 @@
 cargo build --release
 ```
 
-Binary output:
+Local build output (Cargo target directory):
 
-- Windows: `dist/windows/x64/codex-discord-presence.exe`
-- Linux: `dist/linux/x64/codex-discord-presence`
-- macOS x64: `dist/macos/x64/codex-discord-presence`
-- macOS arm64: `dist/macos/arm64/codex-discord-presence`
+- Windows: `releases/.cargo-target/release/codex-discord-presence.exe`
+- Linux/macOS: `releases/.cargo-target/release/codex-discord-presence`
+
+Windows convenience build (writes only under `releases/`):
+
+```powershell
+./build-dist.ps1
+```
+
+Direct executable paths after `build-dist.ps1`:
+
+- `releases/windows/codex-discord-presence.exe`
+- `releases/windows/x64/executables/codex-discord-presence.exe`
+
+Release artifact structure:
+
+- Windows: `releases/windows/x64/executables/codex-discord-presence.exe`
+- Windows archives/checksums: `releases/windows/x64/archives/*`
+- Linux: `releases/linux/distros/x64/executables/codex-discord-presence`
+- Linux archives/checksums: `releases/linux/distros/x64/archives/*`
+- macOS x64: `releases/macos/x64/executables/codex-discord-presence`
+- macOS arm64: `releases/macos/arm64/executables/codex-discord-presence`
 
 ### Download release binaries
 

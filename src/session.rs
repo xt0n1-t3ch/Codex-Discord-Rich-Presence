@@ -284,10 +284,11 @@ fn session_activity_is_sticky_active(activity: &SessionActivitySnapshot) -> bool
     if activity.pending_calls > 0 {
         return true;
     }
-    is_working_activity_kind(&activity.kind)
+    matches!(activity.kind, SessionActivityKind::WaitingInput)
+        || is_working_activity_kind(&activity.kind)
 }
 
-fn session_rank_key(snapshot: &CodexSessionSnapshot) -> (usize, u8, SystemTime) {
+fn session_rank_key(snapshot: &CodexSessionSnapshot) -> (SystemTime, usize, u8, String) {
     let (pending_calls, activity_priority) =
         snapshot
             .activity
@@ -298,7 +299,12 @@ fn session_rank_key(snapshot: &CodexSessionSnapshot) -> (usize, u8, SystemTime) 
                     session_activity_priority(&activity.kind),
                 )
             });
-    (pending_calls, activity_priority, snapshot.last_activity)
+    (
+        snapshot.last_activity,
+        pending_calls,
+        activity_priority,
+        snapshot.session_id.clone(),
+    )
 }
 
 fn session_activity_priority(kind: &SessionActivityKind) -> u8 {
@@ -323,7 +329,21 @@ fn is_working_activity_kind(kind: &SessionActivityKind) -> bool {
 }
 
 fn session_recency(snapshot: &CodexSessionSnapshot, file_modified: SystemTime) -> SystemTime {
-    let mut newest = file_modified;
+    let mut newest = SystemTime::UNIX_EPOCH;
+
+    if let Some(activity) = &snapshot.activity {
+        for candidate in [
+            activity.last_effective_signal_at,
+            activity.last_active_at,
+            activity.observed_at,
+        ] {
+            if let Some(ts) = candidate.and_then(datetime_to_system_time)
+                && ts > newest
+            {
+                newest = ts;
+            }
+        }
+    }
 
     if let Some(ts) = snapshot
         .last_token_event_at
@@ -333,17 +353,11 @@ fn session_recency(snapshot: &CodexSessionSnapshot, file_modified: SystemTime) -
         newest = ts;
     }
 
-    if let Some(activity) = &snapshot.activity {
-        for candidate in [activity.last_active_at, activity.observed_at] {
-            if let Some(ts) = candidate.and_then(datetime_to_system_time)
-                && ts > newest
-            {
-                newest = ts;
-            }
-        }
+    if newest > SystemTime::UNIX_EPOCH {
+        newest
+    } else {
+        file_modified
     }
-
-    newest
 }
 
 fn datetime_to_system_time(ts: DateTime<Utc>) -> Option<SystemTime> {
@@ -540,7 +554,6 @@ impl ActivityTracker {
         {
             snapshot.kind = SessionActivityKind::Idle;
             snapshot.target = None;
-            snapshot.observed_at = Some(now);
         }
 
         Some(snapshot)
@@ -1581,7 +1594,7 @@ mod tests {
     }
 
     #[test]
-    fn sticky_policy_excludes_waiting_session_beyond_stale_cutoff() {
+    fn sticky_policy_keeps_waiting_session_within_window() {
         let now = SystemTime::now();
         let recency = now
             .checked_sub(Duration::from_secs(8 * 60))
@@ -1592,7 +1605,7 @@ mod tests {
             .expect("sticky");
         let snapshot = policy_snapshot(Some(SessionActivityKind::WaitingInput));
 
-        assert!(!should_include_session(
+        assert!(should_include_session(
             &snapshot,
             recency,
             stale_cutoff,
@@ -1643,36 +1656,39 @@ mod tests {
         let file_modified = SystemTime::now()
             .checked_sub(Duration::from_secs(2 * 60 * 60))
             .expect("file_modified");
-        let activity_ts = Utc::now() - ChronoDuration::minutes(10);
-        let token_ts = Utc::now() - ChronoDuration::minutes(20);
+        let observed_ts = Utc::now() - ChronoDuration::minutes(30);
+        let active_ts = Utc::now() - ChronoDuration::minutes(20);
+        let effective_ts = Utc::now() - ChronoDuration::minutes(10);
+        let token_ts = Utc::now() - ChronoDuration::minutes(15);
         let mut snapshot = policy_snapshot(Some(SessionActivityKind::Thinking));
         snapshot.last_token_event_at = Some(token_ts);
         if let Some(activity) = snapshot.activity.as_mut() {
-            activity.observed_at = Some(activity_ts);
-            activity.last_active_at = Some(activity_ts);
+            activity.observed_at = Some(observed_ts);
+            activity.last_active_at = Some(active_ts);
+            activity.last_effective_signal_at = Some(effective_ts);
         }
 
         let recency = session_recency(&snapshot, file_modified);
-        let expected = datetime_to_system_time(activity_ts).expect("expected");
+        let expected = datetime_to_system_time(effective_ts).expect("expected");
         assert_eq!(recency, expected);
     }
 
     #[test]
-    fn session_ranking_prioritizes_pending_then_working_then_waiting_then_idle() {
+    fn session_ranking_prioritizes_recency_before_pending_and_activity() {
         let now = SystemTime::now();
 
-        let mut pending = policy_snapshot(Some(SessionActivityKind::RunningCommand));
-        pending.session_id = "pending".to_string();
-        pending.last_activity = now
+        let mut pending_old = policy_snapshot(Some(SessionActivityKind::RunningCommand));
+        pending_old.session_id = "pending_old".to_string();
+        pending_old.last_activity = now
             .checked_sub(Duration::from_secs(600))
             .expect("pending recency");
-        if let Some(activity) = pending.activity.as_mut() {
+        if let Some(activity) = pending_old.activity.as_mut() {
             activity.pending_calls = 2;
         }
 
-        let mut working = policy_snapshot(Some(SessionActivityKind::Thinking));
-        working.session_id = "working".to_string();
-        working.last_activity = now
+        let mut working_mid = policy_snapshot(Some(SessionActivityKind::Thinking));
+        working_mid.session_id = "working_mid".to_string();
+        working_mid.last_activity = now
             .checked_sub(Duration::from_secs(120))
             .expect("working recency");
 
@@ -1682,17 +1698,86 @@ mod tests {
             .checked_sub(Duration::from_secs(20))
             .expect("waiting recency");
 
-        let mut idle_recent = policy_snapshot(Some(SessionActivityKind::Idle));
-        idle_recent.session_id = "idle_recent".to_string();
-        idle_recent.last_activity = now;
+        let mut idle_newest = policy_snapshot(Some(SessionActivityKind::Idle));
+        idle_newest.session_id = "idle_newest".to_string();
+        idle_newest.last_activity = now;
 
-        let mut sessions = [idle_recent, waiting_recent, working, pending];
+        let mut sessions = [pending_old, working_mid, waiting_recent, idle_newest];
+        sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
+
+        assert_eq!(sessions[0].session_id, "idle_newest");
+        assert_eq!(sessions[1].session_id, "waiting_recent");
+        assert_eq!(sessions[2].session_id, "working_mid");
+        assert_eq!(sessions[3].session_id, "pending_old");
+    }
+
+    #[test]
+    fn preferred_active_session_prefers_most_recent_signal() {
+        let now = SystemTime::now();
+
+        let mut older_pending = policy_snapshot(Some(SessionActivityKind::RunningCommand));
+        older_pending.session_id = "older_pending".to_string();
+        older_pending.last_activity = now.checked_sub(Duration::from_secs(120)).expect("older");
+        if let Some(activity) = older_pending.activity.as_mut() {
+            activity.pending_calls = 4;
+        }
+
+        let mut newest_waiting = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+        newest_waiting.session_id = "newest_waiting".to_string();
+        newest_waiting.last_activity = now;
+
+        let sessions = vec![older_pending, newest_waiting];
+        let active = preferred_active_session(&sessions).expect("active");
+        assert_eq!(active.session_id, "newest_waiting");
+    }
+
+    #[test]
+    fn ranking_tiebreaks_by_pending_then_activity_when_recency_equal() {
+        let now = SystemTime::now();
+
+        let mut pending = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+        pending.session_id = "pending".to_string();
+        pending.last_activity = now;
+        if let Some(activity) = pending.activity.as_mut() {
+            activity.pending_calls = 2;
+        }
+
+        let mut working = policy_snapshot(Some(SessionActivityKind::Thinking));
+        working.session_id = "working".to_string();
+        working.last_activity = now;
+
+        let mut waiting = policy_snapshot(Some(SessionActivityKind::WaitingInput));
+        waiting.session_id = "waiting".to_string();
+        waiting.last_activity = now;
+
+        let mut idle = policy_snapshot(Some(SessionActivityKind::Idle));
+        idle.session_id = "idle".to_string();
+        idle.last_activity = now;
+
+        let mut sessions = [idle, waiting, working, pending];
         sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
 
         assert_eq!(sessions[0].session_id, "pending");
         assert_eq!(sessions[1].session_id, "working");
-        assert_eq!(sessions[2].session_id, "waiting_recent");
-        assert_eq!(sessions[3].session_id, "idle_recent");
+        assert_eq!(sessions[2].session_id, "waiting");
+        assert_eq!(sessions[3].session_id, "idle");
+    }
+
+    #[test]
+    fn idle_transition_does_not_refresh_recency_to_now() {
+        let old = Utc::now() - ChronoDuration::seconds(120);
+        let ts = old.to_rfc3339();
+        let json = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"idle-recency","cwd":"C:\\repo\\app"}}}}
+{{"timestamp":"{ts}","type":"response_item","payload":{{"type":"function_call","name":"shell_command","arguments":"{{\"command\":\"Get-Content src/ui.rs\"}}","call_id":"call_1"}}}}
+{{"timestamp":"{ts}","type":"response_item","payload":{{"type":"function_call_output","call_id":"call_1"}}}}"#
+        );
+        let snapshot = parse_one(&json);
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::Idle);
+        let observed = activity.observed_at.expect("observed_at");
+        let drift = observed.signed_duration_since(old).num_milliseconds().abs();
+        assert!(drift <= 1000, "observed_at drifted by {drift}ms");
     }
 
     #[test]

@@ -5,8 +5,18 @@
 Render pipeline is responsive by mode:
 
 - `Full` (wide/tall): full OpenAI + CODEX banner, richer runtime/active context.
-- `Compact` (medium): condensed banner and metadata.
-- `Minimal` (small): essentials only, compact session summaries.
+- `Compact` (medium): CODEX-first banner fallback and condensed metadata.
+- `Minimal` (small): essentials only with compact banner fallback.
+
+Banner selection is now independent from data-density mode and uses this deterministic ladder:
+
+1. `Image` (only when eligible and enough rows exist for image + subtitle lines)
+2. `ASCII Dual` (OpenAI + CODEX, full mode only)
+3. `ASCII CODEX` (preferred medium/small fallback)
+4. `Compact text` (2 lines)
+5. `Minimal text` (1 line)
+
+ASCII banners are rendered only when their full block fits, preventing partially clipped wordmarks.
 
 ## 2. Layout Budgeting
 
@@ -14,18 +24,19 @@ Render pipeline is responsive by mode:
 - `Recent Sessions` has reserved rows in every mode:
   - `Full`: 5 rows (header + minimum useful entries).
   - `Compact`: 3 rows.
-  - `Minimal`: 2 rows.
+  - `Minimal`: 1 row.
+- Extreme-height exception: when body rows are `<= 12`, reserved rows can drop to `0` to prioritize header + core status.
 - Runtime/active sections collapse first when height is constrained.
 
-This guarantees `Recent Sessions` visibility (or explicit compact fallback) instead of disappearing.
+This keeps `Recent Sessions` visible by default while allowing an explicit extreme-height fallback to prioritize branding and core status.
 
 ## 3. Render Order (Top -> Bottom)
 
 1. Banner
 - Hybrid behavior:
   - inline image when terminal supports it and config allows it.
-  - deterministic ASCII fallback otherwise.
-- High-legibility `CODEX` wordmark and centered subtitle.
+  - deterministic ASCII fallback otherwise, with CODEX-only intermediate step.
+- High-legibility `CODEX` wordmark, centered subtitle, and no partial ASCII clipping.
 
 2. Runtime
 - Mode, current time, uptime, Discord state.
@@ -58,18 +69,20 @@ This guarantees `Recent Sessions` visibility (or explicit compact fallback) inst
   - assistant `phase=final_answer` maps to `Waiting for input`.
 - `Idle` is debounced and shown only when no pending calls and no recent effective activity signal.
 - Active session selection favors:
-  1. pending calls,
-  2. activity class priority:
+  1. newest recency,
+  2. pending calls,
+  3. activity class priority:
      - working (`Thinking`, `Reading`, `Editing`, `Running command`)
      - `Waiting for input`
      - `Idle`,
-  3. newest recency.
-- Sticky session extension applies only to working activity kinds; `Waiting for input` is excluded from sticky long-window visibility.
+  4. deterministic `session_id` tiebreak.
+- Sticky session extension applies to working activity kinds and `Waiting for input`.
 
 ## 5. Visual Constraints
 
 - No line overflow by width truncation.
 - Footer remains anchored on terminal resize.
+- Section spacer rows are preserved in `Full` mode and removed in `Compact`/`Minimal`.
 - Progress bars preserve semantic thresholds:
   - green `>= 60%`
   - yellow `>= 30%`
