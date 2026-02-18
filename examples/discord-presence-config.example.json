@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "discord_client_id": "1470480085453770854",
   "discord_public_key": "29e563eeb755ae71d940c1b11d49dd3282a8886cd8b8cab829b2a14fcedad247",
   "privacy": {
@@ -8,6 +8,7 @@
     "show_git_branch": true,
     "show_model": true,
     "show_tokens": true,
+    "show_cost": true,
     "show_limits": true,
     "show_activity": true,
     "show_activity_target": true
@@ -19,5 +20,12 @@
     "small_text": "OpenAI",
     "terminal_logo_mode": "auto",
     "terminal_logo_path": null
+  },
+  "pricing": {
+    "aliases": {
+      "gpt-5.3-codex": "gpt-5.2-codex",
+      "gpt-5.3-codex-latest": "gpt-5.2-codex"
+    },
+    "overrides": {}
   }
 }

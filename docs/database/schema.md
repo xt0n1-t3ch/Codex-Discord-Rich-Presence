@@ -7,14 +7,14 @@ This project has no relational database.
 ### 1) Config file
 
 - Path: `~/.codex/discord-presence-config.json`
-- Schema version: `3` (non-breaking additions only)
+- Schema version: `4` (non-breaking additions only)
 - Fields:
   - `schema_version: number`
   - `discord_client_id: string | null`
   - `discord_public_key: string | null` (metadata only)
   - `privacy: object`
     - `enabled`, `show_project_name`, `show_git_branch`, `show_model`
-    - `show_tokens`, `show_limits`, `show_activity`, `show_activity_target`
+    - `show_tokens`, `show_cost`, `show_limits`, `show_activity`, `show_activity_target`
   - `display: object`
     - `large_image_key: string` (asset key or `https://` URL)
     - `large_text: string`
@@ -29,6 +29,9 @@ This project has no relational database.
       - `idle?: string`
     - `terminal_logo_mode: "auto" | "ascii" | "image"`
     - `terminal_logo_path: string | null`
+  - `pricing: object`
+    - `aliases: Record<string, string>` (normalized lowercase model keys)
+    - `overrides: Record<string, { input_per_million: number, cached_input_per_million?: number, output_per_million: number }>`
 
 ### 2) Lock file
 
@@ -41,6 +44,25 @@ This project has no relational database.
 - Fields:
   - `pid: number`
   - `exe_path: string | null`
+
+### 4) Metrics JSON snapshot
+
+- Path: `~/.codex/discord-presence-metrics.json`
+- Persist strategy: write `.tmp` then atomic rename.
+- Fields:
+  - `daemon_started_at: datetime (UTC)`
+  - `snapshot_at: datetime (UTC)`
+  - `uptime_seconds: number`
+  - `totals: { cost_usd, input_tokens, cached_input_tokens, output_tokens, total_tokens }`
+  - `cost_breakdown: { input_cost_usd, cached_input_cost_usd, output_cost_usd }`
+  - `by_model: Array<{ model_id, cost_usd, input_tokens, cached_input_tokens, output_tokens, session_count }>`
+  - `active_sessions: number`
+
+### 5) Metrics Markdown report
+
+- Path: `~/.codex/discord-presence-metrics.md`
+- Persist strategy: write `.tmp` then atomic rename.
+- Content: totals, token split, cost split, per-model table, uptime.
 
 ## External Read-Only Input
 
@@ -58,6 +80,15 @@ Per session:
 - `session_total_tokens`
 - `last_turn_tokens`
 - `session_delta_tokens`
+- `input_tokens_total`
+- `cached_input_tokens_total`
+- `output_tokens_total`
+- `last_input_tokens`
+- `last_cached_input_tokens`
+- `last_output_tokens`
+- `total_cost_usd`
+- `cost_breakdown`
+- `pricing_source`
 - `last_token_event_at`
 - `last_activity`
 - `activity.kind`

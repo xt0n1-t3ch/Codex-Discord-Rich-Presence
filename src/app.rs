@@ -1,4 +1,5 @@
 use std::env;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,13 +13,14 @@ use tracing::debug;
 
 use crate::config::{self, PresenceConfig, RuntimeSettings};
 use crate::discord::DiscordPresence;
+use crate::metrics::MetricsTracker;
 use crate::process_guard::{self, RunningState};
 use crate::session::{
-    CodexSessionSnapshot, GitBranchCache, RateLimits, SessionParseCache, collect_active_sessions,
-    latest_limits_source, preferred_active_session,
+    CodexSessionSnapshot, GitBranchCache, RateLimits, SessionParseCache,
+    collect_active_sessions_multi, latest_limits_source, preferred_active_session,
 };
 use crate::ui::{self, RenderData};
-use crate::util::{format_time_until, format_token_triplet};
+use crate::util::{format_cost, format_time_until, format_token_triplet};
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
 
@@ -37,14 +39,16 @@ pub fn run(config: PresenceConfig, mode: AppMode, runtime: RuntimeSettings) -> R
 
 pub fn print_status(config: &PresenceConfig) -> Result<()> {
     let runtime = config::runtime_settings();
+    let session_roots = config::sessions_paths();
     let mut cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
-    let sessions = collect_active_sessions(
-        &config::sessions_path(),
+    let sessions = collect_active_sessions_multi(
+        &session_roots,
         runtime.stale_threshold,
         runtime.active_sticky_window,
         &mut cache,
         &mut parse_cache,
+        &config.pricing,
     )?;
     let running = process_guard::inspect_running_instance()?;
     let (is_running, running_pid) = match running {
@@ -58,7 +62,7 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         println!("pid: {pid}");
     }
     println!("config: {}", config::config_path().display());
-    println!("sessions_dir: {}", config::sessions_path().display());
+    print_session_roots("sessions_dirs", &session_roots);
     println!(
         "discord_client_id: {}",
         if config.effective_client_id().is_some() {
@@ -85,17 +89,21 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
 
 pub fn doctor(config: &PresenceConfig) -> Result<u8> {
     let mut issues = 0u8;
-    let sessions_dir = config::sessions_path();
+    let session_roots = config::sessions_paths();
+    let existing_roots: Vec<&PathBuf> = session_roots.iter().filter(|path| path.exists()).collect();
 
     println!("codex-discord-presence doctor");
     println!("config_path: {}", config::config_path().display());
-    println!("sessions_path: {}", sessions_dir.display());
+    print_session_roots("sessions_paths", &session_roots);
 
-    if !sessions_dir.exists() {
+    if existing_roots.is_empty() {
         issues += 1;
-        println!("[WARN] Codex sessions directory missing.");
+        println!("[WARN] No discovered Codex sessions directory is currently accessible.");
     } else {
-        println!("[OK] Codex sessions directory exists.");
+        println!(
+            "[OK] Discovered {} accessible sessions root(s).",
+            existing_roots.len()
+        );
     }
 
     if config.effective_client_id().is_none() {
@@ -107,6 +115,10 @@ pub fn doctor(config: &PresenceConfig) -> Result<u8> {
 
     if command_available("codex") {
         println!("[OK] codex command available.");
+    } else if !existing_roots.is_empty() {
+        println!(
+            "[INFO] codex command not found in PATH (session-file monitoring can still work)."
+        );
     } else {
         issues += 1;
         println!("[WARN] codex command not found in PATH.");
@@ -140,7 +152,8 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
     let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
     let mut discord = DiscordPresence::new(config.effective_client_id());
-    let sessions_root = config::sessions_path();
+    let mut metrics_tracker = MetricsTracker::new();
+    let sessions_roots = config::sessions_paths();
     let started = Instant::now();
     let mut last_tick = Instant::now() - runtime.poll_interval;
     let mut sessions: Vec<CodexSessionSnapshot> = Vec::new();
@@ -157,13 +170,16 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
             }
 
             if last_tick.elapsed() >= runtime.poll_interval {
-                sessions = collect_active_sessions(
-                    &sessions_root,
+                sessions = collect_active_sessions_multi(
+                    &sessions_roots,
                     runtime.stale_threshold,
                     runtime.active_sticky_window,
                     &mut git_cache,
                     &mut parse_cache,
+                    &config.pricing,
                 )?;
+                metrics_tracker.update(&sessions);
+                metrics_tracker.persist_if_due();
                 let active = preferred_active_session(&sessions);
                 let effective_limits = latest_limits_source(&sessions).map(|source| &source.limits);
                 if let Err(err) = discord.update(active, effective_limits, &config) {
@@ -183,6 +199,7 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                     logo_path: config.display.terminal_logo_path.as_deref(),
                     active,
                     effective_limits,
+                    metrics: metrics_tracker.snapshot(),
                     sessions: &sessions,
                 };
                 let signature = ui::frame_signature(&render);
@@ -232,18 +249,22 @@ fn run_headless_foreground(
     let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
     let mut discord = DiscordPresence::new(config.effective_client_id());
-    let sessions_root = config::sessions_path();
+    let mut metrics_tracker = MetricsTracker::new();
+    let sessions_roots = config::sessions_paths();
     println!("No interactive terminal detected; running in headless foreground mode.");
     println!("Press Ctrl+C to stop.");
 
     while !stop.load(Ordering::Relaxed) {
-        let sessions = collect_active_sessions(
-            &sessions_root,
+        let sessions = collect_active_sessions_multi(
+            &sessions_roots,
             runtime.stale_threshold,
             runtime.active_sticky_window,
             &mut git_cache,
             &mut parse_cache,
+            &config.pricing,
         )?;
+        metrics_tracker.update(&sessions);
+        metrics_tracker.persist_if_due();
         let active = preferred_active_session(&sessions);
         let effective_limits = latest_limits_source(&sessions).map(|source| &source.limits);
         if let Err(err) = discord.update(active, effective_limits, &config) {
@@ -413,7 +434,8 @@ fn run_codex_wrapper(
     let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
     let mut discord = DiscordPresence::new(config.effective_client_id());
-    let sessions_root = config::sessions_path();
+    let mut metrics_tracker = MetricsTracker::new();
+    let sessions_roots = config::sessions_paths();
 
     println!("codex child started; Discord presence tracking is active.");
 
@@ -423,13 +445,16 @@ fn run_codex_wrapper(
             break;
         }
 
-        let sessions = collect_active_sessions(
-            &sessions_root,
+        let sessions = collect_active_sessions_multi(
+            &sessions_roots,
             runtime.stale_threshold,
             runtime.active_sticky_window,
             &mut git_cache,
             &mut parse_cache,
+            &config.pricing,
         )?;
+        metrics_tracker.update(&sessions);
+        metrics_tracker.persist_if_due();
         let active = preferred_active_session(&sessions);
         let effective_limits = latest_limits_source(&sessions).map(|source| &source.limits);
         if let Err(err) = discord.update(active, effective_limits, &config) {
@@ -480,6 +505,15 @@ fn print_active_summary(
     if show_activity && let Some(activity) = &active.activity {
         println!("  activity: {}", activity.to_text(show_activity_target));
     }
+    if active.total_cost_usd > 0.0 {
+        println!("  cost: {}", format_cost(active.total_cost_usd));
+    }
+    println!(
+        "  tokens io: in {} | cached {} | out {}",
+        crate::util::format_tokens(active.input_tokens_total),
+        crate::util::format_tokens(active.cached_input_tokens_total),
+        crate::util::format_tokens(active.output_tokens_total),
+    );
     println!(
         "  {}",
         format_token_triplet(
@@ -514,6 +548,13 @@ fn command_available(program: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn print_session_roots(label: &str, paths: &[PathBuf]) {
+    println!("{label}:");
+    for path in paths {
+        println!("  - {}", path.display());
+    }
 }
 
 fn install_stop_signal() -> Result<Arc<AtomicBool>> {
