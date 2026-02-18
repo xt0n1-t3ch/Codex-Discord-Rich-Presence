@@ -1,7 +1,9 @@
 pub mod app;
 pub mod cli;
 pub mod config;
+pub mod cost;
 pub mod discord;
+pub mod metrics;
 pub mod process_guard;
 pub mod session;
 pub mod ui;

@@ -48,12 +48,19 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 - Token triplet (`This update | Last response | Session total`).
 - Remaining limit bars (`5h`, `7d`) with semantic color.
 
-4. Recent Sessions
+4. Metrics
+- Always rendered after active session.
+- `Full`: total cost/tokens, input-cached-output token split, cost split, top model by cost.
+- `Compact`: total cost/tokens + token split + cost split.
+- `Minimal`: total cost/tokens + token split only.
+- Empty-state fallback: `awaiting token events` / `no token usage observed yet`.
+
+5. Recent Sessions
 - Always rendered in reserved space.
 - Two-line entries when enough space.
 - Automatic one-line compact entries in constrained space.
 
-5. Footer
+6. Footer
 - Bottom-left: quit hint (`Press q or Ctrl+C to quit.`).
 - Bottom-right credits:
   - full: `XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
@@ -63,6 +70,8 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 ## 4. Activity Surface Rules
 
 - Priority labels: `Thinking`, `Reading <target>`, `Editing <target>`, `Running command`, `Waiting for input`, `Idle`.
+- File activity targets are sanitized to basename for readability/privacy.
+  - Example: `Editing c:/tony/test.ts` -> `Editing test.ts`.
 - Commentary handling:
   - assistant `phase=commentary` is a progress signal and does not overwrite active working labels.
   - commentary can reactivate `Waiting for input` / `Idle` into `Thinking`.

@@ -1,6 +1,9 @@
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -10,7 +13,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 3;
+const CONFIG_SCHEMA_VERSION: u32 = 4;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
     "29e563eeb755ae71d940c1b11d49dd3282a8886cd8b8cab829b2a14fcedad247";
@@ -23,6 +26,7 @@ pub struct PresenceConfig {
     pub discord_public_key: Option<String>,
     pub privacy: PrivacyConfig,
     pub display: DisplayConfig,
+    pub pricing: PricingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,9 +37,25 @@ pub struct PrivacyConfig {
     pub show_git_branch: bool,
     pub show_model: bool,
     pub show_tokens: bool,
+    pub show_cost: bool,
     pub show_limits: bool,
     pub show_activity: bool,
     pub show_activity_target: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PricingConfig {
+    pub aliases: BTreeMap<String, String>,
+    pub overrides: BTreeMap<String, ModelPricingOverride>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ModelPricingOverride {
+    pub input_per_million: f64,
+    pub cached_input_per_million: Option<f64>,
+    pub output_per_million: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -85,6 +105,7 @@ impl Default for PresenceConfig {
             discord_public_key: Some(DEFAULT_DISCORD_PUBLIC_KEY.to_string()),
             privacy: PrivacyConfig::default(),
             display: DisplayConfig::default(),
+            pricing: PricingConfig::default(),
         }
     }
 }
@@ -97,9 +118,20 @@ impl Default for PrivacyConfig {
             show_git_branch: true,
             show_model: true,
             show_tokens: true,
+            show_cost: true,
             show_limits: true,
             show_activity: true,
             show_activity_target: true,
+        }
+    }
+}
+
+impl Default for ModelPricingOverride {
+    fn default() -> Self {
+        Self {
+            input_per_million: 0.0,
+            cached_input_per_million: Some(0.0),
+            output_per_million: 0.0,
         }
     }
 }
@@ -114,6 +146,21 @@ impl Default for DisplayConfig {
             activity_small_image_keys: ActivitySmallImageKeys::default(),
             terminal_logo_mode: TerminalLogoMode::Auto,
             terminal_logo_path: None,
+        }
+    }
+}
+
+impl Default for PricingConfig {
+    fn default() -> Self {
+        let mut aliases = BTreeMap::new();
+        aliases.insert("gpt-5.3-codex".to_string(), "gpt-5.2-codex".to_string());
+        aliases.insert(
+            "gpt-5.3-codex-latest".to_string(),
+            "gpt-5.2-codex".to_string(),
+        );
+        Self {
+            aliases,
+            overrides: BTreeMap::new(),
         }
     }
 }
@@ -226,6 +273,9 @@ impl PresenceConfig {
             self.display.terminal_logo_path = None;
             changed = true;
         }
+        if normalize_pricing_config(&mut self.pricing) {
+            changed = true;
+        }
 
         changed
     }
@@ -267,6 +317,29 @@ pub fn sessions_path() -> PathBuf {
     codex_home().join("sessions")
 }
 
+pub fn sessions_paths() -> Vec<PathBuf> {
+    let mut ordered: Vec<PathBuf> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    push_unique_path(&mut ordered, &mut seen, sessions_path());
+
+    #[cfg(windows)]
+    {
+        for candidate in windows_wsl_sessions_candidates() {
+            push_unique_path(&mut ordered, &mut seen, candidate);
+        }
+    }
+
+    #[cfg(all(unix, not(windows)))]
+    {
+        for candidate in wsl_windows_sessions_candidates() {
+            push_unique_path(&mut ordered, &mut seen, candidate);
+        }
+    }
+
+    ordered
+}
+
 pub fn config_path() -> PathBuf {
     codex_home().join("discord-presence-config.json")
 }
@@ -306,6 +379,238 @@ fn normalize_optional_string(value: &mut Option<String>) -> bool {
     false
 }
 
+fn normalize_pricing_config(pricing: &mut PricingConfig) -> bool {
+    let mut changed = false;
+
+    let mut normalized_aliases: BTreeMap<String, String> = BTreeMap::new();
+    for (raw_key, raw_target) in pricing.aliases.clone() {
+        let key = raw_key.trim().to_ascii_lowercase();
+        let target = raw_target.trim().to_ascii_lowercase();
+        if key.is_empty() || target.is_empty() || key == target {
+            if !raw_key.trim().is_empty() || !raw_target.trim().is_empty() {
+                changed = true;
+            }
+            continue;
+        }
+        if normalized_aliases
+            .insert(key.clone(), target.clone())
+            .is_none()
+            && (key != raw_key || target != raw_target)
+        {
+            changed = true;
+        }
+    }
+    if pricing.aliases != normalized_aliases {
+        pricing.aliases = normalized_aliases;
+        changed = true;
+    }
+
+    let mut normalized_overrides: BTreeMap<String, ModelPricingOverride> = BTreeMap::new();
+    for (raw_key, mut override_pricing) in pricing.overrides.clone() {
+        let key = raw_key.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            changed = true;
+            continue;
+        }
+
+        if !override_pricing.input_per_million.is_finite()
+            || override_pricing.input_per_million < 0.0
+        {
+            override_pricing.input_per_million = 0.0;
+            changed = true;
+        }
+        if let Some(value) = override_pricing.cached_input_per_million
+            && (!value.is_finite() || value < 0.0)
+        {
+            override_pricing.cached_input_per_million = Some(0.0);
+            changed = true;
+        }
+        if !override_pricing.output_per_million.is_finite()
+            || override_pricing.output_per_million < 0.0
+        {
+            override_pricing.output_per_million = 0.0;
+            changed = true;
+        }
+
+        if key != raw_key {
+            changed = true;
+        }
+        normalized_overrides.insert(key, override_pricing);
+    }
+    if pricing.overrides != normalized_overrides {
+        pricing.overrides = normalized_overrides;
+        changed = true;
+    }
+
+    changed
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, seen: &mut HashSet<String>, candidate: PathBuf) {
+    if candidate.as_os_str().is_empty() {
+        return;
+    }
+    let key = path_key(&candidate);
+    if seen.insert(key) {
+        paths.push(candidate);
+    }
+}
+
+fn path_key(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        return path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
+    }
+
+    #[cfg(not(windows))]
+    {
+        path.to_string_lossy().to_string()
+    }
+}
+
+#[cfg(all(unix, not(windows)))]
+fn wsl_windows_sessions_candidates() -> Vec<PathBuf> {
+    if !running_in_wsl() {
+        return Vec::new();
+    }
+
+    let mut candidates = Vec::new();
+
+    if let Ok(profile) = env::var("USERPROFILE") {
+        let profile = profile.trim();
+        if !profile.is_empty() {
+            candidates.push(PathBuf::from(profile).join(".codex").join("sessions"));
+        }
+    }
+
+    if let Ok(username) = env::var("USERNAME").or_else(|_| env::var("USER")) {
+        let username = username.trim();
+        if !username.is_empty() {
+            candidates.push(
+                PathBuf::from("/mnt/c/Users")
+                    .join(username)
+                    .join(".codex")
+                    .join("sessions"),
+            );
+        }
+    }
+
+    candidates
+}
+
+#[cfg(all(unix, not(windows)))]
+fn running_in_wsl() -> bool {
+    if env::var_os("WSL_DISTRO_NAME").is_some() {
+        return true;
+    }
+    fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|value| value.to_ascii_lowercase().contains("microsoft"))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn windows_wsl_sessions_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let distros = windows_wsl_distro_names();
+    for distro in distros {
+        if let Some(home) = wsl_home_for_distro(&distro) {
+            candidates.push(wsl_home_to_unc_sessions_path(&distro, &home));
+            continue;
+        }
+        if let Some(username) = env::var("USERNAME")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            let fallback = format!(
+                r"\\wsl.localhost\{}\home\{}\.codex\sessions",
+                distro, username
+            );
+            candidates.push(PathBuf::from(fallback));
+        }
+    }
+    candidates
+}
+
+#[cfg(windows)]
+fn windows_wsl_distro_names() -> Vec<String> {
+    let output = Command::new("wsl.exe")
+        .args(["-l", "-q"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    decode_windows_text_output(&output.stdout)
+        .lines()
+        .map(|line| line.trim().trim_start_matches('*').trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+#[cfg(windows)]
+fn wsl_home_for_distro(distro: &str) -> Option<String> {
+    let output = Command::new("wsl.exe")
+        .args(["-d", distro, "--", "sh", "-lc", "printf %s \"$HOME\""])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let home = decode_windows_text_output(&output.stdout)
+        .trim()
+        .to_string();
+    if home.is_empty() { None } else { Some(home) }
+}
+
+#[cfg(windows)]
+fn wsl_home_to_unc_sessions_path(distro: &str, home: &str) -> PathBuf {
+    let mut unc = format!(r"\\wsl.localhost\{}", distro);
+    for part in home.trim().trim_start_matches('/').split('/') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        unc.push('\\');
+        unc.push_str(part);
+    }
+    unc.push_str(r"\.codex\sessions");
+    PathBuf::from(unc)
+}
+
+#[cfg(windows)]
+fn decode_windows_text_output(bytes: &[u8]) -> String {
+    let has_interleaved_nuls = bytes
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .take(64)
+        .any(|byte| *byte == 0);
+
+    if bytes.starts_with(&[0xFF, 0xFE]) || has_interleaved_nuls {
+        let mut utf16: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+        let mut chunks = bytes.chunks_exact(2);
+        for chunk in &mut chunks {
+            utf16.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+        }
+        return String::from_utf16_lossy(&utf16);
+    }
+
+    String::from_utf8_lossy(bytes).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,12 +632,13 @@ mod tests {
             discord_public_key: None,
             privacy: PrivacyConfig::default(),
             display: DisplayConfig::default(),
+            pricing: PricingConfig::default(),
         };
 
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 3);
+        assert_eq!(cfg.schema_version, 4);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
             Some(DEFAULT_DISCORD_CLIENT_ID)
@@ -348,5 +654,40 @@ mod tests {
         let cfg = PresenceConfig::default();
         assert_eq!(cfg.display.terminal_logo_mode, TerminalLogoMode::Auto);
         assert_eq!(cfg.display.terminal_logo_path, None);
+    }
+
+    #[test]
+    fn pricing_defaults_include_gpt_5_3_alias() {
+        let cfg = PresenceConfig::default();
+        assert_eq!(
+            cfg.pricing.aliases.get("gpt-5.3-codex").map(String::as_str),
+            Some("gpt-5.2-codex")
+        );
+    }
+
+    #[test]
+    fn pricing_normalization_lowercases_alias_and_override_keys() {
+        let mut cfg = PresenceConfig::default();
+        cfg.pricing.aliases.clear();
+        cfg.pricing
+            .aliases
+            .insert(" GPT-5.3-CODEX ".to_string(), " GPT-5.2-CODEX ".to_string());
+        cfg.pricing.overrides.clear();
+        cfg.pricing.overrides.insert(
+            " GPT-5.2-CODEX ".to_string(),
+            ModelPricingOverride {
+                input_per_million: 1.0,
+                cached_input_per_million: Some(0.1),
+                output_per_million: 2.0,
+            },
+        );
+
+        let changed = cfg.normalize_and_migrate();
+        assert!(changed);
+        assert_eq!(
+            cfg.pricing.aliases.get("gpt-5.3-codex").map(String::as_str),
+            Some("gpt-5.2-codex")
+        );
+        assert!(cfg.pricing.overrides.contains_key("gpt-5.2-codex"));
     }
 }

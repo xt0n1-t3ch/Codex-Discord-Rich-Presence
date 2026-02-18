@@ -11,9 +11,11 @@ use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlt
 use viuer::{Config as ViuerConfig, KittySupport};
 
 use crate::config::TerminalLogoMode;
+use crate::metrics::MetricsSnapshot;
 use crate::session::{CodexSessionSnapshot, RateLimits, UsageWindow};
 use crate::util::{
-    format_time_until, format_token_triplet, human_duration, now_local, progress_bar, truncate,
+    format_cost, format_time_until, format_token_triplet, format_tokens, human_duration, now_local,
+    progress_bar, truncate,
 };
 
 const FOOTER_ROWS: u16 = 1;
@@ -101,6 +103,7 @@ pub struct RenderData<'a> {
     pub logo_path: Option<&'a str>,
     pub active: Option<&'a CodexSessionSnapshot>,
     pub effective_limits: Option<&'a RateLimits>,
+    pub metrics: Option<&'a MetricsSnapshot>,
     pub sessions: &'a [CodexSessionSnapshot],
 }
 
@@ -152,6 +155,9 @@ pub fn draw(data: &RenderData<'_>) -> Result<()> {
     render_active_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
     write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
 
+    render_metrics_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
+    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
+
     if row < top_body_limit {
         row = top_body_limit;
     }
@@ -198,6 +204,17 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
         }
     } else {
         signature.push_str("active:none|");
+    }
+
+    if let Some(metrics) = data.metrics {
+        let _ = write!(
+            signature,
+            "metrics:{:.6}|{}|{}|{}|",
+            metrics.totals.cost_usd,
+            metrics.totals.input_tokens,
+            metrics.totals.cached_input_tokens,
+            metrics.totals.output_tokens
+        );
     }
 
     for session in data.sessions.iter().take(5) {
@@ -383,6 +400,88 @@ fn render_active_section(
     if matches!(layout, UiLayoutMode::Full) {
         let path_text = truncate(&active.cwd.display().to_string(), width.saturating_sub(13));
         let _ = write_line(out, row, max_body_row, width, &kv_line("Path", &path_text));
+    }
+
+    Ok(())
+}
+
+fn render_metrics_section(
+    out: &mut impl Write,
+    row: &mut u16,
+    max_body_row: u16,
+    width: usize,
+    layout: UiLayoutMode,
+    data: &RenderData<'_>,
+) -> Result<()> {
+    if !write_line(out, row, max_body_row, width, &hr("Metrics", width))? {
+        return Ok(());
+    }
+
+    let Some(metrics) = data.metrics else {
+        let _ = write_line(
+            out,
+            row,
+            max_body_row,
+            width,
+            "Metrics: awaiting token events...",
+        );
+        return Ok(());
+    };
+
+    if metrics.totals.total_tokens == 0 && metrics.totals.cost_usd <= 0.0 {
+        let _ = write_line(
+            out,
+            row,
+            max_body_row,
+            width,
+            "Metrics: no token usage observed yet.",
+        );
+        return Ok(());
+    }
+
+    let summary = format!(
+        "Total {} | Tokens {}",
+        format_cost(metrics.totals.cost_usd),
+        format_tokens(metrics.totals.total_tokens)
+    );
+    if !write_line(out, row, max_body_row, width, &summary)? {
+        return Ok(());
+    }
+
+    let io_line = format!(
+        "Input {} | Cached {} | Output {}",
+        format_tokens(metrics.totals.input_tokens),
+        format_tokens(metrics.totals.cached_input_tokens),
+        format_tokens(metrics.totals.output_tokens)
+    );
+    if !write_line(out, row, max_body_row, width, &io_line)? {
+        return Ok(());
+    }
+
+    if matches!(layout, UiLayoutMode::Minimal) {
+        return Ok(());
+    }
+
+    let breakdown = format!(
+        "Cost split I {} | C {} | O {}",
+        format_cost(metrics.cost_breakdown.input_cost_usd),
+        format_cost(metrics.cost_breakdown.cached_input_cost_usd),
+        format_cost(metrics.cost_breakdown.output_cost_usd)
+    );
+    if !write_line(out, row, max_body_row, width, &breakdown)? {
+        return Ok(());
+    }
+
+    if matches!(layout, UiLayoutMode::Full)
+        && let Some(top_model) = metrics.by_model.first()
+    {
+        let top_line = format!(
+            "Top model {} | {} | sessions {}",
+            truncate(&top_model.model_id, 24),
+            format_cost(top_model.cost_usd),
+            top_model.session_count
+        );
+        let _ = write_line(out, row, max_body_row, width, &top_line)?;
     }
 
     Ok(())

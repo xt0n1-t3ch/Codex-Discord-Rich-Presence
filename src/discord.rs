@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::PresenceConfig;
 use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind};
-use crate::util::format_tokens;
+use crate::util::{format_cost, format_tokens};
 
 pub struct DiscordPresence {
     client_id: Option<String>,
@@ -18,11 +18,19 @@ pub struct DiscordPresence {
     last_publish_at: Option<Instant>,
     known_asset_keys: Option<HashSet<String>>,
     last_asset_refresh_at: Option<Instant>,
+    last_heartbeat_at: Option<Instant>,
+    reconnect_backoff: Duration,
+    last_reconnect_attempt: Option<Instant>,
+    consecutive_errors: u32,
+    idle_start_epoch: Option<i64>,
 }
 
 const DISCORD_MIN_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
 const DISCORD_ASSET_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 const DISCORD_ASSET_FETCH_TIMEOUT: Duration = Duration::from_secs(2);
+const DISCORD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const RECONNECT_MIN_BACKOFF: Duration = Duration::from_secs(5);
+const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 impl DiscordPresence {
     pub fn new(client_id: Option<String>) -> Self {
@@ -39,6 +47,11 @@ impl DiscordPresence {
             last_publish_at: None,
             known_asset_keys: None,
             last_asset_refresh_at: None,
+            last_heartbeat_at: None,
+            reconnect_backoff: RECONNECT_MIN_BACKOFF,
+            last_reconnect_attempt: None,
+            consecutive_errors: 0,
+            idle_start_epoch: None,
         }
     }
 
@@ -57,14 +70,26 @@ impl DiscordPresence {
             return Ok(());
         }
 
-        self.ensure_connected()?;
+        if let Err(_err) = self.ensure_connected() {
+            return Ok(());
+        }
+        if self.client.is_none() {
+            return Ok(());
+        }
+
         self.refresh_asset_keys_if_needed();
+        let needs_heartbeat = self
+            .last_heartbeat_at
+            .map(|value| value.elapsed() >= DISCORD_HEARTBEAT_INTERVAL)
+            .unwrap_or(true);
 
         match active_session {
             Some(session) => {
+                self.idle_start_epoch = None;
                 let (details, state) = presence_lines(session, effective_limits, config);
                 let payload = (details.clone(), state.clone());
-                if self.last_sent.as_ref() == Some(&payload) {
+
+                if self.last_sent.as_ref() == Some(&payload) && !needs_heartbeat {
                     self.last_status = "Connected".to_string();
                     return Ok(());
                 }
@@ -84,6 +109,7 @@ impl DiscordPresence {
                     resolve_image_key(&small_image_key, self.known_asset_keys.as_ref());
                 let (large_image_key, small_image_key) =
                     normalize_asset_pair(resolved_large_key, resolved_small_key);
+
                 let activity = build_activity(
                     &details,
                     &state,
@@ -104,14 +130,65 @@ impl DiscordPresence {
                     self.handle_ipc_error(&err.to_string());
                     return Err(err);
                 }
+
                 self.last_sent = Some(payload);
                 self.last_publish_at = Some(Instant::now());
+                self.last_heartbeat_at = Some(Instant::now());
                 self.last_status = "Connected".to_string();
             }
             None => {
-                self.clear_activity()?;
-                self.last_sent = None;
+                let idle_start = *self
+                    .idle_start_epoch
+                    .get_or_insert_with(|| Utc::now().timestamp().max(0));
+
+                let details = "Codex CLI".to_string();
+                let state = "Waiting for session".to_string();
+                let payload = (details.clone(), state.clone());
+
+                if self.last_sent.as_ref() == Some(&payload) && !needs_heartbeat {
+                    self.last_status = "Connected (idle)".to_string();
+                    return Ok(());
+                }
+                if let Some(last_publish) = self.last_publish_at
+                    && last_publish.elapsed() < DISCORD_MIN_PUBLISH_INTERVAL
+                {
+                    self.last_status = "Connected (idle)".to_string();
+                    return Ok(());
+                }
+
+                let resolved_large_key = resolve_image_key(
+                    &config.display.large_image_key,
+                    self.known_asset_keys.as_ref(),
+                );
+
+                let mut activity = Activity::new()
+                    .details(&details)
+                    .state(&state)
+                    .timestamps(Timestamps::new().start(idle_start));
+
+                if let Some(large_key) = resolved_large_key.as_deref() {
+                    let mut assets = Assets::new().large_image(large_key);
+                    if let Some(text) = non_empty_trimmed(&config.display.large_text) {
+                        assets = assets.large_text(text);
+                    }
+                    activity = activity.assets(assets);
+                }
+
+                let client = self
+                    .client
+                    .as_mut()
+                    .ok_or_else(|| anyhow!("Discord IPC client unexpectedly missing"))?;
+                if let Err(err) = client
+                    .set_activity(activity)
+                    .context("failed to set Discord idle activity")
+                {
+                    self.handle_ipc_error(&err.to_string());
+                    return Err(err);
+                }
+
+                self.last_sent = Some(payload);
                 self.last_publish_at = Some(Instant::now());
+                self.last_heartbeat_at = Some(Instant::now());
                 self.last_status = "Connected (idle)".to_string();
             }
         }
@@ -127,7 +204,11 @@ impl DiscordPresence {
         self.client = None;
         self.last_sent = None;
         self.last_publish_at = None;
+        self.last_heartbeat_at = None;
         self.last_asset_refresh_at = None;
+        self.idle_start_epoch = None;
+        self.reconnect_backoff = RECONNECT_MIN_BACKOFF;
+        self.consecutive_errors = 0;
         if self.client_id.is_some() {
             self.last_status = "Disconnected".to_string();
         }
@@ -154,16 +235,34 @@ impl DiscordPresence {
             return Ok(());
         };
 
+        if let Some(last_attempt) = self.last_reconnect_attempt
+            && last_attempt.elapsed() < self.reconnect_backoff
+        {
+            return Ok(());
+        }
+
+        self.last_reconnect_attempt = Some(Instant::now());
         let mut client = DiscordIpcClient::new(&client_id);
-        client
+        match client
             .connect()
             .context("failed to connect to Discord IPC (is Discord desktop open?)")
-            .inspect_err(|err| {
-                self.handle_ipc_error(&err.to_string());
-            })?;
-        self.client = Some(client);
-        self.last_status = "Connected".to_string();
-        Ok(())
+        {
+            Ok(()) => {
+                self.client = Some(client);
+                self.last_sent = None;
+                self.last_heartbeat_at = None;
+                self.reconnect_backoff = RECONNECT_MIN_BACKOFF;
+                self.consecutive_errors = 0;
+                self.last_status = "Connected".to_string();
+                Ok(())
+            }
+            Err(err) => {
+                self.increase_backoff();
+                self.last_status =
+                    format!("Reconnecting in {}s...", self.reconnect_backoff.as_secs());
+                Err(err)
+            }
+        }
     }
 
     fn refresh_asset_keys_if_needed(&mut self) {
@@ -184,16 +283,21 @@ impl DiscordPresence {
 
     fn handle_ipc_error(&mut self, message: &str) {
         self.client = None;
+        self.increase_backoff();
         self.last_status = format!("Discord error: {}", compact_error(message));
+    }
+
+    fn increase_backoff(&mut self) {
+        self.consecutive_errors = self.consecutive_errors.saturating_add(1);
+        let secs = RECONNECT_MIN_BACKOFF
+            .as_secs()
+            .saturating_mul(1u64 << self.consecutive_errors.min(4));
+        self.reconnect_backoff = Duration::from_secs(secs.min(RECONNECT_MAX_BACKOFF.as_secs()));
     }
 }
 
 fn compact_error(input: &str) -> String {
-    const MAX: usize = 96;
-    if input.len() <= MAX {
-        return input.to_string();
-    }
-    format!("{}...", &input[..MAX.saturating_sub(3)])
+    truncate_for_limit(input, 96)
 }
 
 fn build_activity<'a>(
@@ -292,9 +396,10 @@ fn presence_lines(
         state_parts.push(model.clone());
     }
     if config.privacy.show_tokens {
-        for token_part in token_state_parts(session) {
-            state_parts.push(token_part);
-        }
+        state_parts.extend(token_state_parts(session));
+    }
+    if config.privacy.show_cost && session.total_cost_usd > 0.0 {
+        state_parts.push(format!("Cost {}", format_cost(session.total_cost_usd)));
     }
     if config.privacy.show_limits {
         if let Some(primary) = &limits.primary {
@@ -311,22 +416,33 @@ fn presence_lines(
         "Codex session"
     };
     let state = compact_join_prioritized(&state_parts, 128, fallback);
-    (truncate_for_discord(&details), state)
+    (truncate_for_limit(&details, 128), state)
 }
 
 fn token_state_parts(session: &CodexSessionSnapshot) -> Vec<String> {
     let mut parts = Vec::new();
+
+    if session.input_tokens_total > 0 || session.output_tokens_total > 0 {
+        parts.push(format!(
+            "I {} C {} O {}",
+            format_tokens(session.input_tokens_total),
+            format_tokens(session.cached_input_tokens_total),
+            format_tokens(session.output_tokens_total)
+        ));
+    }
+
     if let Some(last) = session.last_turn_tokens {
-        parts.push(format!("Last response {}", format_tokens(last)));
+        parts.push(format!("Last {}", format_tokens(last)));
     }
     if let Some(total) = session.session_total_tokens {
-        parts.push(format!("Session total {}", format_tokens(total)));
+        parts.push(format!("Total {}", format_tokens(total)));
     }
     if parts.is_empty()
         && let Some(delta) = session.session_delta_tokens
     {
-        parts.push(format!("This update {}", format_tokens(delta)));
+        parts.push(format!("Update {}", format_tokens(delta)));
     }
+
     parts
 }
 
@@ -466,21 +582,22 @@ fn compact_join_prioritized(parts: &[String], max: usize, fallback: &str) -> Str
     }
 }
 
-fn truncate_for_discord(input: &str) -> String {
-    truncate_for_limit(input, 128)
-}
-
 fn truncate_for_limit(input: &str, max: usize) -> String {
     if input.len() <= max {
         return input.to_string();
     }
-    format!("{}...", &input[..max.saturating_sub(3)])
+    let mut end = max.saturating_sub(3);
+    while end > 0 && !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &input[..end])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::PresenceConfig;
+    use crate::cost::{PricingSource, TokenCostBreakdown};
     use crate::session::{RateLimits, UsageWindow};
     use std::path::PathBuf;
     use std::time::SystemTime;
@@ -497,6 +614,19 @@ mod tests {
             session_total_tokens: Some(30_000),
             last_turn_tokens: Some(1_700),
             session_delta_tokens: Some(600),
+            input_tokens_total: 24_000,
+            cached_input_tokens_total: 15_000,
+            output_tokens_total: 6_000,
+            last_input_tokens: Some(1_500),
+            last_cached_input_tokens: Some(900),
+            last_output_tokens: Some(200),
+            total_cost_usd: 1.234,
+            cost_breakdown: TokenCostBreakdown {
+                input_cost_usd: 0.5,
+                cached_input_cost_usd: 0.2,
+                output_cost_usd: 0.534,
+            },
+            pricing_source: PricingSource::Alias,
             limits: RateLimits {
                 primary: Some(UsageWindow {
                     used_percent: 36.0,
@@ -520,18 +650,14 @@ mod tests {
     }
 
     #[test]
-    fn state_uses_remaining_limits_and_token_natural_labels() {
+    fn state_uses_remaining_limits_and_cost_tokens() {
         let session = sample_session();
         let config = PresenceConfig::default();
         let (_details, state) = presence_lines(&session, Some(&session.limits), &config);
         assert!(state.contains("5h left 64%"));
         assert!(state.contains("7d left 18%"));
-        assert!(state.contains("Last response 1.7K"));
-        assert!(state.contains("Session total 30.0K"));
-        assert!(!state.contains("This update"));
-        assert!(!state.contains("tok "));
-        assert!(!state.contains(" l "));
-        assert!(!state.contains(" t "));
+        assert!(state.contains("Cost"));
+        assert!(state.contains("I 24.0K"));
     }
 
     #[test]
@@ -550,7 +676,7 @@ mod tests {
         let mut session = sample_session();
         session.activity = Some(crate::session::SessionActivitySnapshot {
             kind: crate::session::SessionActivityKind::EditingFile,
-            target: Some("src/ui.rs".to_string()),
+            target: Some("main.rs".to_string()),
             observed_at: None,
             last_active_at: None,
             last_effective_signal_at: None,

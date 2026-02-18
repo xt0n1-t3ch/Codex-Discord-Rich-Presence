@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
 
+use crate::config::PricingConfig;
+use crate::cost::{self, PricingSource, TokenCostBreakdown};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UsageWindow {
     pub used_percent: f64,
@@ -84,6 +87,15 @@ pub struct CodexSessionSnapshot {
     pub session_total_tokens: Option<u64>,
     pub last_turn_tokens: Option<u64>,
     pub session_delta_tokens: Option<u64>,
+    pub input_tokens_total: u64,
+    pub cached_input_tokens_total: u64,
+    pub output_tokens_total: u64,
+    pub last_input_tokens: Option<u64>,
+    pub last_cached_input_tokens: Option<u64>,
+    pub last_output_tokens: Option<u64>,
+    pub total_cost_usd: f64,
+    pub cost_breakdown: TokenCostBreakdown,
+    pub pricing_source: PricingSource,
     pub limits: RateLimits,
     pub activity: Option<SessionActivitySnapshot>,
     pub started_at: Option<DateTime<Utc>>,
@@ -176,12 +188,26 @@ pub fn collect_active_sessions(
     active_sticky_window: Duration,
     git_cache: &mut GitBranchCache,
     parse_cache: &mut SessionParseCache,
+    pricing_config: &PricingConfig,
 ) -> Result<Vec<CodexSessionSnapshot>> {
-    if !sessions_root.exists() {
-        parse_cache.entries.clear();
-        return Ok(Vec::new());
-    }
+    collect_active_sessions_multi(
+        &[sessions_root.to_path_buf()],
+        stale_threshold,
+        active_sticky_window,
+        git_cache,
+        parse_cache,
+        pricing_config,
+    )
+}
 
+pub fn collect_active_sessions_multi(
+    sessions_roots: &[PathBuf],
+    stale_threshold: Duration,
+    active_sticky_window: Duration,
+    git_cache: &mut GitBranchCache,
+    parse_cache: &mut SessionParseCache,
+    pricing_config: &PricingConfig,
+) -> Result<Vec<CodexSessionSnapshot>> {
     let now = SystemTime::now();
     let stale_cutoff = now
         .checked_sub(stale_threshold)
@@ -193,34 +219,45 @@ pub fn collect_active_sessions(
     let mut sessions = Vec::new();
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
 
-    for entry in WalkDir::new(sessions_root)
-        .into_iter()
-        .filter_map(std::result::Result::ok)
-    {
-        let path = entry.path();
-        if !entry.file_type().is_file() {
+    for sessions_root in sessions_roots {
+        if !sessions_root.exists() {
             continue;
         }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-            continue;
-        }
-        seen_paths.insert(path.to_path_buf());
 
-        let metadata = match entry.metadata() {
-            Ok(meta) => meta,
-            Err(_) => continue,
-        };
-        let modified = match metadata.modified() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if let Some(mut snapshot) =
-            parse_session_file_cached(path, &metadata, modified, git_cache, parse_cache)?
+        for entry in WalkDir::new(sessions_root)
+            .into_iter()
+            .filter_map(std::result::Result::ok)
         {
-            let recency = session_recency(&snapshot, modified);
-            snapshot.last_activity = recency;
-            if should_include_session(&snapshot, recency, stale_cutoff, sticky_cutoff) {
-                sessions.push(snapshot);
+            let path = entry.path();
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                continue;
+            }
+            seen_paths.insert(path.to_path_buf());
+
+            let metadata = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(_) => continue,
+            };
+            let modified = match metadata.modified() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if let Some(mut snapshot) = parse_session_file_cached(
+                path,
+                &metadata,
+                modified,
+                git_cache,
+                parse_cache,
+                pricing_config,
+            )? {
+                let recency = session_recency(&snapshot, modified);
+                snapshot.last_activity = recency;
+                if should_include_session(&snapshot, recency, stale_cutoff, sticky_cutoff) {
+                    sessions.push(snapshot);
+                }
             }
         }
     }
@@ -228,8 +265,30 @@ pub fn collect_active_sessions(
     parse_cache
         .entries
         .retain(|path, _| seen_paths.contains(path));
+    sessions = dedupe_sessions_by_id(sessions);
     sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
     Ok(sessions)
+}
+
+fn dedupe_sessions_by_id(sessions: Vec<CodexSessionSnapshot>) -> Vec<CodexSessionSnapshot> {
+    let mut deduped: Vec<CodexSessionSnapshot> = Vec::new();
+    let mut index_by_id: HashMap<String, usize> = HashMap::new();
+
+    for session in sessions {
+        let session_id = session.session_id.clone();
+        if let Some(existing_index) = index_by_id.get(&session_id).copied() {
+            if session_rank_key(&session) > session_rank_key(&deduped[existing_index]) {
+                deduped[existing_index] = session;
+            }
+            continue;
+        }
+
+        let next_index = deduped.len();
+        index_by_id.insert(session_id, next_index);
+        deduped.push(session);
+    }
+
+    deduped
 }
 
 pub fn latest_limits_source(sessions: &[CodexSessionSnapshot]) -> Option<&CodexSessionSnapshot> {
@@ -382,6 +441,12 @@ struct SessionAccumulator {
     session_total_tokens: Option<u64>,
     previous_session_total_tokens: Option<u64>,
     last_turn_tokens: Option<u64>,
+    input_tokens_total: u64,
+    cached_input_tokens_total: u64,
+    output_tokens_total: u64,
+    last_input_tokens: Option<u64>,
+    last_cached_input_tokens: Option<u64>,
+    last_output_tokens: Option<u64>,
     limits: RateLimits,
     last_token_event_at: Option<DateTime<Utc>>,
     activity_tracker: ActivityTracker,
@@ -594,12 +659,46 @@ impl SessionAccumulator {
             }
             Some("event_msg") => match str_at(payload, &["type"]).as_deref() {
                 Some("token_count") => {
-                    if let Some(total_tokens) = total_tokens_from_info(payload) {
-                        self.previous_session_total_tokens = self.session_total_tokens;
-                        self.session_total_tokens = Some(total_tokens);
+                    self.previous_session_total_tokens = self.session_total_tokens;
+
+                    if let Some(total_input_tokens) = total_input_tokens_from_info(payload) {
+                        self.input_tokens_total = total_input_tokens;
                     }
+                    if let Some(total_cached_input_tokens) =
+                        total_cached_input_tokens_from_info(payload)
+                    {
+                        self.cached_input_tokens_total = total_cached_input_tokens;
+                    }
+                    if let Some(total_output_tokens) = total_output_tokens_from_info(payload) {
+                        self.output_tokens_total = total_output_tokens;
+                    }
+
+                    if let Some(last_input_tokens) = last_input_tokens_from_info(payload) {
+                        self.last_input_tokens = Some(last_input_tokens);
+                    }
+                    if let Some(last_cached_input_tokens) =
+                        last_cached_input_tokens_from_info(payload)
+                    {
+                        self.last_cached_input_tokens = Some(last_cached_input_tokens);
+                    }
+                    if let Some(last_output_tokens) = last_output_tokens_from_info(payload) {
+                        self.last_output_tokens = Some(last_output_tokens);
+                    }
+
+                    if let Some(total_tokens) = total_tokens_from_info(payload) {
+                        self.session_total_tokens = Some(total_tokens);
+                    } else if self.input_tokens_total > 0 || self.output_tokens_total > 0 {
+                        self.session_total_tokens =
+                            Some(self.input_tokens_total + self.output_tokens_total);
+                    }
+
                     if let Some(last_tokens) = last_tokens_from_info(payload) {
                         self.last_turn_tokens = Some(last_tokens);
+                    } else if self.last_input_tokens.is_some() || self.last_output_tokens.is_some()
+                    {
+                        let last_input = self.last_input_tokens.unwrap_or(0);
+                        let last_output = self.last_output_tokens.unwrap_or(0);
+                        self.last_turn_tokens = Some(last_input + last_output);
                     }
 
                     let parsed_limits = parse_rate_limits(payload.get("rate_limits"));
@@ -686,6 +785,7 @@ impl SessionAccumulator {
         jsonl_path: &Path,
         last_activity: SystemTime,
         git_cache: &mut GitBranchCache,
+        pricing_config: &PricingConfig,
     ) -> Option<CodexSessionSnapshot> {
         let activity = self.activity_tracker.finalize(Utc::now());
         let session_delta_tokens = compute_session_delta(
@@ -700,6 +800,9 @@ impl SessionAccumulator {
             && self.session_total_tokens.is_none()
             && self.last_turn_tokens.is_none()
             && session_delta_tokens.is_none()
+            && self.input_tokens_total == 0
+            && self.cached_input_tokens_total == 0
+            && self.output_tokens_total == 0
             && !limits_present(&self.limits)
             && activity.is_none()
         {
@@ -719,6 +822,13 @@ impl SessionAccumulator {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown-session")
             .to_string();
+        let cost = cost::compute_total_cost(
+            self.model.as_deref().unwrap_or(""),
+            self.input_tokens_total,
+            self.cached_input_tokens_total,
+            self.output_tokens_total,
+            pricing_config,
+        );
 
         Some(CodexSessionSnapshot {
             session_id: self.session_id.clone().unwrap_or(fallback_id),
@@ -731,6 +841,15 @@ impl SessionAccumulator {
             session_total_tokens: self.session_total_tokens,
             last_turn_tokens: self.last_turn_tokens,
             session_delta_tokens,
+            input_tokens_total: self.input_tokens_total,
+            cached_input_tokens_total: self.cached_input_tokens_total,
+            output_tokens_total: self.output_tokens_total,
+            last_input_tokens: self.last_input_tokens,
+            last_cached_input_tokens: self.last_cached_input_tokens,
+            last_output_tokens: self.last_output_tokens,
+            total_cost_usd: cost.total_cost_usd,
+            cost_breakdown: cost.breakdown,
+            pricing_source: cost.source,
             limits: self.limits.clone(),
             activity,
             started_at: self.started_at,
@@ -823,7 +942,9 @@ fn shell_command_text(arguments: &str) -> String {
 
 fn extract_view_image_target(arguments: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(arguments).ok()?;
-    str_at(&value, &["path"]).or_else(|| str_at(&value, &["image_path"]))
+    str_at(&value, &["path"])
+        .or_else(|| str_at(&value, &["image_path"]))
+        .map(|target| sanitize_file_target(&target, 72))
 }
 
 fn extract_read_target(command: &str) -> Option<String> {
@@ -890,7 +1011,7 @@ fn positional_argument_after(command: &str, prefix: &str) -> Option<String> {
         if cleaned.is_empty() || cleaned.starts_with('-') {
             continue;
         }
-        return Some(cleaned);
+        return Some(sanitize_file_target(&cleaned, 72));
     }
     None
 }
@@ -911,7 +1032,7 @@ fn named_argument(command: &str, flag: &str) -> Option<String> {
         if tokens[idx].eq_ignore_ascii_case(flag) {
             let value = tokens[idx + 1].clone();
             if !value.starts_with('-') && !value.is_empty() {
-                return Some(value);
+                return Some(sanitize_file_target(&value, 72));
             }
         }
         idx += 1;
@@ -983,26 +1104,30 @@ fn extract_rg_target(command: &str) -> Option<String> {
     }
 
     if command.contains("--files") {
-        return positional.first().cloned();
+        return positional
+            .first()
+            .map(|target| sanitize_file_target(target, 72));
     }
 
     // rg [pattern] [path]
-    positional.get(1).cloned()
+    positional
+        .get(1)
+        .map(|target| sanitize_file_target(target, 72))
 }
 
 fn extract_patch_target(input: &str) -> Option<String> {
     for line in input.lines() {
         if let Some(path) = line.strip_prefix("*** Update File: ") {
-            return Some(path.trim().to_string());
+            return Some(sanitize_file_target(path.trim(), 72));
         }
         if let Some(path) = line.strip_prefix("*** Add File: ") {
-            return Some(path.trim().to_string());
+            return Some(sanitize_file_target(path.trim(), 72));
         }
         if let Some(path) = line.strip_prefix("*** Delete File: ") {
-            return Some(path.trim().to_string());
+            return Some(sanitize_file_target(path.trim(), 72));
         }
         if let Some(path) = line.strip_prefix("*** Move to: ") {
-            return Some(path.trim().to_string());
+            return Some(sanitize_file_target(path.trim(), 72));
         }
     }
     None
@@ -1018,18 +1143,39 @@ fn truncate_activity_target(input: String, max_len: usize) -> String {
     format!("{}...", &input[..max_len - 3])
 }
 
+fn sanitize_file_target(raw: &str, max_len: usize) -> String {
+    let cleaned = raw
+        .trim()
+        .trim_matches('\"')
+        .trim_matches('\'')
+        .trim_matches('`');
+    if cleaned.is_empty() {
+        return String::new();
+    }
+
+    let path = Path::new(cleaned);
+    if let Some(file_name) = path.file_name().and_then(|item| item.to_str())
+        && !file_name.trim().is_empty()
+    {
+        return truncate_activity_target(file_name.trim().to_string(), max_len);
+    }
+
+    truncate_activity_target(cleaned.to_string(), max_len)
+}
+
 #[cfg(test)]
 fn parse_session_file(
     jsonl_path: &Path,
     last_activity: SystemTime,
     git_cache: &mut GitBranchCache,
+    pricing_config: &PricingConfig,
 ) -> Result<Option<CodexSessionSnapshot>> {
     let file = File::open(jsonl_path)
         .with_context(|| format!("failed to open session file {}", jsonl_path.display()))?;
     let mut reader = BufReader::new(file);
     let mut accumulator = SessionAccumulator::default();
     parse_new_lines(&mut reader, &mut accumulator)?;
-    Ok(accumulator.build_snapshot(jsonl_path, last_activity, git_cache))
+    Ok(accumulator.build_snapshot(jsonl_path, last_activity, git_cache, pricing_config))
 }
 
 fn parse_session_file_cached(
@@ -1038,6 +1184,7 @@ fn parse_session_file_cached(
     last_activity: SystemTime,
     git_cache: &mut GitBranchCache,
     parse_cache: &mut SessionParseCache,
+    pricing_config: &PricingConfig,
 ) -> Result<Option<CodexSessionSnapshot>> {
     let modified = metadata.modified().unwrap_or(last_activity);
     let file_len = metadata.len();
@@ -1069,9 +1216,10 @@ fn parse_session_file_cached(
     cached.file_len = file_len;
     cached.modified = modified;
 
-    let snapshot = cached
-        .accumulator
-        .build_snapshot(jsonl_path, last_activity, git_cache);
+    let snapshot =
+        cached
+            .accumulator
+            .build_snapshot(jsonl_path, last_activity, git_cache, pricing_config);
     cached.snapshot = snapshot.clone();
     Ok(snapshot)
 }
@@ -1117,6 +1265,36 @@ fn total_tokens_from_info(payload: &Value) -> Option<u64> {
 
 fn last_tokens_from_info(payload: &Value) -> Option<u64> {
     uint_at(payload, &["info", "last_token_usage", "total_tokens"])
+}
+
+fn total_input_tokens_from_info(payload: &Value) -> Option<u64> {
+    uint_at(payload, &["info", "total_token_usage", "input_tokens"])
+}
+
+fn total_cached_input_tokens_from_info(payload: &Value) -> Option<u64> {
+    uint_at(
+        payload,
+        &["info", "total_token_usage", "cached_input_tokens"],
+    )
+}
+
+fn total_output_tokens_from_info(payload: &Value) -> Option<u64> {
+    uint_at(payload, &["info", "total_token_usage", "output_tokens"])
+}
+
+fn last_input_tokens_from_info(payload: &Value) -> Option<u64> {
+    uint_at(payload, &["info", "last_token_usage", "input_tokens"])
+}
+
+fn last_cached_input_tokens_from_info(payload: &Value) -> Option<u64> {
+    uint_at(
+        payload,
+        &["info", "last_token_usage", "cached_input_tokens"],
+    )
+}
+
+fn last_output_tokens_from_info(payload: &Value) -> Option<u64> {
+    uint_at(payload, &["info", "last_token_usage", "output_tokens"])
 }
 
 fn parse_rate_limits(value: Option<&Value>) -> RateLimits {
@@ -1242,6 +1420,8 @@ fn float_at(value: &Value, path: &[&str]) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::PricingConfig;
+    use crate::cost::{PricingSource, TokenCostBreakdown};
     use chrono::Duration as ChronoDuration;
     use tempfile::TempDir;
 
@@ -1251,9 +1431,14 @@ mod tests {
         std::fs::write(&file_path, content).expect("write jsonl");
         let modified = SystemTime::now();
         let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
-        parse_session_file(&file_path, modified, &mut git_cache)
-            .expect("parse")
-            .expect("snapshot")
+        parse_session_file(
+            &file_path,
+            modified,
+            &mut git_cache,
+            &PricingConfig::default(),
+        )
+        .expect("parse")
+        .expect("snapshot")
     }
 
     fn policy_snapshot(activity_kind: Option<SessionActivityKind>) -> CodexSessionSnapshot {
@@ -1268,6 +1453,15 @@ mod tests {
             session_total_tokens: None,
             last_turn_tokens: None,
             session_delta_tokens: None,
+            input_tokens_total: 0,
+            cached_input_tokens_total: 0,
+            output_tokens_total: 0,
+            last_input_tokens: None,
+            last_cached_input_tokens: None,
+            last_output_tokens: None,
+            total_cost_usd: 0.0,
+            cost_breakdown: TokenCostBreakdown::default(),
+            pricing_source: PricingSource::Fallback,
             limits: RateLimits::default(),
             activity: activity_kind.map(|kind| SessionActivitySnapshot {
                 kind,
@@ -1365,8 +1559,8 @@ mod tests {
 
         let activity = snapshot.activity.expect("activity");
         assert_eq!(activity.kind, SessionActivityKind::ReadingFile);
-        assert_eq!(activity.target.as_deref(), Some("src/ui.rs"));
-        assert_eq!(activity.to_text(true), "Reading src/ui.rs");
+        assert_eq!(activity.target.as_deref(), Some("ui.rs"));
+        assert_eq!(activity.to_text(true), "Reading ui.rs");
     }
 
     #[test]
@@ -1378,8 +1572,8 @@ mod tests {
 
         let activity = snapshot.activity.expect("activity");
         assert_eq!(activity.kind, SessionActivityKind::EditingFile);
-        assert_eq!(activity.target.as_deref(), Some("src/session.rs"));
-        assert_eq!(activity.to_text(true), "Editing src/session.rs");
+        assert_eq!(activity.target.as_deref(), Some("session.rs"));
+        assert_eq!(activity.to_text(true), "Editing session.rs");
     }
 
     #[test]
@@ -1395,7 +1589,7 @@ mod tests {
         let snapshot = parse_one(&json);
         let activity = snapshot.activity.expect("activity");
         assert_eq!(activity.kind, SessionActivityKind::ReadingFile);
-        assert_eq!(activity.target.as_deref(), Some("src/ui.rs"));
+        assert_eq!(activity.target.as_deref(), Some("ui.rs"));
     }
 
     #[test]
@@ -1506,6 +1700,15 @@ mod tests {
             session_total_tokens: None,
             last_turn_tokens: None,
             session_delta_tokens: None,
+            input_tokens_total: 0,
+            cached_input_tokens_total: 0,
+            output_tokens_total: 0,
+            last_input_tokens: None,
+            last_cached_input_tokens: None,
+            last_output_tokens: None,
+            total_cost_usd: 0.0,
+            cost_breakdown: TokenCostBreakdown::default(),
+            pricing_source: PricingSource::Fallback,
             limits: RateLimits {
                 primary: Some(UsageWindow {
                     used_percent: 50.0,
@@ -1532,6 +1735,15 @@ mod tests {
             session_total_tokens: None,
             last_turn_tokens: None,
             session_delta_tokens: None,
+            input_tokens_total: 0,
+            cached_input_tokens_total: 0,
+            output_tokens_total: 0,
+            last_input_tokens: None,
+            last_cached_input_tokens: None,
+            last_output_tokens: None,
+            total_cost_usd: 0.0,
+            cost_breakdown: TokenCostBreakdown::default(),
+            pricing_source: PricingSource::Fallback,
             limits: RateLimits {
                 primary: Some(UsageWindow {
                     used_percent: 20.0,
@@ -1802,6 +2014,7 @@ mod tests {
             modified1,
             &mut git_cache,
             &mut parse_cache,
+            &PricingConfig::default(),
         )
         .expect("parse1")
         .expect("snapshot1");
@@ -1833,6 +2046,7 @@ mod tests {
             modified2,
             &mut git_cache,
             &mut parse_cache,
+            &PricingConfig::default(),
         )
         .expect("parse2")
         .expect("snapshot2");

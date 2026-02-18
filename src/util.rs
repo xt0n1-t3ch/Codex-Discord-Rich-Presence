@@ -18,6 +18,19 @@ pub fn format_tokens(tokens: u64) -> String {
     }
 }
 
+pub fn format_cost(cost_usd: f64) -> String {
+    if !cost_usd.is_finite() || cost_usd <= 0.0 {
+        return "$0.00".to_string();
+    }
+    if cost_usd < 0.01 {
+        format!("${cost_usd:.4}")
+    } else if cost_usd < 1.0 {
+        format!("${cost_usd:.3}")
+    } else {
+        format!("${cost_usd:.2}")
+    }
+}
+
 pub fn format_delta_tokens(tokens: u64) -> String {
     format_tokens(tokens)
 }
@@ -114,5 +127,13 @@ mod tests {
             format_token_triplet(None, None, None),
             "Tokens: unavailable"
         );
+    }
+
+    #[test]
+    fn cost_formatting() {
+        assert_eq!(format_cost(0.0), "$0.00");
+        assert_eq!(format_cost(0.0009), "$0.0009");
+        assert_eq!(format_cost(0.1284), "$0.128");
+        assert_eq!(format_cost(12.3456), "$12.35");
     }
 }

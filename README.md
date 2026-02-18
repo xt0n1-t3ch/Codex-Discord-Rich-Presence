@@ -16,13 +16,16 @@
 
 ## Overview
 
-`codex-discord-presence` reads local Codex session JSONL files (`~/.codex/sessions`), detects live activity (`Thinking`, `Reading`, `Editing`, `Running`, `Waiting for input`), renders an adaptive terminal dashboard, and updates Discord Rich Presence with low overhead.
+`codex-discord-presence` reads local Codex session JSONL files from discovered session roots (for example `~/.codex/sessions`, Windows `%USERPROFILE%\\.codex\\sessions`, and WSL homes when available), detects live activity (`Thinking`, `Reading`, `Editing`, `Running`, `Waiting for input`), renders an adaptive terminal dashboard, and updates Discord Rich Presence with low overhead.
 
 ## Core Capabilities
 
 - Stable multi-session detection with anti-false-idle behavior.
+- Discord Rich Presence keepalive in idle mode (persistent idle card + heartbeat + reconnect backoff).
 - Always-visible `Recent Sessions` section with adaptive compact fallback.
-- Action-first Discord details/state with deterministic truncation.
+- Action-first Discord details/state with deterministic truncation and compact token/cost telemetry.
+- Full metrics tracking with per-model aggregation and persisted reports (`JSON` + `Markdown`).
+- File activity labels sanitized to basename (`Editing test.ts` instead of full path).
 - Semantic remaining-limit bars (`5h`, `7d`) with color thresholds.
 - Incremental parse cache and render/publish dedupe for low CPU and memory use.
 
@@ -80,12 +83,24 @@ Config file:
 
 Defaults:
 
-- `schema_version`: `3`
+- `schema_version`: `4`
 - `discord_client_id`: `1470480085453770854`
 - `display.large_image_key`: `codex-logo`
 - `display.small_image_key`: `openai`
+- `privacy.show_cost`: `true`
 - `poll_interval_seconds`: `2`
 - `active_sticky_window_seconds`: `3600` (runtime env)
+- `pricing.aliases.gpt-5.3-codex`: `gpt-5.2-codex`
+
+Pricing config supports:
+
+- `pricing.aliases`: map model ids to another model's catalog pricing.
+- `pricing.overrides`: explicit per-model pricing override in USD per million tokens.
+
+Metrics artifacts:
+
+- `~/.codex/discord-presence-metrics.json`
+- `~/.codex/discord-presence-metrics.md`
 
 Environment overrides:
 
