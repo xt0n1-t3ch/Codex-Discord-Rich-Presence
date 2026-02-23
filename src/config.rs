@@ -519,10 +519,9 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, seen: &mut HashSet<String>, candid
 fn path_key(path: &Path) -> String {
     #[cfg(windows)]
     {
-        return path
-            .to_string_lossy()
+        path.to_string_lossy()
             .replace('\\', "/")
-            .to_ascii_lowercase();
+            .to_ascii_lowercase()
     }
 
     #[cfg(not(windows))]
