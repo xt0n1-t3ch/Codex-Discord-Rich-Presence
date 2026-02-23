@@ -157,6 +157,14 @@ pub fn normalize_model_key(model: &str) -> String {
     model.trim().to_ascii_lowercase()
 }
 
+pub fn default_model_context_window(model_id: &str) -> Option<u64> {
+    let key = normalize_model_key(model_id);
+    if key.starts_with("gpt-5") || key.starts_with("codex") {
+        return Some(400_000);
+    }
+    None
+}
+
 fn fallback_pricing() -> ModelPricing {
     // Official OpenAI API pricing fallback (gpt-5-codex)
     ModelPricing {
@@ -272,5 +280,41 @@ mod tests {
         assert!((computed.breakdown.cached_input_cost_usd - expected_cached).abs() < 0.0001);
         assert!((computed.breakdown.output_cost_usd - expected_output).abs() < 0.0001);
         assert!((computed.total_cost_usd - expected_total).abs() < 0.0001);
+    }
+
+    #[test]
+    fn pricing_catalog_matches_required_models() {
+        let config = PricingConfig::default();
+
+        let p52 = resolve_model_pricing("gpt-5.2", &config);
+        assert!((p52.pricing.input_per_million - 1.75).abs() < 0.0001);
+        assert!((p52.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
+        assert!((p52.pricing.output_per_million - 14.0).abs() < 0.0001);
+
+        let p51max = resolve_model_pricing("gpt-5.1-codex-max", &config);
+        assert!((p51max.pricing.input_per_million - 1.25).abs() < 0.0001);
+        assert!((p51max.pricing.cached_input_per_million - 0.125).abs() < 0.0001);
+        assert!((p51max.pricing.output_per_million - 10.0).abs() < 0.0001);
+
+        let p51mini = resolve_model_pricing("gpt-5.1-codex-mini", &config);
+        assert!((p51mini.pricing.input_per_million - 0.25).abs() < 0.0001);
+        assert!((p51mini.pricing.cached_input_per_million - 0.025).abs() < 0.0001);
+        assert!((p51mini.pricing.output_per_million - 2.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn catalog_context_window_for_gpt5_family_is_400k() {
+        assert_eq!(default_model_context_window("gpt-5.2"), Some(400_000));
+        assert_eq!(default_model_context_window("gpt-5.2-codex"), Some(400_000));
+        assert_eq!(
+            default_model_context_window("gpt-5.1-codex-mini"),
+            Some(400_000)
+        );
+        assert_eq!(default_model_context_window("gpt-5.3-codex"), Some(400_000));
+    }
+
+    #[test]
+    fn catalog_context_window_for_unknown_model_is_none() {
+        assert_eq!(default_model_context_window("unknown-model"), None);
     }
 }

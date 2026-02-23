@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "discord_client_id": "1470480085453770854",
   "discord_public_key": "29e563eeb755ae71d940c1b11d49dd3282a8886cd8b8cab829b2a14fcedad247",
   "privacy": {
@@ -27,5 +27,9 @@
       "gpt-5.3-codex-latest": "gpt-5.2-codex"
     },
     "overrides": {}
+  },
+  "openai_plan": {
+    "tier": "pro",
+    "show_price": true
   }
 }

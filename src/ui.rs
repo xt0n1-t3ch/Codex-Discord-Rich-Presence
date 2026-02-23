@@ -14,8 +14,8 @@ use crate::config::TerminalLogoMode;
 use crate::metrics::MetricsSnapshot;
 use crate::session::{CodexSessionSnapshot, RateLimits, UsageWindow};
 use crate::util::{
-    format_cost, format_time_until, format_token_triplet, format_tokens, human_duration, now_local,
-    progress_bar, truncate,
+    format_cost, format_model_name, format_time_until, format_token_triplet, format_tokens,
+    human_duration, now_local, progress_bar, truncate,
 };
 
 const FOOTER_ROWS: u16 = 1;
@@ -99,6 +99,7 @@ pub struct RenderData<'a> {
     pub stale_secs: u64,
     pub show_activity: bool,
     pub show_activity_target: bool,
+    pub openai_plan_label: &'a str,
     pub logo_mode: TerminalLogoMode,
     pub logo_path: Option<&'a str>,
     pub active: Option<&'a CodexSessionSnapshot>,
@@ -172,12 +173,13 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     let mut signature = String::with_capacity(768);
     let _ = write!(
         signature,
-        "{}|{}|{}|{}|{}|{}|",
+        "{}|{}|{}|{}|{}|{}|{}|",
         data.mode_label,
         data.discord_status,
         data.client_id_configured,
         data.show_activity,
         data.show_activity_target,
+        data.openai_plan_label,
         data.sessions.len()
     );
 
@@ -326,29 +328,60 @@ fn render_active_section(
         return Ok(());
     }
 
+    let activity_text = if data.show_activity {
+        active
+            .activity
+            .as_ref()
+            .map(|item| item.to_text(data.show_activity_target))
+            .unwrap_or_else(|| "Idle".to_string())
+    } else {
+        "hidden".to_string()
+    };
     if !write_line(
         out,
         row,
         max_body_row,
         width,
-        &kv_line("Model", active.model.as_deref().unwrap_or("unknown")),
+        &kv_line("Activity", &activity_text),
     )? {
         return Ok(());
     }
 
-    if data.show_activity
-        && let Some(activity) = &active.activity
-    {
-        let activity_text = activity.to_text(data.show_activity_target);
-        if !write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &kv_line("Activity", &activity_text),
-        )? {
-            return Ok(());
-        }
+    let model_line = format!(
+        "{} | {}",
+        format_model_name(active.model.as_deref().unwrap_or("unknown")),
+        data.openai_plan_label
+    );
+    if !write_line(
+        out,
+        row,
+        max_body_row,
+        width,
+        &kv_line("Model", &truncate(&model_line, width.saturating_sub(13))),
+    )? {
+        return Ok(());
+    }
+
+    let context_text = active
+        .context_window
+        .as_ref()
+        .map(|context| {
+            format!(
+                "{}/{} used ({:.0}% left)",
+                format_tokens(context.used_tokens),
+                format_tokens(context.window_tokens),
+                context.remaining_percent
+            )
+        })
+        .unwrap_or_else(|| "n/a".to_string());
+    if !write_line(
+        out,
+        row,
+        max_body_row,
+        width,
+        &kv_line("Context", &context_text),
+    )? {
+        return Ok(());
     }
 
     if !matches!(layout, UiLayoutMode::Minimal) {
@@ -360,6 +393,15 @@ fn render_active_section(
         if !write_line(out, row, max_body_row, width, &token_line)? {
             return Ok(());
         }
+    }
+
+    let cost_text = if active.total_cost_usd > 0.0 {
+        format_cost(active.total_cost_usd)
+    } else {
+        "n/a".to_string()
+    };
+    if !write_line(out, row, max_body_row, width, &kv_line("Cost", &cost_text))? {
+        return Ok(());
     }
 
     let limits = data.effective_limits.unwrap_or(&active.limits);
@@ -477,7 +519,7 @@ fn render_metrics_section(
     {
         let top_line = format!(
             "Top model {} | {} | sessions {}",
-            truncate(&top_model.model_id, 24),
+            truncate(&format_model_name(&top_model.model_id), 24),
             format_cost(top_model.cost_usd),
             top_model.session_count
         );
@@ -530,13 +572,13 @@ fn render_recent_section(
 
         let marker = if idx == 0 { ">" } else { "-" };
         let branch = session.git_branch.as_deref().unwrap_or("n/a");
-        let model = session.model.as_deref().unwrap_or("unknown");
+        let model = format_model_name(session.model.as_deref().unwrap_or("unknown"));
 
         let header = format!(
             "{marker} {} | {} | {}",
             truncate(&session.project_name, 28),
             truncate(branch, 16),
-            truncate(model, 18)
+            truncate(&model, 18)
         );
         if !write_line(out, row, max_body_row, width, &header)? {
             break;

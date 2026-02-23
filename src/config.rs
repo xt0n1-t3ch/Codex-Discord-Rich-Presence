@@ -13,7 +13,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 4;
+const CONFIG_SCHEMA_VERSION: u32 = 5;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
     "29e563eeb755ae71d940c1b11d49dd3282a8886cd8b8cab829b2a14fcedad247";
@@ -27,6 +27,7 @@ pub struct PresenceConfig {
     pub privacy: PrivacyConfig,
     pub display: DisplayConfig,
     pub pricing: PricingConfig,
+    pub openai_plan: OpenAiPlanDisplayConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +49,65 @@ pub struct PrivacyConfig {
 pub struct PricingConfig {
     pub aliases: BTreeMap<String, String>,
     pub overrides: BTreeMap<String, ModelPricingOverride>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiPlanTier {
+    Free,
+    Go,
+    Plus,
+    #[default]
+    Pro,
+}
+
+impl OpenAiPlanTier {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Free => "Free",
+            Self::Go => "Go",
+            Self::Plus => "Plus",
+            Self::Pro => "Pro",
+        }
+    }
+
+    pub fn monthly_price_usd(self) -> u32 {
+        match self {
+            Self::Free => 0,
+            Self::Go => 8,
+            Self::Plus => 20,
+            Self::Pro => 200,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OpenAiPlanDisplayConfig {
+    pub tier: OpenAiPlanTier,
+    pub show_price: bool,
+}
+
+impl OpenAiPlanDisplayConfig {
+    pub fn label(&self) -> String {
+        if self.show_price {
+            return format!(
+                "{} (${}/month)",
+                self.tier.title(),
+                self.tier.monthly_price_usd()
+            );
+        }
+        self.tier.title().to_string()
+    }
+}
+
+impl Default for OpenAiPlanDisplayConfig {
+    fn default() -> Self {
+        Self {
+            tier: OpenAiPlanTier::Pro,
+            show_price: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -106,6 +166,7 @@ impl Default for PresenceConfig {
             privacy: PrivacyConfig::default(),
             display: DisplayConfig::default(),
             pricing: PricingConfig::default(),
+            openai_plan: OpenAiPlanDisplayConfig::default(),
         }
     }
 }
@@ -633,12 +694,13 @@ mod tests {
             privacy: PrivacyConfig::default(),
             display: DisplayConfig::default(),
             pricing: PricingConfig::default(),
+            openai_plan: OpenAiPlanDisplayConfig::default(),
         };
 
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 4);
+        assert_eq!(cfg.schema_version, 5);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
             Some(DEFAULT_DISCORD_CLIENT_ID)
@@ -647,6 +709,8 @@ mod tests {
             cfg.discord_public_key.as_deref(),
             Some(DEFAULT_DISCORD_PUBLIC_KEY)
         );
+        assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro);
+        assert!(cfg.openai_plan.show_price);
     }
 
     #[test]
@@ -689,5 +753,22 @@ mod tests {
             Some("gpt-5.2-codex")
         );
         assert!(cfg.pricing.overrides.contains_key("gpt-5.2-codex"));
+    }
+
+    #[test]
+    fn default_openai_plan_is_pro_with_price() {
+        let cfg = PresenceConfig::default();
+        assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro);
+        assert!(cfg.openai_plan.show_price);
+        assert_eq!(cfg.openai_plan.label(), "Pro ($200/month)");
+    }
+
+    #[test]
+    fn openai_plan_label_without_price_uses_tier_name_only() {
+        let cfg = OpenAiPlanDisplayConfig {
+            tier: OpenAiPlanTier::Go,
+            show_price: false,
+        };
+        assert_eq!(cfg.label(), "Go");
     }
 }

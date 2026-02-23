@@ -31,6 +31,23 @@ pub struct RateLimits {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum ContextWindowSource {
+    #[default]
+    Event,
+    Catalog,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ContextWindowSnapshot {
+    pub window_tokens: u64,
+    pub used_tokens: u64,
+    pub remaining_tokens: u64,
+    pub remaining_percent: f64,
+    pub source: ContextWindowSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum SessionActivityKind {
     #[default]
     Idle,
@@ -96,6 +113,7 @@ pub struct CodexSessionSnapshot {
     pub total_cost_usd: f64,
     pub cost_breakdown: TokenCostBreakdown,
     pub pricing_source: PricingSource,
+    pub context_window: Option<ContextWindowSnapshot>,
     pub limits: RateLimits,
     pub activity: Option<SessionActivitySnapshot>,
     pub started_at: Option<DateTime<Utc>>,
@@ -447,6 +465,7 @@ struct SessionAccumulator {
     last_input_tokens: Option<u64>,
     last_cached_input_tokens: Option<u64>,
     last_output_tokens: Option<u64>,
+    model_context_window: Option<u64>,
     limits: RateLimits,
     last_token_event_at: Option<DateTime<Utc>>,
     activity_tracker: ActivityTracker,
@@ -700,6 +719,9 @@ impl SessionAccumulator {
                         let last_output = self.last_output_tokens.unwrap_or(0);
                         self.last_turn_tokens = Some(last_input + last_output);
                     }
+                    if let Some(context_window) = model_context_window_from_info(payload) {
+                        self.model_context_window = Some(context_window);
+                    }
 
                     let parsed_limits = parse_rate_limits(payload.get("rate_limits"));
                     if limits_present(&parsed_limits) {
@@ -829,6 +851,12 @@ impl SessionAccumulator {
             self.output_tokens_total,
             pricing_config,
         );
+        let context_window = build_context_window_snapshot(
+            self.model.as_deref(),
+            self.model_context_window,
+            self.last_turn_tokens,
+            self.session_total_tokens,
+        );
 
         Some(CodexSessionSnapshot {
             session_id: self.session_id.clone().unwrap_or(fallback_id),
@@ -850,6 +878,7 @@ impl SessionAccumulator {
             total_cost_usd: cost.total_cost_usd,
             cost_breakdown: cost.breakdown,
             pricing_source: cost.source,
+            context_window,
             limits: self.limits.clone(),
             activity,
             started_at: self.started_at,
@@ -878,13 +907,13 @@ fn classify_shell_command(arguments: &str) -> PendingActivity {
 
     PendingActivity {
         kind: SessionActivityKind::RunningCommand,
-        target: Some(truncate_activity_target(command, 72)),
+        target: Some(summarize_command_for_presence(&command, 72)),
     }
 }
 
 fn classify_function_call(name: &str, arguments: &str) -> PendingActivity {
     match name {
-        "shell_command" => classify_shell_command(arguments),
+        "shell_command" | "exec_command" => classify_shell_command(arguments),
         "view_image" => PendingActivity {
             kind: SessionActivityKind::ReadingFile,
             target: extract_view_image_target(arguments),
@@ -932,12 +961,53 @@ fn web_search_target(payload: &Value) -> Option<String> {
 }
 
 fn shell_command_text(arguments: &str) -> String {
-    if let Ok(value) = serde_json::from_str::<Value>(arguments)
-        && let Some(command) = value.get("command").and_then(Value::as_str)
-    {
-        return command.to_string();
+    if let Ok(value) = serde_json::from_str::<Value>(arguments) {
+        if let Some(command) = value.get("command").and_then(Value::as_str) {
+            return command.to_string();
+        }
+        if let Some(command) = value.get("cmd").and_then(Value::as_str) {
+            return command.to_string();
+        }
     }
     arguments.to_string()
+}
+
+fn summarize_command_for_presence(command: &str, max_len: usize) -> String {
+    let tokens: Vec<String> = command
+        .split_whitespace()
+        .map(clean_shell_token)
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens.is_empty() {
+        return truncate_activity_target(command.trim().to_string(), max_len);
+    }
+
+    let first = tokens[0].clone();
+    let second = tokens.get(1).cloned();
+    let summary = match (first.as_str(), second.as_deref()) {
+        ("rg", Some("--files")) => "rg --files".to_string(),
+        ("cargo", Some(sub)) => format!("cargo {sub}"),
+        ("sed", Some("-n")) => "sed -n".to_string(),
+        ("git", Some(sub)) => format!("git {sub}"),
+        ("cmd", Some("/c")) => "cmd /c".to_string(),
+        ("powershell", Some(sub)) => format!("powershell {sub}"),
+        ("pwsh", Some(sub)) => format!("pwsh {sub}"),
+        (_, Some(sub)) if !sub.starts_with('-') && sub.len() <= 18 => {
+            format!("{first} {sub}")
+        }
+        _ => first,
+    };
+
+    truncate_activity_target(summary, max_len)
+}
+
+fn clean_shell_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_matches('`')
+        .to_string()
 }
 
 fn extract_view_image_target(arguments: &str) -> Option<String> {
@@ -1282,6 +1352,10 @@ fn total_output_tokens_from_info(payload: &Value) -> Option<u64> {
     uint_at(payload, &["info", "total_token_usage", "output_tokens"])
 }
 
+fn model_context_window_from_info(payload: &Value) -> Option<u64> {
+    uint_at(payload, &["info", "model_context_window"])
+}
+
 fn last_input_tokens_from_info(payload: &Value) -> Option<u64> {
     uint_at(payload, &["info", "last_token_usage", "input_tokens"])
 }
@@ -1295,6 +1369,42 @@ fn last_cached_input_tokens_from_info(payload: &Value) -> Option<u64> {
 
 fn last_output_tokens_from_info(payload: &Value) -> Option<u64> {
     uint_at(payload, &["info", "last_token_usage", "output_tokens"])
+}
+
+fn build_context_window_snapshot(
+    model_id: Option<&str>,
+    event_window_tokens: Option<u64>,
+    last_turn_tokens: Option<u64>,
+    session_total_tokens: Option<u64>,
+) -> Option<ContextWindowSnapshot> {
+    let (window_tokens, source) = if let Some(window_tokens) = event_window_tokens {
+        (window_tokens, ContextWindowSource::Event)
+    } else {
+        let fallback_window = cost::default_model_context_window(model_id.unwrap_or(""))?;
+        (fallback_window, ContextWindowSource::Catalog)
+    };
+    if window_tokens == 0 {
+        return None;
+    }
+    // Context usage must track active-turn usage first; session totals are cumulative and can
+    // greatly exceed context windows in long sessions.
+    let used_tokens = if let Some(last_turn_tokens) = last_turn_tokens {
+        last_turn_tokens
+    } else {
+        session_total_tokens.filter(|tokens| *tokens <= window_tokens)?
+    }
+    .min(window_tokens);
+
+    let remaining_tokens = window_tokens.saturating_sub(used_tokens);
+    let remaining_percent =
+        ((remaining_tokens as f64 / window_tokens as f64) * 100.0).clamp(0.0, 100.0);
+    Some(ContextWindowSnapshot {
+        window_tokens,
+        used_tokens,
+        remaining_tokens,
+        remaining_percent,
+        source,
+    })
 }
 
 fn parse_rate_limits(value: Option<&Value>) -> RateLimits {
@@ -1462,6 +1572,7 @@ mod tests {
             total_cost_usd: 0.0,
             cost_breakdown: TokenCostBreakdown::default(),
             pricing_source: PricingSource::Fallback,
+            context_window: None,
             limits: RateLimits::default(),
             activity: activity_kind.map(|kind| SessionActivitySnapshot {
                 kind,
@@ -1534,6 +1645,101 @@ mod tests {
         assert_eq!(primary.remaining_percent, 0.0);
         assert_eq!(secondary.used_percent, 0.0);
         assert_eq!(secondary.remaining_percent, 100.0);
+    }
+
+    #[test]
+    fn parses_running_activity_from_exec_command_cmd() {
+        let snapshot = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"exec-cmd","cwd":"C:\\repo\\app"}}
+{"timestamp":"2026-02-23T03:40:45Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rg --files --hidden -g '*.rs'\"}","call_id":"call_exec"}}"#,
+        );
+
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::RunningCommand);
+        assert_eq!(activity.target.as_deref(), Some("rg --files"));
+    }
+
+    #[test]
+    fn shell_command_accepts_cmd_argument_key() {
+        let snapshot = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"shell-cmd","cwd":"C:\\repo\\app"}}
+{"timestamp":"2026-02-23T03:40:45Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"cmd\":\"cargo test --all\"}","call_id":"call_shell"}}"#,
+        );
+
+        let activity = snapshot.activity.expect("activity");
+        assert_eq!(activity.kind, SessionActivityKind::RunningCommand);
+        assert_eq!(activity.target.as_deref(), Some("cargo test"));
+    }
+
+    #[test]
+    fn parses_context_window_from_token_event_info() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-02-23T03:40:38Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.3-codex"}}
+{"timestamp":"2026-02-23T03:40:45Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":15224,"cached_input_tokens":6528,"output_tokens":450,"total_tokens":15674},"last_token_usage":{"input_tokens":15224,"cached_input_tokens":6528,"output_tokens":450,"total_tokens":15674},"model_context_window":258400}}}"#,
+        );
+
+        let context = snapshot.context_window.expect("context window");
+        assert_eq!(context.window_tokens, 258_400);
+        assert_eq!(context.used_tokens, 15_674);
+        assert_eq!(context.remaining_tokens, 242_726);
+        assert!((context.remaining_percent - 93.93).abs() < 0.05);
+        assert_eq!(context.source, ContextWindowSource::Event);
+    }
+
+    #[test]
+    fn falls_back_to_catalog_context_window_when_event_window_is_missing() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-02-23T03:40:38Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.2"}}
+{"timestamp":"2026-02-23T03:40:45Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":120000},"last_token_usage":{"total_tokens":50000}}}}"#,
+        );
+
+        let context = snapshot.context_window.expect("context window");
+        assert_eq!(context.window_tokens, 400_000);
+        assert_eq!(context.used_tokens, 50_000);
+        assert_eq!(context.remaining_tokens, 350_000);
+        assert!((context.remaining_percent - 87.5).abs() < 0.01);
+        assert_eq!(context.source, ContextWindowSource::Catalog);
+    }
+
+    #[test]
+    fn falls_back_to_last_turn_tokens_when_session_total_is_missing_for_context_window() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-02-23T03:40:38Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.3-codex"}}
+{"timestamp":"2026-02-23T03:40:45Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":33000},"model_context_window":258400}}}"#,
+        );
+
+        let context = snapshot.context_window.expect("context window");
+        assert_eq!(context.window_tokens, 258_400);
+        assert_eq!(context.used_tokens, 33_000);
+        assert_eq!(context.remaining_tokens, 225_400);
+        assert!((context.remaining_percent - 87.23).abs() < 0.05);
+        assert_eq!(context.source, ContextWindowSource::Event);
+    }
+
+    #[test]
+    fn context_window_usage_is_incremental_since_context_compaction() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-02-23T04:09:07Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.3-codex"}}
+{"timestamp":"2026-02-23T04:09:08Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":11900000},"last_token_usage":{"total_tokens":22800},"model_context_window":258400}}}
+{"timestamp":"2026-02-23T04:09:09Z","type":"event_msg","payload":{"type":"context_compacted"}}
+{"timestamp":"2026-02-23T04:10:08Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":11934000},"last_token_usage":{"total_tokens":34000},"model_context_window":258400}}}"#,
+        );
+
+        let context = snapshot.context_window.expect("context window");
+        assert_eq!(context.window_tokens, 258_400);
+        assert_eq!(context.used_tokens, 34_000);
+        assert_eq!(context.remaining_tokens, 224_400);
+        assert!((context.remaining_percent - 86.84).abs() < 0.05);
+        assert_eq!(context.source, ContextWindowSource::Event);
+    }
+
+    #[test]
+    fn context_window_ignores_large_session_total_when_last_turn_is_missing() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-02-23T04:09:07Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.3-codex"}}
+{"timestamp":"2026-02-23T04:09:08Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9300000},"model_context_window":258400}}}"#,
+        );
+        assert!(snapshot.context_window.is_none());
     }
 
     #[test]
@@ -1709,6 +1915,7 @@ mod tests {
             total_cost_usd: 0.0,
             cost_breakdown: TokenCostBreakdown::default(),
             pricing_source: PricingSource::Fallback,
+            context_window: None,
             limits: RateLimits {
                 primary: Some(UsageWindow {
                     used_percent: 50.0,
@@ -1744,6 +1951,7 @@ mod tests {
             total_cost_usd: 0.0,
             cost_breakdown: TokenCostBreakdown::default(),
             pricing_source: PricingSource::Fallback,
+            context_window: None,
             limits: RateLimits {
                 primary: Some(UsageWindow {
                     used_percent: 20.0,

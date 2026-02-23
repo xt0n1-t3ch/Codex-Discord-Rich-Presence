@@ -24,6 +24,9 @@
 - Discord Rich Presence keepalive in idle mode (persistent idle card + heartbeat + reconnect backoff).
 - Always-visible `Recent Sessions` section with adaptive compact fallback.
 - Action-first Discord details/state with deterministic truncation and compact token/cost telemetry.
+- Accurate context-window usage from active turn usage (`last_token_usage`) instead of cumulative session totals.
+- Accurate command activity classification for modern Codex tool calls (`exec_command` + `shell_command`).
+- Human-readable model labels (`GPT-5.3-Codex`, `GPT-5.1-Codex-Mini`) with OpenAI plan label next to model.
 - Full metrics tracking with per-model aggregation and persisted reports (`JSON` + `Markdown`).
 - File activity labels sanitized to basename (`Editing test.ts` instead of full path).
 - Semantic remaining-limit bars (`5h`, `7d`) with color thresholds.
@@ -39,8 +42,8 @@ cargo build --release
 
 Local build output (Cargo target directory):
 
-- Windows: `releases/.cargo-target/release/codex-discord-presence.exe`
-- Linux/macOS: `releases/.cargo-target/release/codex-discord-presence`
+- Windows: `releases/windows/codex-discord-presence.exe` (via `build-dist.ps1`)
+- Linux/macOS: standard Cargo target output for your host toolchain
 
 Windows convenience build (writes only under `releases/`):
 
@@ -51,16 +54,7 @@ Windows convenience build (writes only under `releases/`):
 Direct executable paths after `build-dist.ps1`:
 
 - `releases/windows/codex-discord-presence.exe`
-- `releases/windows/x64/executables/codex-discord-presence.exe`
-
-Release artifact structure:
-
-- Windows: `releases/windows/x64/executables/codex-discord-presence.exe`
-- Windows archives/checksums: `releases/windows/x64/archives/*`
-- Linux: `releases/linux/distros/x64/executables/codex-discord-presence`
-- Linux archives/checksums: `releases/linux/distros/x64/archives/*`
-- macOS x64: `releases/macos/x64/executables/codex-discord-presence`
-- macOS arm64: `releases/macos/arm64/executables/codex-discord-presence`
+- `releases/windows/codex-discord-presence.next.exe` (only if the main `.exe` is locked)
 
 ### Download release binaries
 
@@ -83,11 +77,13 @@ Config file:
 
 Defaults:
 
-- `schema_version`: `4`
+- `schema_version`: `5`
 - `discord_client_id`: `1470480085453770854`
 - `display.large_image_key`: `codex-logo`
 - `display.small_image_key`: `openai`
 - `privacy.show_cost`: `true`
+- `openai_plan.tier`: `pro`
+- `openai_plan.show_price`: `true`
 - `poll_interval_seconds`: `2`
 - `active_sticky_window_seconds`: `3600` (runtime env)
 - `pricing.aliases.gpt-5.3-codex`: `gpt-5.2-codex`
@@ -96,6 +92,7 @@ Pricing config supports:
 
 - `pricing.aliases`: map model ids to another model's catalog pricing.
 - `pricing.overrides`: explicit per-model pricing override in USD per million tokens.
+- `openai_plan`: display tier next to model in Discord/TUI (`free`, `go`, `plus`, `pro`).
 
 Metrics artifacts:
 
@@ -122,9 +119,11 @@ Environment overrides:
 
 ## Documentation
 
+- Docs index: `docs/README.md`
 - API: `docs/api/codex-presence.md`
 - UI: `docs/ui/UI_SITEMAP.md`
 - Config schema: `docs/database/schema.md`
+- Contributors: `CONTRIBUTORS.md`
 
 ## Credits
 

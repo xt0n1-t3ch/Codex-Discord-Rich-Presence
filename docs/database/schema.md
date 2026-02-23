@@ -7,7 +7,7 @@ This project has no relational database.
 ### 1) Config file
 
 - Path: `~/.codex/discord-presence-config.json`
-- Schema version: `4` (non-breaking additions only)
+- Schema version: `5` (non-breaking additions only)
 - Fields:
   - `schema_version: number`
   - `discord_client_id: string | null`
@@ -32,6 +32,18 @@ This project has no relational database.
   - `pricing: object`
     - `aliases: Record<string, string>` (normalized lowercase model keys)
     - `overrides: Record<string, { input_per_million: number, cached_input_per_million?: number, output_per_million: number }>`
+  - `openai_plan: object`
+    - `tier: "free" | "go" | "plus" | "pro"`
+    - `show_price: boolean`
+
+### Pricing Defaults (Catalog)
+
+- `gpt-5.2-codex`: input `1.75`, cached input `0.175`, output `14.0` (USD / 1M tokens)
+- `gpt-5.2`: input `1.75`, cached input `0.175`, output `14.0`
+- `gpt-5.1-codex-max`: input `1.25`, cached input `0.125`, output `10.0`
+- `gpt-5.1-codex-mini`: input `0.25`, cached input `0.025`, output `2.0`
+- `gpt-5.3-codex` pricing alias defaults to `gpt-5.2-codex` until official pricing exists.
+- Default `openai_plan`: `pro` with `show_price = true`.
 
 ### 2) Lock file
 
@@ -89,6 +101,12 @@ Per session:
 - `total_cost_usd`
 - `cost_breakdown`
 - `pricing_source`
+- `context_window`
+  - `window_tokens`
+  - `used_tokens`
+  - `remaining_tokens`
+  - `remaining_percent`
+  - `source: "event" | "catalog"`
 - `last_token_event_at`
 - `last_activity`
 - `activity.kind`
@@ -98,6 +116,17 @@ Per session:
 - `activity.last_effective_signal_at` (new non-breaking runtime field)
 - `activity.idle_candidate_at`
 - `activity.pending_calls`
+
+### Context Window Semantics
+
+- `window_tokens` priority:
+  1. `event_msg.token_count.info.model_context_window`
+  2. model catalog fallback (`cost::default_model_context_window`)
+- `used_tokens` priority:
+  1. `event_msg.token_count.info.last_token_usage.total_tokens` (active-turn context usage)
+  2. `event_msg.token_count.info.total_token_usage.total_tokens` only when `<= window_tokens`
+- If only cumulative totals exist and they already exceed the context window, `context_window` is omitted (`None`) to avoid displaying inaccurate usage.
+- Display semantics are incremental for the active context segment (`used/total`), not "remaining as used".
 
 ## Activity Lifecycle Rules
 

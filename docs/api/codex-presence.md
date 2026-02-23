@@ -62,13 +62,9 @@ codex-discord-presence doctor
 
 All generated build and release outputs are written under `releases/`:
 
-- Cargo target cache/output root: `releases/.cargo-target`
-- Windows executable output: `releases/windows/x64/executables/codex-discord-presence.exe`
-- Linux executable output: `releases/linux/distros/x64/executables/codex-discord-presence`
-- macOS executable outputs:
-  - `releases/macos/x64/executables/codex-discord-presence`
-  - `releases/macos/arm64/executables/codex-discord-presence`
-- Packaged archives/checksums are emitted into sibling `archives/` directories for each OS/arch path.
+- Windows executable output: `releases/windows/codex-discord-presence.exe`
+- Fallback when locked: `releases/windows/codex-discord-presence.next.exe`
+- Windows convenience build also cleans legacy artifact folders such as `dist/`, `releases/.cargo-target`, and `releases/windows/x64/`.
 
 ## Session Selection Contract
 
@@ -93,6 +89,9 @@ This ranking is used for both TUI primary card and Discord presence source.
 - assistant messages without a known phase fall back to `Waiting for input`.
 - `event_msg.agent_message` is treated as commentary progress (not immediate waiting).
 - `response_item.web_search_call` / `response_item.web_search_result` are treated as working activity signals.
+- `response_item.function_call` supports `shell_command` and `exec_command`.
+  - command text is read from JSON argument key `command` or `cmd`.
+  - running commands are summarized for presence readability (for example `rg --files`, `cargo test`, `sed -n`).
 - file read/edit targets are sanitized to basename (for example `src/session.rs` -> `session.rs`).
 - Sticky visibility extends sessions within `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` for:
   - working activity kinds
@@ -102,12 +101,15 @@ This ranking is used for both TUI primary card and Discord presence source.
 
 When privacy mode is disabled:
 
-- `details`: `<activity> • <project>`
+- `details`: `<activity> - <project>`
   - examples:
-    - `Reading app.rs • MCP Servers`
-    - `Thinking • Property Alpha (tony/mobile1)`
+    - `Reading app.rs - MCP Servers`
+    - `Thinking - Property Alpha (tony/mobile1)`
 - `state`: prioritized compact telemetry
-  - `<model> | I X C Y O Z | Last response N | Session total M | Cost $K | 5h left A% | 7d left B%`
+  - `<model> | <plan> • $cost • N tokens • Ctx U/T used (L% left) • 5h A% • 7d B%`
+  - model ids are display-formatted (for example `GPT-5.3-Codex`).
+  - truncation policy drops lower-priority tail fields first.
+  - model + plan and cost remain pinned whenever present.
   - bounded to Discord field limits (2..128 chars).
 
 When privacy mode is enabled:
@@ -137,7 +139,7 @@ Update behavior:
 ## Local Config Contract
 
 - Path: `~/.codex/discord-presence-config.json`
-- Schema: `4`
+- Schema: `5`
 - Key fields:
   - `discord_client_id`
   - `discord_public_key` (metadata)
@@ -154,6 +156,16 @@ Update behavior:
   - `display.terminal_logo_path`
   - `pricing.aliases` (model-id alias map)
   - `pricing.overrides` (per-model `input_per_million`, `cached_input_per_million`, `output_per_million`)
+  - `openai_plan.tier` (`free`, `go`, `plus`, `pro`)
+  - `openai_plan.show_price`
+
+## Context Window Contract
+
+- Preferred window source: `event_msg.token_count.info.model_context_window`.
+- Fallback window source: model catalog context window (for known families, e.g. GPT-5/Codex `400_000`).
+- `used_tokens` is taken from active-turn usage (`info.last_token_usage.total_tokens`) when available.
+- Fallback to session total is allowed only when the session total does not exceed the window.
+- This prevents false values like multi-million cumulative totals being shown as current context usage.
 
 ## Metrics Persistence Contract
 

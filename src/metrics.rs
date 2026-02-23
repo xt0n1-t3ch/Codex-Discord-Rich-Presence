@@ -324,6 +324,7 @@ mod tests {
                 output_cost_usd: cost / 4.0,
             },
             pricing_source: PricingSource::Exact,
+            context_window: None,
             limits: RateLimits::default(),
             activity: Some(SessionActivitySnapshot::default()),
             started_at: None,

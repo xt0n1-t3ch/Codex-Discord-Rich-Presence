@@ -35,6 +35,48 @@ pub fn format_delta_tokens(tokens: u64) -> String {
     format_tokens(tokens)
 }
 
+pub fn format_model_name(model_id: &str) -> String {
+    if model_id.trim().is_empty() {
+        return "unknown".to_string();
+    }
+
+    model_id
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .map(format_model_component)
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn format_model_component(component: &str) -> String {
+    let lower = component.to_ascii_lowercase();
+    match lower.as_str() {
+        "gpt" => "GPT".to_string(),
+        "codex" => "Codex".to_string(),
+        "mini" => "Mini".to_string(),
+        "max" => "Max".to_string(),
+        "nano" => "Nano".to_string(),
+        "turbo" => "Turbo".to_string(),
+        "preview" => "Preview".to_string(),
+        _ => {
+            if lower
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == 'x')
+            {
+                return lower;
+            }
+            if lower.starts_with('o') && lower.chars().skip(1).all(|ch| ch.is_ascii_digit()) {
+                return lower.to_ascii_uppercase();
+            }
+            let mut chars = lower.chars();
+            let Some(first) = chars.next() else {
+                return lower;
+            };
+            format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+        }
+    }
+}
+
 pub fn format_token_triplet(delta: Option<u64>, last: Option<u64>, total: Option<u64>) -> String {
     let mut parts = Vec::new();
     if let Some(value) = delta {
@@ -135,5 +177,15 @@ mod tests {
         assert_eq!(format_cost(0.0009), "$0.0009");
         assert_eq!(format_cost(0.1284), "$0.128");
         assert_eq!(format_cost(12.3456), "$12.35");
+    }
+
+    #[test]
+    fn model_name_formatting() {
+        assert_eq!(format_model_name("gpt-5.3-codex"), "GPT-5.3-Codex");
+        assert_eq!(
+            format_model_name("gpt-5.1-codex-mini"),
+            "GPT-5.1-Codex-Mini"
+        );
+        assert_eq!(format_model_name("o3"), "O3");
     }
 }

@@ -20,7 +20,7 @@ use crate::session::{
     collect_active_sessions_multi, latest_limits_source, preferred_active_session,
 };
 use crate::ui::{self, RenderData};
-use crate::util::{format_cost, format_time_until, format_token_triplet};
+use crate::util::{format_cost, format_model_name, format_time_until, format_token_triplet};
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
 
@@ -77,11 +77,13 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         if let Some(source) = limits_source {
             println!("limits_source_session: {}", source.session_id);
         }
+        let openai_plan_label = config.openai_plan.label();
         print_active_summary(
             active,
             limits_source.map(|source| &source.limits),
             config.privacy.show_activity,
             config.privacy.show_activity_target,
+            &openai_plan_label,
         );
     }
     Ok(())
@@ -186,6 +188,7 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                     debug!(error = %err, "discord presence update failed");
                 }
 
+                let openai_plan_label = config.openai_plan.label();
                 let render = RenderData {
                     running_for: started.elapsed(),
                     mode_label: "Smart Foreground",
@@ -195,6 +198,7 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                     stale_secs: runtime.stale_threshold.as_secs(),
                     show_activity: config.privacy.show_activity,
                     show_activity_target: config.privacy.show_activity_target,
+                    openai_plan_label: openai_plan_label.as_str(),
                     logo_mode: config.display.terminal_logo_mode.clone(),
                     logo_path: config.display.terminal_logo_path.as_deref(),
                     active,
@@ -493,11 +497,16 @@ fn print_active_summary(
     effective_limits: Option<&RateLimits>,
     show_activity: bool,
     show_activity_target: bool,
+    openai_plan_label: &str,
 ) {
     println!("active_session:");
     println!("  project: {}", active.project_name);
     println!("  path: {}", active.cwd.display());
-    println!("  model: {}", active.model.as_deref().unwrap_or("unknown"));
+    println!(
+        "  model: {} | {}",
+        format_model_name(active.model.as_deref().unwrap_or("unknown")),
+        openai_plan_label
+    );
     println!(
         "  branch: {}",
         active.git_branch.as_deref().unwrap_or("n/a")
@@ -522,6 +531,16 @@ fn print_active_summary(
             active.session_total_tokens
         )
     );
+    if let Some(context) = &active.context_window {
+        println!(
+            "  context: {}/{} used ({:.0}% left)",
+            crate::util::format_tokens(context.used_tokens),
+            crate::util::format_tokens(context.window_tokens),
+            context.remaining_percent
+        );
+    } else {
+        println!("  context: n/a");
+    }
 
     let limits = effective_limits.unwrap_or(&active.limits);
     if let Some(primary) = &limits.primary {

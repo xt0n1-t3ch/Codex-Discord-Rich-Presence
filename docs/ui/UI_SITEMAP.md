@@ -43,9 +43,11 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 - Client ID + polling/stale details in `Full`/`Compact`.
 
 3. Active Session
-- Project, path (full mode), model, branch.
-- Activity line (privacy-aware).
-- Token triplet (`This update | Last response | Session total`).
+- Project, activity, model + OpenAI plan tier, context window (`used/total` + `% left`).
+- Model label uses display formatting (`GPT-5.3-Codex`, `GPT-5.1-Codex-Mini`) instead of raw lowercase ids.
+- Context `used` value is sourced from active-turn usage (`last_token_usage`) to avoid cumulative-session inflation.
+- Token triplet (`This update | Last response | Session total`) in full/compact modes.
+- Cost line + branch (path in full mode).
 - Remaining limit bars (`5h`, `7d`) with semantic color.
 
 4. Metrics
@@ -70,6 +72,8 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 ## 4. Activity Surface Rules
 
 - Priority labels: `Thinking`, `Reading <target>`, `Editing <target>`, `Running command`, `Waiting for input`, `Idle`.
+- Function-call command parsing supports both `arguments.command` and `arguments.cmd`.
+- `Running command` targets use compact command summaries to avoid ambiguous labels.
 - File activity targets are sanitized to basename for readability/privacy.
   - Example: `Editing c:/tony/test.ts` -> `Editing test.ts`.
 - Commentary handling:

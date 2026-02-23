@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::PresenceConfig;
 use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind};
-use crate::util::{format_cost, format_tokens};
+use crate::util::{format_cost, format_model_name, format_tokens};
 
 pub struct DiscordPresence {
     client_id: Option<String>,
@@ -372,7 +372,7 @@ fn presence_lines(
     let details = if config.privacy.show_activity {
         if let Some(activity) = &session.activity {
             format!(
-                "{} • {}",
+                "{} - {}",
                 activity.to_text(config.privacy.show_activity_target),
                 project_label
             )
@@ -393,20 +393,30 @@ fn presence_lines(
     if config.privacy.show_model
         && let Some(model) = &session.model
     {
-        state_parts.push(model.clone());
-    }
-    if config.privacy.show_tokens {
-        state_parts.extend(token_state_parts(session));
+        let label = format!(
+            "{} | {}",
+            format_model_name(model),
+            config.openai_plan.label()
+        );
+        state_parts.push(truncate_for_limit(&label, 72));
     }
     if config.privacy.show_cost && session.total_cost_usd > 0.0 {
-        state_parts.push(format!("Cost {}", format_cost(session.total_cost_usd)));
+        state_parts.push(format_cost(session.total_cost_usd));
+    }
+    if config.privacy.show_tokens
+        && let Some(tokens) = token_state_part(session)
+    {
+        state_parts.push(tokens);
+    }
+    if let Some(context) = context_state_part(session) {
+        state_parts.push(context);
     }
     if config.privacy.show_limits {
         if let Some(primary) = &limits.primary {
-            state_parts.push(format!("5h left {:.0}%", primary.remaining_percent));
+            state_parts.push(format!("5h {:.0}%", primary.remaining_percent));
         }
         if let Some(secondary) = &limits.secondary {
-            state_parts.push(format!("7d left {:.0}%", secondary.remaining_percent));
+            state_parts.push(format!("7d {:.0}%", secondary.remaining_percent));
         }
     }
 
@@ -415,35 +425,37 @@ fn presence_lines(
     } else {
         "Codex session"
     };
-    let state = compact_join_prioritized(&state_parts, 128, fallback);
+    let state = compact_join_prioritized(&state_parts, 128, fallback, " • ");
     (truncate_for_limit(&details, 128), state)
 }
 
-fn token_state_parts(session: &CodexSessionSnapshot) -> Vec<String> {
-    let mut parts = Vec::new();
-
-    if session.input_tokens_total > 0 || session.output_tokens_total > 0 {
-        parts.push(format!(
-            "I {} C {} O {}",
-            format_tokens(session.input_tokens_total),
-            format_tokens(session.cached_input_tokens_total),
-            format_tokens(session.output_tokens_total)
-        ));
-    }
-
-    if let Some(last) = session.last_turn_tokens {
-        parts.push(format!("Last {}", format_tokens(last)));
-    }
-    if let Some(total) = session.session_total_tokens {
-        parts.push(format!("Total {}", format_tokens(total)));
-    }
-    if parts.is_empty()
-        && let Some(delta) = session.session_delta_tokens
+fn token_state_part(session: &CodexSessionSnapshot) -> Option<String> {
+    if let Some(total) = session.session_total_tokens
+        && total > 0
     {
-        parts.push(format!("Update {}", format_tokens(delta)));
+        return Some(format!("{} tokens", format_tokens(total)));
     }
+    if let Some(last) = session.last_turn_tokens
+        && last > 0
+    {
+        return Some(format!("Last {}", format_tokens(last)));
+    }
+    if let Some(delta) = session.session_delta_tokens
+        && delta > 0
+    {
+        return Some(format!("Update {}", format_tokens(delta)));
+    }
+    None
+}
 
-    parts
+fn context_state_part(session: &CodexSessionSnapshot) -> Option<String> {
+    let context = session.context_window.as_ref()?;
+    Some(format!(
+        "Ctx {}/{} used ({:.0}% left)",
+        format_tokens(context.used_tokens),
+        format_tokens(context.window_tokens),
+        context.remaining_percent
+    ))
 }
 
 fn small_asset_for_activity(
@@ -553,7 +565,12 @@ fn parse_discord_asset_keys(body: &str) -> Result<HashSet<String>> {
         .collect())
 }
 
-fn compact_join_prioritized(parts: &[String], max: usize, fallback: &str) -> String {
+fn compact_join_prioritized(
+    parts: &[String],
+    max: usize,
+    fallback: &str,
+    separator: &str,
+) -> String {
     let mut out = String::new();
     for part in parts {
         if part.trim().is_empty() {
@@ -569,8 +586,8 @@ fn compact_join_prioritized(parts: &[String], max: usize, fallback: &str) -> Str
             continue;
         }
 
-        if out.len() + 3 + part.len() <= max {
-            out.push_str(" | ");
+        if out.len() + separator.len() + part.len() <= max {
+            out.push_str(separator);
             out.push_str(part);
         }
     }
@@ -596,9 +613,9 @@ fn truncate_for_limit(input: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::PresenceConfig;
+    use crate::config::{OpenAiPlanTier, PresenceConfig};
     use crate::cost::{PricingSource, TokenCostBreakdown};
-    use crate::session::{RateLimits, UsageWindow};
+    use crate::session::{ContextWindowSnapshot, ContextWindowSource, RateLimits, UsageWindow};
     use std::path::PathBuf;
     use std::time::SystemTime;
 
@@ -627,6 +644,13 @@ mod tests {
                 output_cost_usd: 0.534,
             },
             pricing_source: PricingSource::Alias,
+            context_window: Some(ContextWindowSnapshot {
+                window_tokens: 258_400,
+                used_tokens: 15_674,
+                remaining_tokens: 242_726,
+                remaining_percent: 93.94,
+                source: ContextWindowSource::Event,
+            }),
             limits: RateLimits {
                 primary: Some(UsageWindow {
                     used_percent: 36.0,
@@ -654,10 +678,45 @@ mod tests {
         let session = sample_session();
         let config = PresenceConfig::default();
         let (_details, state) = presence_lines(&session, Some(&session.limits), &config);
-        assert!(state.contains("5h left 64%"));
-        assert!(state.contains("7d left 18%"));
-        assert!(state.contains("Cost"));
-        assert!(state.contains("I 24.0K"));
+        assert!(state.contains("GPT-5.3-Codex | Pro ($200/month)"));
+        assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
+        assert!(state.contains("30.0K tokens"));
+        assert!(state.contains("Ctx 15.7K/258.4K used (94% left)"));
+        assert!(state.contains("5h 64%"));
+        assert!(state.contains("7d 18%"));
+    }
+
+    #[test]
+    fn state_keeps_priority_when_length_is_limited() {
+        let mut session = sample_session();
+        session.model = Some("gpt-5.3-codex-ultra-long-variant-name-for-tests".to_string());
+        let mut config = PresenceConfig::default();
+        config.openai_plan.tier = OpenAiPlanTier::Pro;
+        let (_details, state) = presence_lines(&session, Some(&session.limits), &config);
+        let model_pos = state.find("GPT-5.3-Codex-Ultra-Long-Variant-Name-For-Tests | Pro");
+        let cost_pos = state.find('$');
+        assert!(model_pos.is_some(), "state must keep model+plan");
+        assert!(cost_pos.is_some(), "state must keep cost");
+    }
+
+    #[test]
+    fn details_use_activity_dash_project_format() {
+        let mut session = sample_session();
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: crate::session::SessionActivityKind::RunningCommand,
+            target: Some("rg --files".to_string()),
+            observed_at: None,
+            last_active_at: None,
+            last_effective_signal_at: None,
+            idle_candidate_at: None,
+            pending_calls: 0,
+        });
+        let config = PresenceConfig::default();
+        let (details, _state) = presence_lines(&session, Some(&session.limits), &config);
+        assert_eq!(
+            details,
+            "Running command rg --files - project-alpha (feature/main)"
+        );
     }
 
     #[test]
@@ -667,8 +726,8 @@ mod tests {
             "token-summary".to_string(),
             "very-long-tail-that-should-not-fit".to_string(),
         ];
-        let state = compact_join_prioritized(&parts, 22, "fallback");
-        assert_eq!(state, "model | token-summary");
+        let state = compact_join_prioritized(&parts, 24, "fallback", " • ");
+        assert_eq!(state, "model • token-summary");
     }
 
     #[test]
@@ -687,7 +746,7 @@ mod tests {
         let (details, state) = presence_lines(&session, Some(&session.limits), &config);
         assert!(details.starts_with("Editing"));
         assert!(details.contains("project-alpha"));
-        assert!(state.contains("gpt-5.3-codex"));
+        assert!(state.contains("GPT-5.3-Codex"));
     }
 
     #[test]

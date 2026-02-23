@@ -5,16 +5,32 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $projectRoot
 
 $releaseRoot = Join-Path $projectRoot "releases"
-$cargoTargetRoot = Join-Path $releaseRoot ".cargo-target"
+$cargoTargetRoot = Join-Path $releaseRoot "_build-cache"
 $env:CARGO_TARGET_DIR = $cargoTargetRoot
 
 Write-Host "Building release binary (output root: $releaseRoot)..."
-cargo build --release
+$cargoCandidates = @(
+    (Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"),
+    "cargo"
+)
+$cargoCmd = $cargoCandidates | Where-Object {
+    ($_ -eq "cargo") -or (Test-Path $_)
+} | Select-Object -First 1
+if (-not $cargoCmd) {
+    throw "cargo executable not found. Install Rust toolchain or add cargo to PATH."
+}
+
+& $cargoCmd build --release
+if ((Get-Variable LASTEXITCODE -ErrorAction SilentlyContinue) -and $LASTEXITCODE -ne 0) {
+    throw "cargo build --release failed with exit code $LASTEXITCODE"
+}
 
 $binaryName = "codex-discord-presence.exe"
 $releaseCandidates = @(
     (Join-Path $cargoTargetRoot "release\$binaryName"),
-    (Join-Path $cargoTargetRoot "x86_64-pc-windows-msvc\release\$binaryName")
+    (Join-Path $cargoTargetRoot "x86_64-pc-windows-msvc\release\$binaryName"),
+    (Join-Path $releaseRoot ".cargo-target\release\$binaryName"),
+    (Join-Path $releaseRoot ".cargo-target\x86_64-pc-windows-msvc\release\$binaryName")
 )
 $releaseBinary = $releaseCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $releaseBinary) {
@@ -22,36 +38,41 @@ if (-not $releaseBinary) {
 }
 
 $windowsRoot = Join-Path $releaseRoot "windows"
-$windowsArchRoot = Join-Path $windowsRoot "x64"
-$executablesDir = Join-Path $windowsArchRoot "executables"
-$archivesDir = Join-Path $windowsArchRoot "archives"
-New-Item -ItemType Directory -Force -Path $executablesDir | Out-Null
-New-Item -ItemType Directory -Force -Path $archivesDir | Out-Null
+New-Item -ItemType Directory -Force -Path $windowsRoot | Out-Null
 
 $rootBinary = Join-Path $windowsRoot $binaryName
-$archBinary = Join-Path $executablesDir $binaryName
-$archNextBinary = Join-Path $executablesDir "codex-discord-presence.next.exe"
+$nextBinary = Join-Path $windowsRoot "codex-discord-presence.next.exe"
 
-Copy-Item $releaseBinary $rootBinary -Force
 try {
-    Copy-Item $releaseBinary $archBinary -Force
+    Copy-Item $releaseBinary $rootBinary -Force
+    if (Test-Path $nextBinary) {
+        Remove-Item $nextBinary -Force -ErrorAction SilentlyContinue
+    }
 }
 catch {
-    Write-Warning "$archBinary is in use; writing $archNextBinary instead."
-    Copy-Item $releaseBinary $archNextBinary -Force
+    Write-Warning "$rootBinary is in use; writing $nextBinary instead."
+    Copy-Item $releaseBinary $nextBinary -Force
 }
 
-$archiveName = "codex-discord-presence-windows-x64.zip"
-$archivePath = Join-Path $archivesDir $archiveName
-Compress-Archive -Path (Join-Path $executablesDir $binaryName) -DestinationPath $archivePath -Force
+$legacyPaths = @(
+    (Join-Path $projectRoot "dist"),
+    (Join-Path $releaseRoot ".cargo-target"),
+    (Join-Path $releaseRoot "windows\x64"),
+    (Join-Path $releaseRoot "linux"),
+    (Join-Path $releaseRoot "macos"),
+    $cargoTargetRoot
+)
+foreach ($path in $legacyPaths | Select-Object -Unique) {
+    if (Test-Path $path) {
+        try {
+            Remove-Item $path -Recurse -Force
+        }
+        catch {
+            Write-Warning "Could not remove $path (possibly locked)."
+        }
+    }
+}
 
-$shaPath = "$archivePath.sha256"
-$hash = (Get-FileHash $archivePath -Algorithm SHA256).Hash.ToLower()
-"$hash  $archiveName" | Out-File $shaPath -Encoding ascii
-
-Write-Host "Ready (releases-only layout):"
+Write-Host "Ready (simple releases layout):"
 Write-Host " - $rootBinary"
-Write-Host " - $archBinary"
-Write-Host " - $archNextBinary (fallback when locked)"
-Write-Host " - $archivePath"
-Write-Host " - $shaPath"
+Write-Host " - $nextBinary (fallback when locked)"
