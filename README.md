@@ -23,7 +23,7 @@ It automatically detects whether your active session is coming from:
 
 - Codex CLI
 - Codex VS Code Extension
-- Codex App (Windows, Linux, macOS)
+- Codex App
 
 and switches branding, client ID, and visual assets accordingly.
 
@@ -143,6 +143,10 @@ Environment overrides:
 ## CI and Release Pipelines
 
 - CI matrix validates Linux, macOS, and Windows on every push/PR.
+- Release pipeline runs automatically and publishes packaged artifacts:
+  - stable releases on `v*.*.*` tags
+  - continuous pre-releases from `main`
+- Release notes include a generated summary of implemented changes plus touched files.
 - Release matrix builds platform artifacts for:
   - `x86_64-unknown-linux-gnu`
   - `x86_64-apple-darwin`

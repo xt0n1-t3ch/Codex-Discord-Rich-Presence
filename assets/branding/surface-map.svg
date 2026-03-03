@@ -1,59 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
-  <title id="title">Codex Discord Rich Presence Surface Map</title>
-  <desc id="desc">Visual summary of automatic surface-aware switching between Codex CLI, Codex VS Code Extension, and Codex App.</desc>
+  <title id="title">Codex Discord Rich Presence Runtime Map</title>
+  <desc id="desc">Ultra-dark two-panel map showing session surfaces and runtime detection logic.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#05070d"/>
-      <stop offset="100%" stop-color="#0c1220"/>
+      <stop offset="0%" stop-color="#040404"/>
+      <stop offset="100%" stop-color="#0a0a0a"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#090909"/>
+      <stop offset="100%" stop-color="#111111"/>
     </linearGradient>
     <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0a111d"/>
-      <stop offset="100%" stop-color="#101b2f"/>
+      <stop offset="0%" stop-color="#0e0e0e"/>
+      <stop offset="100%" stop-color="#161616"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#6a7cff"/>
-      <stop offset="100%" stop-color="#89b7ff"/>
-    </linearGradient>
-    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="8" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
   </defs>
 
   <rect width="1280" height="420" fill="url(#bg)"/>
-  <rect x="28" y="22" width="1224" height="376" rx="24" fill="#070d19" stroke="#1d2a43"/>
+  <rect x="28" y="24" width="1224" height="372" rx="24" fill="url(#panel)" stroke="#232323"/>
 
-  <text x="640" y="72" fill="#f4f8ff" font-size="40" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">Automatic Surface-Aware Presence</text>
-  <text x="640" y="106" fill="#b7c6e6" font-size="21" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Codex Discord Rich Presence adapts branding and client ID based on live session origin.</text>
+  <text x="640" y="76" fill="#ffffff" font-size="40" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">Automatic Profile Selection</text>
+  <text x="640" y="108" fill="#b9b9b9" font-size="20" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">One runtime, two profile paths, zero manual switching.</text>
 
-  <rect x="72" y="146" width="360" height="206" rx="18" fill="url(#card)" stroke="#2a3c5c"/>
-  <rect x="460" y="146" width="360" height="206" rx="18" fill="url(#card)" stroke="#2a3c5c"/>
-  <rect x="848" y="146" width="360" height="206" rx="18" fill="url(#card)" stroke="#2a3c5c"/>
+  <rect x="84" y="150" width="516" height="212" rx="18" fill="url(#card)" stroke="#2b2b2b"/>
+  <rect x="680" y="150" width="516" height="212" rx="18" fill="url(#card)" stroke="#2b2b2b"/>
 
-  <text x="252" y="186" fill="#ffffff" font-size="23" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">
-    <tspan x="252" dy="0">Codex CLI /</tspan>
-    <tspan x="252" dy="30">Codex VS Code Extension</tspan>
-  </text>
-  <text x="252" y="232" fill="#c8d6f4" font-size="20" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Uses Codex branding</text>
-  <text x="252" y="262" fill="#9eb4dd" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">`discord_client_id`</text>
-  <text x="252" y="288" fill="#9eb4dd" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Large image: `codex-logo`</text>
+  <text x="342" y="196" fill="#ffffff" font-size="33" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">Session Surfaces</text>
+  <text x="342" y="236" fill="#d0d0d0" font-size="22" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Codex CLI</text>
+  <text x="342" y="266" fill="#d0d0d0" font-size="22" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Codex VS Code Extension</text>
+  <text x="342" y="296" fill="#d0d0d0" font-size="22" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Codex App</text>
+  <text x="342" y="334" fill="#9c9c9c" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">The runtime observes active surface metadata.</text>
 
-  <text x="640" y="194" fill="#ffffff" font-size="30" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">Runtime Detection</text>
-  <text x="640" y="232" fill="#c8d6f4" font-size="20" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Reads `session_meta` source</text>
-  <text x="640" y="262" fill="#9eb4dd" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">`originator` / `source`</text>
-  <text x="640" y="288" fill="#9eb4dd" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Switches app profile automatically</text>
+  <text x="938" y="196" fill="#ffffff" font-size="33" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">Runtime Detection</text>
+  <text x="938" y="234" fill="#d0d0d0" font-size="20" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Reads `session_meta.originator` / `session_meta.source`</text>
+  <text x="938" y="266" fill="#c5c5c5" font-size="20" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Selects `discord_client_id` or `discord_client_id_desktop`</text>
+  <text x="938" y="298" fill="#c5c5c5" font-size="20" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Applies matching assets (`codex-logo` / `codex-app`)</text>
+  <text x="938" y="334" fill="#9c9c9c" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Presence updates stay consistent while surface changes.</text>
 
-  <text x="1028" y="194" fill="#ffffff" font-size="30" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">Codex App</text>
-  <text x="1028" y="232" fill="#c8d6f4" font-size="20" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Desktop-specific branding</text>
-  <text x="1028" y="262" fill="#9eb4dd" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">`discord_client_id_desktop`</text>
-  <text x="1028" y="288" fill="#9eb4dd" font-size="18" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">Large image: `codex-app`</text>
-
-  <line x1="432" y1="249" x2="460" y2="249" stroke="url(#accent)" stroke-width="4" stroke-linecap="round"/>
-  <line x1="820" y1="249" x2="848" y2="249" stroke="url(#accent)" stroke-width="4" stroke-linecap="round"/>
-
-  <circle cx="446" cy="249" r="5" fill="#89b7ff" filter="url(#softGlow)"/>
-  <circle cx="834" cy="249" r="5" fill="#89b7ff" filter="url(#softGlow)"/>
+  <line x1="600" y1="256" x2="680" y2="256" stroke="#8a8a8a" stroke-width="3" stroke-linecap="round"/>
+  <polygon points="674,248 694,256 674,264" fill="#8a8a8a"/>
 </svg>
