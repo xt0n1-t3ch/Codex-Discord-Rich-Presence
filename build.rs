@@ -1,6 +1,9 @@
-use std::env;
-use std::fs::File;
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "windows")]
+use std::{
+    env,
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/branding/codex-app.png");

@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
   workflow_dispatch:
@@ -92,12 +94,32 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: releases
+
+      - name: Derive release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "TAG_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+            echo "RELEASE_NAME=Codex Discord Rich Presence ${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+            echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
+            echo "TRACK=stable" >> "$GITHUB_ENV"
+          else
+            echo "TAG_NAME=build-${SHORT_SHA}" >> "$GITHUB_ENV"
+            echo "RELEASE_NAME=Codex Discord Rich Presence Build ${SHORT_SHA}" >> "$GITHUB_ENV"
+            echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
+            echo "TRACK=continuous" >> "$GITHUB_ENV"
+          fi
 
       - name: Flatten artifacts
         shell: bash
@@ -106,8 +128,35 @@ jobs:
           find releases -type f -maxdepth 10 \( -name "codex-discord-rich-presence*" -o -name "codex-app.png" \) -exec cp {} release-assets/ \;
           ls -lah release-assets
 
+      - name: Generate detailed release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "# Codex Discord Rich Presence"
+            echo
+            echo "Track: ${TRACK}"
+            echo "Commit: ${GITHUB_SHA}"
+            echo
+            echo "## Implemented Changes"
+            git log -n 15 --pretty='- %s (%h)'
+            echo
+            echo "## Files Touched In This Commit"
+            git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" | sed 's/^/- /'
+            echo
+            echo "## Release Artifacts"
+            echo "- Windows: codex-discord-rich-presence.exe"
+            echo "- Linux: codex-discord-rich-presence"
+            echo "- macOS x64: codex-discord-rich-presence-x64"
+            echo "- macOS arm64: codex-discord-rich-presence-arm64"
+          } > RELEASE_NOTES.md
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.RELEASE_NAME }}
+          body_path: RELEASE_NOTES.md
+          prerelease: ${{ env.IS_PRERELEASE }}
           files: release-assets/*
           generate_release_notes: true
