@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "codex-discord-presence",
     version,
-    about = "Show live Codex CLI/VS Code and Codex App activity in Discord Rich Presence",
+    about = "Show live Codex CLI, Codex VS Code Extension, and Codex App activity in Discord Rich Presence",
     trailing_var_arg = true
 )]
 pub struct Cli {

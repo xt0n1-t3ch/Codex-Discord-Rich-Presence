@@ -375,7 +375,7 @@ fn display_branding<'a>(
         PresenceSurface::Default => SurfaceDisplay {
             large_image_key: &config.display.large_image_key,
             large_text: &config.display.large_text,
-            idle_details: "Codex CLI/VS Code",
+            idle_details: "Codex CLI / Codex VS Code Extension",
         },
         PresenceSurface::Desktop => SurfaceDisplay {
             large_image_key: &config.display.desktop_large_image_key,

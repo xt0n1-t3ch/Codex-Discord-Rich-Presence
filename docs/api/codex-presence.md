@@ -114,7 +114,7 @@ This ranking is used for both TUI primary card and Discord presence source.
 - Runtime surface is auto-detected from `session_meta`:
   - `originator` containing `desktop` => Desktop surface.
   - fallback: string `source` containing `desktop` => Desktop surface.
-  - otherwise => default CLI/VS Code surface.
+  - otherwise => default Codex CLI / Codex VS Code Extension surface.
 - Non-string `source` payloads (for example subagent metadata objects) are ignored for surface detection.
 - Idle surface sticks to the latest detected active surface, so the idle card remains consistent.
 
@@ -145,8 +145,8 @@ Update behavior:
 - rate-limits publish bursts via minimum interval.
 - sends heartbeat re-publish every `30s` even when payload is unchanged.
 - reconnects IPC with exponential backoff (`5s` to `60s`) when Discord is unavailable.
-- keeps an explicit idle card (`Codex CLI/VS Code` or `Codex App` / `Waiting for session`) instead of clearing activity.
-- can switch Discord application/client dynamically when surface changes (CLI/VS Code <-> Desktop).
+- keeps an explicit idle card (`Codex CLI / Codex VS Code Extension` or `Codex App` / `Waiting for session`) instead of clearing activity.
+- can switch Discord application/client dynamically when surface changes (Codex CLI / Codex VS Code Extension <-> Desktop).
 - validates configured image keys against Discord app assets when available.
 - skips invalid image keys and falls back to safe icon payload (avoids `?` placeholder on Discord mobile).
 

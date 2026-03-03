@@ -41,7 +41,7 @@ const CODEX_ASCII: [&str; 8] = [
     " | |     | |  | || |  | ||  __|     > <     ",
     " | |____ | |__| || |__| || |____   / . \\    ",
     "  \\_____| \\____/ |_____/ |______| /_/ \\_\\   ",
-    "   Presence for CLI/VS Code + Desktop App    ",
+    " Presence for CLI + Codex VS Code Ext + App  ",
     "       Live activity + account usage         ",
 ];
 

@@ -99,7 +99,7 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 ## 5. Surface-Aware Branding
 
 - Surface detection comes from `session_meta.originator` and `session_meta.source`.
-- Default surface is CLI/VS Code.
+- Default surface is Codex CLI / Codex VS Code Extension.
 - Desktop surface switches to Codex App branding automatically.
 - Discord app/client selection is dynamic per surface (no manual toggle required while running).
 - Idle presence keeps the last active surface so the card does not jump between app identities.

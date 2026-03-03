@@ -14,7 +14,7 @@ Describe the issue clearly.
 
 - OS:
 - App version:
-- Codex version (CLI/VS Code/Desktop):
+- Codex version (CLI / Codex VS Code Extension / App):
 - Discord desktop version:
 
 ## Reproduction

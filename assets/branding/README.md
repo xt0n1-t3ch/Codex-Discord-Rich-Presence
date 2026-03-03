@@ -4,6 +4,7 @@ This folder contains original project branding assets for Codex Discord Rich Pre
 
 - `project-mark.svg`: repository/project icon.
 - `social-card.svg`: suggested social preview artwork.
+- `surface-map.svg`: visual map for automatic Codex CLI / Codex VS Code Extension <-> Codex App switching.
 - `credits-ribbon.svg`: premium credits banner (dark Discord style + subtle tactical grid).
 - `codex-app.png`: Codex App icon source used for Discord assets and executable branding.
 
