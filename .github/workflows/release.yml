@@ -98,6 +98,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -114,41 +117,84 @@ jobs:
             echo "RELEASE_NAME=Codex Discord Rich Presence ${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
             echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
             echo "TRACK=stable" >> "$GITHUB_ENV"
+            echo "MAKE_LATEST=true" >> "$GITHUB_ENV"
           else
             echo "TAG_NAME=build-${SHORT_SHA}" >> "$GITHUB_ENV"
-            echo "RELEASE_NAME=Codex Discord Rich Presence Build ${SHORT_SHA}" >> "$GITHUB_ENV"
+            echo "RELEASE_NAME=Codex Discord Rich Presence Continuous ${SHORT_SHA}" >> "$GITHUB_ENV"
             echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
             echo "TRACK=continuous" >> "$GITHUB_ENV"
+            echo "MAKE_LATEST=false" >> "$GITHUB_ENV"
           fi
 
       - name: Flatten artifacts
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p release-assets
-          find releases -type f -maxdepth 10 \( -name "codex-discord-rich-presence*" -o -name "codex-app.png" \) -exec cp {} release-assets/ \;
+
+          WINDOWS_BIN="$(find releases -type f -path '*/windows/codex-discord-rich-presence.exe' | head -n1)"
+          LINUX_BIN="$(find releases -type f -path '*/linux/codex-discord-rich-presence' | head -n1)"
+          MACOS_X64_BIN="$(find releases -type f -path '*/macos/codex-discord-rich-presence-x64' | head -n1)"
+          MACOS_ARM64_BIN="$(find releases -type f -path '*/macos/codex-discord-rich-presence-arm64' | head -n1)"
+          APP_LOGO="$(find releases -type f -name 'codex-app.png' | head -n1)"
+
+          test -n "${WINDOWS_BIN}"
+          test -n "${LINUX_BIN}"
+          test -n "${MACOS_X64_BIN}"
+          test -n "${MACOS_ARM64_BIN}"
+          test -n "${APP_LOGO}"
+
+          cp "${WINDOWS_BIN}" "release-assets/Codex Discord Rich Presence - Windows x64.exe"
+          cp "${LINUX_BIN}" "release-assets/Codex Discord Rich Presence - Linux x64"
+          cp "${MACOS_X64_BIN}" "release-assets/Codex Discord Rich Presence - macOS x64"
+          cp "${MACOS_ARM64_BIN}" "release-assets/Codex Discord Rich Presence - macOS arm64"
+          cp "${APP_LOGO}" "release-assets/Codex Discord Rich Presence - Codex App Logo.png"
           ls -lah release-assets
 
       - name: Generate detailed release notes
         shell: bash
         run: |
           set -euo pipefail
+          BASE_TAG="$(git tag --sort=-creatordate | grep -v "^${TAG_NAME}$" | head -n1 || true)"
+          if [[ -n "${BASE_TAG}" ]]; then
+            BASE_LABEL="${BASE_TAG}"
+            COMMIT_RANGE="${BASE_TAG}..${GITHUB_SHA}"
+          else
+            ROOT_COMMIT="$(git rev-list --max-parents=0 HEAD | tail -n1)"
+            BASE_LABEL="${ROOT_COMMIT}"
+            COMMIT_RANGE="${ROOT_COMMIT}..${GITHUB_SHA}"
+          fi
+
+          COMMIT_LIST="$(git log --no-merges --pretty='- %s (%h)' "${COMMIT_RANGE}" || true)"
+          if [[ -z "${COMMIT_LIST}" ]]; then
+            COMMIT_LIST="- No additional commits found in range (${COMMIT_RANGE})."
+          fi
+
+          FILE_LIST="$(git diff --name-only "${COMMIT_RANGE}" | sed 's/^/- /' || true)"
+          if [[ -z "${FILE_LIST}" ]]; then
+            FILE_LIST="- No file deltas detected in range (${COMMIT_RANGE})."
+          fi
+
           {
             echo "# Codex Discord Rich Presence"
             echo
             echo "Track: ${TRACK}"
             echo "Commit: ${GITHUB_SHA}"
+            echo "Delta Base: ${BASE_LABEL}"
+            echo "Commit Range: ${COMMIT_RANGE}"
             echo
             echo "## Implemented Changes"
-            git log -n 15 --pretty='- %s (%h)'
+            echo "${COMMIT_LIST}"
             echo
-            echo "## Files Touched In This Commit"
-            git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" | sed 's/^/- /'
+            echo "## Files Touched Since Delta Base"
+            echo "${FILE_LIST}"
             echo
             echo "## Release Artifacts"
-            echo "- Windows: codex-discord-rich-presence.exe"
-            echo "- Linux: codex-discord-rich-presence"
-            echo "- macOS x64: codex-discord-rich-presence-x64"
-            echo "- macOS arm64: codex-discord-rich-presence-arm64"
+            echo "- Codex Discord Rich Presence - Windows x64.exe"
+            echo "- Codex Discord Rich Presence - Linux x64"
+            echo "- Codex Discord Rich Presence - macOS x64"
+            echo "- Codex Discord Rich Presence - macOS arm64"
+            echo "- Codex Discord Rich Presence - Codex App Logo.png"
           } > RELEASE_NOTES.md
 
       - name: Create release
@@ -158,5 +204,6 @@ jobs:
           name: ${{ env.RELEASE_NAME }}
           body_path: RELEASE_NOTES.md
           prerelease: ${{ env.IS_PRERELEASE }}
+          make_latest: ${{ env.MAKE_LATEST }}
           files: release-assets/*
           generate_release_notes: true
