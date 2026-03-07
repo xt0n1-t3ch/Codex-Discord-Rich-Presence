@@ -109,8 +109,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION_LABEL="${VERSION}"
+          if [[ "${VERSION}" =~ ^([0-9]+\.[0-9]+)\.0$ ]]; then
+            VERSION_LABEL="${BASH_REMATCH[1]}"
+          fi
           echo "TAG_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-          echo "RELEASE_NAME=Codex Discord Rich Presence ${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "VERSION_LABEL=${VERSION_LABEL}" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=Codex Discord Rich Presence v${VERSION_LABEL}" >> "$GITHUB_ENV"
           echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
           echo "TRACK=stable" >> "$GITHUB_ENV"
           echo "MAKE_LATEST=true" >> "$GITHUB_ENV"
@@ -144,39 +151,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE_TAG="$(git tag --sort=-creatordate | grep -v "^${TAG_NAME}$" | head -n1 || true)"
-          if [[ -n "${BASE_TAG}" ]]; then
-            BASE_LABEL="${BASE_TAG}"
-            COMMIT_RANGE="${BASE_TAG}..${GITHUB_SHA}"
-          else
-            ROOT_COMMIT="$(git rev-list --max-parents=0 HEAD | tail -n1)"
-            BASE_LABEL="${ROOT_COMMIT}"
-            COMMIT_RANGE="${ROOT_COMMIT}..${GITHUB_SHA}"
-          fi
+          CHANGELOG_SECTION="$(awk -v version="${VERSION}" '
+            $0 ~ "^## \\[" version "\\]" { capture=1; next }
+            capture && $0 ~ "^## \\[" { exit }
+            capture { print }
+          ' CHANGELOG.md)"
 
-          COMMIT_LIST="$(git log --no-merges --pretty='- %s (%h)' "${COMMIT_RANGE}" || true)"
-          if [[ -z "${COMMIT_LIST}" ]]; then
-            COMMIT_LIST="- No additional commits found in range (${COMMIT_RANGE})."
-          fi
-
-          FILE_LIST="$(git diff --name-only "${COMMIT_RANGE}" | sed 's/^/- /' || true)"
-          if [[ -z "${FILE_LIST}" ]]; then
-            FILE_LIST="- No file deltas detected in range (${COMMIT_RANGE})."
+          if [[ -z "${CHANGELOG_SECTION//[[:space:]]/}" ]]; then
+            CHANGELOG_SECTION=$'### Summary\n\n- See commit history and repository changelog for release details.'
           fi
 
           {
-            echo "# Codex Discord Rich Presence"
+            echo "# Codex Discord Rich Presence ${VERSION_LABEL}"
             echo
-            echo "Track: ${TRACK}"
-            echo "Commit: ${GITHUB_SHA}"
-            echo "Delta Base: ${BASE_LABEL}"
-            echo "Commit Range: ${COMMIT_RANGE}"
+            echo "Stable release for Codex CLI, Codex VS Code Extension, and Codex App."
             echo
-            echo "## Implemented Changes"
-            echo "${COMMIT_LIST}"
-            echo
-            echo "## Files Touched Since Delta Base"
-            echo "${FILE_LIST}"
+            echo "${CHANGELOG_SECTION}"
             echo
             echo "## Release Artifacts"
             echo "- Codex Discord Rich Presence - Windows x64.exe"
@@ -195,4 +185,3 @@ jobs:
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.MAKE_LATEST }}
           files: release-assets/*
-          generate_release_notes: true

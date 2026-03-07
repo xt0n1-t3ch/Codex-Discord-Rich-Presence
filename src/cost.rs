@@ -176,18 +176,31 @@ fn fallback_pricing() -> ModelPricing {
 
 fn default_alias_target(model: &str) -> Option<&'static str> {
     match model {
-        // User-approved policy: gpt-5.3 Codex variants inherit gpt-5.2-codex pricing.
-        "gpt-5.3-codex"
-        | "gpt-5.3-codex-latest"
-        | "gpt-5.3-codex-spark"
-        | "gpt-5.3-codex-spark-latest" => Some("gpt-5.2-codex"),
+        // Spark variants are internal Codex labels, not standalone API catalog entries.
+        "gpt-5.3-codex-spark" | "gpt-5.3-codex-spark-latest" => Some("gpt-5.3-codex"),
         _ => None,
     }
 }
 
 fn default_model_pricing(model: &str) -> Option<ModelPricing> {
-    // Source: https://platform.openai.com/docs/pricing (Feb 2026)
+    // Sources:
+    // - https://openai.com/api/pricing/
+    // - https://developers.openai.com/api/docs/models/gpt-5.3-codex/
+    // - https://developers.openai.com/api/docs/models/gpt-5.4/
+    // Prices below reflect standard API rates as of March 7, 2026.
+    // GPT-5.4 has a documented surcharge for prompts with >272K input tokens, which this
+    // aggregate session-level estimator does not currently model per request.
     let pricing = match model {
+        "gpt-5.4" | "gpt-5.4-2026-03-05" => ModelPricing {
+            input_per_million: 2.5,
+            cached_input_per_million: 0.25,
+            output_per_million: 15.0,
+        },
+        "gpt-5.3-codex" | "gpt-5.3-codex-latest" => ModelPricing {
+            input_per_million: 1.75,
+            cached_input_per_million: 0.175,
+            output_per_million: 14.0,
+        },
         "gpt-5.2" | "gpt-5.2-chat-latest" | "gpt-5.2-codex" => ModelPricing {
             input_per_million: 1.75,
             cached_input_per_million: 0.175,
@@ -244,20 +257,44 @@ mod tests {
     fn aliases_gpt_5_3_codex_to_gpt_5_2_codex() {
         let config = PricingConfig::default();
         let resolved = resolve_model_pricing("gpt-5.3-codex", &config);
-        assert_eq!(resolved.source, PricingSource::Alias);
-        assert_eq!(resolved.resolved_model, "gpt-5.2-codex");
+        assert_eq!(resolved.source, PricingSource::Exact);
+        assert_eq!(resolved.resolved_model, "gpt-5.3-codex");
         assert!((resolved.pricing.input_per_million - 1.75).abs() < 0.0001);
+        assert!((resolved.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
         assert!((resolved.pricing.output_per_million - 14.0).abs() < 0.0001);
     }
 
     #[test]
-    fn aliases_gpt_5_3_codex_spark_to_gpt_5_2_codex() {
+    fn aliases_gpt_5_3_codex_spark_to_gpt_5_3_codex() {
         let config = PricingConfig::default();
         let resolved = resolve_model_pricing("gpt-5.3-codex-spark", &config);
         assert_eq!(resolved.source, PricingSource::Alias);
-        assert_eq!(resolved.resolved_model, "gpt-5.2-codex");
+        assert_eq!(resolved.resolved_model, "gpt-5.3-codex");
         assert!((resolved.pricing.input_per_million - 1.75).abs() < 0.0001);
+        assert!((resolved.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
         assert!((resolved.pricing.output_per_million - 14.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn resolves_exact_pricing_for_gpt_5_4() {
+        let config = PricingConfig::default();
+        let resolved = resolve_model_pricing("gpt-5.4", &config);
+        assert_eq!(resolved.source, PricingSource::Exact);
+        assert_eq!(resolved.resolved_model, "gpt-5.4");
+        assert!((resolved.pricing.input_per_million - 2.5).abs() < 0.0001);
+        assert!((resolved.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
+        assert!((resolved.pricing.output_per_million - 15.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn resolves_exact_pricing_for_gpt_5_4_snapshot() {
+        let config = PricingConfig::default();
+        let resolved = resolve_model_pricing("gpt-5.4-2026-03-05", &config);
+        assert_eq!(resolved.source, PricingSource::Exact);
+        assert_eq!(resolved.resolved_model, "gpt-5.4-2026-03-05");
+        assert!((resolved.pricing.input_per_million - 2.5).abs() < 0.0001);
+        assert!((resolved.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
+        assert!((resolved.pricing.output_per_million - 15.0).abs() < 0.0001);
     }
 
     #[test]
@@ -298,6 +335,16 @@ mod tests {
     #[test]
     fn pricing_catalog_matches_required_models() {
         let config = PricingConfig::default();
+
+        let p54 = resolve_model_pricing("gpt-5.4", &config);
+        assert!((p54.pricing.input_per_million - 2.5).abs() < 0.0001);
+        assert!((p54.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
+        assert!((p54.pricing.output_per_million - 15.0).abs() < 0.0001);
+
+        let p53codex = resolve_model_pricing("gpt-5.3-codex", &config);
+        assert!((p53codex.pricing.input_per_million - 1.75).abs() < 0.0001);
+        assert!((p53codex.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
+        assert!((p53codex.pricing.output_per_million - 14.0).abs() < 0.0001);
 
         let p52 = resolve_model_pricing("gpt-5.2", &config);
         assert!((p52.pricing.input_per_million - 1.75).abs() < 0.0001);

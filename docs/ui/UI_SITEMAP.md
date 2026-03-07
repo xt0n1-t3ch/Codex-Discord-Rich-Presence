@@ -33,16 +33,19 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 ## 3. Render Order (Top -> Bottom)
 
 1. Banner
+
 - Hybrid behavior:
   - inline image when explicitly configured (`display.terminal_logo_mode = "image"` and path available).
   - deterministic ASCII fallback otherwise, with CODEX-only intermediate step.
 - High-legibility `CODEX` wordmark, centered subtitle, and no partial ASCII clipping.
 
 2. Runtime
+
 - Mode, current time, uptime, Discord state.
 - Client ID + polling/stale details in `Full`/`Compact`.
 
 3. Active Session
+
 - Project, activity, model + OpenAI plan tier, context window (`used/total` + `% left`).
 - Model row can include Fast prefix (`⚡`) and effort suffix (`Extra High`).
 - Fast mode row (`Fast Mode: On/Off`).
@@ -58,6 +61,7 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 - Spark guardrail warning in TUI when telemetry shows Spark with non-Pro plan.
 
 4. Metrics
+
 - Always rendered after active session.
 - `Full`: total cost/tokens, input-cached-output token split, cost split, top model by cost.
 - `Compact`: total cost/tokens + token split + cost split.
@@ -65,11 +69,13 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 - Empty-state fallback: `awaiting token events` / `no token usage observed yet`.
 
 5. Recent Sessions
+
 - Always rendered in reserved space.
 - Two-line entries when enough space.
 - Automatic one-line compact entries in constrained space.
 
 6. Footer
+
 - Bottom-left:
   - default: `Press P to change plan | q or Ctrl+C to quit.`
   - when the selector screen is open: navigation/apply/cancel instructions.

@@ -4,60 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [1.1.0] - 2026-03-07
+
+### Added
+
+- Full-screen TUI plan selector with instant save support for `Auto Detect`, `Free`, `Go`, `Plus`, `Pro`, `Business`, and `Enterprise`.
+- Fast-mode visibility derived from Codex global state, including the lightning-prefixed model label.
+- Reasoning-effort visibility across TUI, status output, and Discord presence.
+- Official pricing catalog entries for `gpt-5.4`, `gpt-5.4-2026-03-05`, `gpt-5.3-codex`, and `gpt-5.3-codex-latest`.
+
 ### Changed
 
-- Published release artifacts remain standardized under `releases/<platform>/`.
-- Cargo build cache is routed to `.build/target` so root-level `target/` stays out of the workspace.
-- CI and release workflows now upload artifacts from `releases/**`.
-- Active-session selection is now recency-first (`last_activity`) with deterministic tie-breaks:
-  - `pending_calls`,
-  - activity class (`Working` > `Waiting for input` > `Idle`),
-  - `session_id`.
-- Sticky-window visibility now includes `Waiting for input` sessions.
-- Idle transition no longer rewrites activity timestamps to `now`, preventing synthetic recency inflation.
-- Session recency now considers `last_effective_signal_at` before fallback to file modified time.
-- Activity parsing is now phase-aware for assistant messages:
-  - `phase=commentary` acts as a progress signal and no longer forces `Waiting for input`.
-  - `phase=final_answer` maps to `Waiting for input`.
-- `event_msg.agent_message` now behaves as commentary progress instead of immediate waiting state.
-- Added working-signal handling for `response_item.web_search_call` / `response_item.web_search_result`.
-- `assets/branding/credits-ribbon.svg` redesigned with premium dark Discord-style tactical grid visuals.
-- README release badge URL hardened with a simplified dynamic query for more reliable rendering.
-- Added spec-kit plan:
-  - `plans/20260210-activity-credits-release-hardening/plan.md`
-- Anti-false-idle logic now tracks effective activity signals and prevents stale idle transitions.
-- `Recent Sessions` is now guaranteed visible with reserved layout rows and compact fallback rendering.
-- Discord state text is cleaner (prefers `Last response` + `Session total`; omits noisy delta when redundant).
-- Added optional per-activity Discord small-image mapping:
-  - `display.activity_small_image_keys.{thinking,reading,editing,running,waiting,idle}`
-- Credits format unified across TUI/README/social assets:
-  - `XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
-- README refreshed with cleaner structure and a dedicated credits ribbon SVG.
-- Social card typography reflowed to avoid clipping in repository preview.
-- Added spec-kit plan:
-  - `plans/20260210-recent-sessions-premium-presence-polish/plan.md`
-- README restructured with concise, professional copy and clearer install/use/config flow.
-- Branding visuals refreshed:
-  - `assets/branding/social-card.svg` now uses dark social-card styling with OpenAI-style mark.
-  - `assets/branding/project-mark.svg` now matches the dark branding system.
-- Branding documentation wording updated for trademark clarity.
-- Session visibility now supports sticky activity-window fallback beyond strict stale cutoff.
-- TUI header ASCII wordmark updated to clear block `CODEX`.
-- TUI footer is now anchored on the last row:
-  - left: quit hint,
-  - right: author credit.
-- README subtitle is now centered.
-- Added runtime env override:
-  - `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` (default `3600`, min clamp).
-- Discord asset reliability improvements:
-  - runtime asset-key validation against Discord app asset catalog,
-  - invalid/missing image keys are omitted from payload,
-  - fallback avoids `?` placeholder icon on Discord mobile.
-- Added spec-kit plan:
-  - `plans/20260210-discord-mobile-assets-fallback/plan.md`
-- Added spec-kit plan:
-  - `plans/20260210-readme-branding-professional-polish/plan.md`
-  - `plans/20260210-session-stability-header-footer-svg-fixes/plan.md`
+- Release outputs are standardized under `releases/<platform>/`, with Cargo cache kept under `.build/target`.
+- Active-session selection is recency-first and uses deterministic tie-breakers based on pending calls, activity priority, and session ID.
+- Discord and TUI model labels now compose model, Fast mode, reasoning effort, and resolved account plan more cleanly.
+- Session parsing internals are now split into focused activity and parser modules for easier maintenance.
+- README, schema docs, API contract, and UI docs were refreshed to reflect plan selection, Fast mode, reasoning visibility, and current build/release layout.
+
+### Fixed
+
+- Idle transitions no longer fabricate recency or prematurely hide active sessions.
+- Commentary and tool-call activity tracking now preserves working-state visibility more accurately.
+- Incremental JSONL parsing safely retains partial lines across updates.
+- Legacy `gpt-5.3-codex -> gpt-5.2-codex` pricing aliasing is migrated away; Spark variants now map to `gpt-5.3-codex`.
 
 ## [0.2.2] - 2026-02-10
 
@@ -98,6 +69,7 @@ All notable changes to this project are documented in this file.
   - `CodexSessionSnapshot.activity`
 - Terminal footer author credit:
   - `By XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
+
 ### Changed
 
 - Discord details now prioritize live activity (`Thinking`, `Reading`, `Editing`, etc.).

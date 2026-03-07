@@ -42,12 +42,15 @@ This project has no relational database.
 
 ### Pricing Defaults (Catalog)
 
+- `gpt-5.4`: input `2.5`, cached input `0.25`, output `15.0` (USD / 1M tokens, standard API pricing)
+- `gpt-5.4-2026-03-05`: input `2.5`, cached input `0.25`, output `15.0`
+- `gpt-5.3-codex`: input `1.75`, cached input `0.175`, output `14.0`
+- `gpt-5.3-codex-latest`: input `1.75`, cached input `0.175`, output `14.0`
 - `gpt-5.2-codex`: input `1.75`, cached input `0.175`, output `14.0` (USD / 1M tokens)
 - `gpt-5.2`: input `1.75`, cached input `0.175`, output `14.0`
 - `gpt-5.1-codex-max`: input `1.25`, cached input `0.125`, output `10.0`
 - `gpt-5.1-codex-mini`: input `0.25`, cached input `0.025`, output `2.0`
-- `gpt-5.3-codex` pricing alias defaults to `gpt-5.2-codex` until official pricing exists.
-- `gpt-5.3-codex-spark` pricing alias defaults to `gpt-5.2-codex` until official pricing exists.
+- `gpt-5.3-codex-spark` and `gpt-5.3-codex-spark-latest` alias to `gpt-5.3-codex`.
 - Default `openai_plan`: `mode = "auto"`, `tier = "pro"`, `show_price = true`.
 
 ### 1b) Plan cache file
