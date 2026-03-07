@@ -9,7 +9,8 @@ use std::time::{Duration, Instant, SystemTime};
 use crate::config::{PresenceConfig, PresenceSurface};
 use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind};
 use crate::telemetry::plan::ResolvedPlan;
-use crate::util::{format_cost, format_model_name, format_tokens};
+use crate::telemetry::service_tier::ResolvedServiceTier;
+use crate::util::{format_cost, format_model_display, format_tokens};
 
 pub struct DiscordPresence {
     surface: PresenceSurface,
@@ -72,6 +73,7 @@ impl DiscordPresence {
         active_session: Option<&CodexSessionSnapshot>,
         effective_limits: Option<&RateLimits>,
         resolved_plan: &ResolvedPlan,
+        resolved_service_tier: &ResolvedServiceTier,
         config: &PresenceConfig,
     ) -> Result<()> {
         self.surface = detect_surface(active_session).unwrap_or(self.surface);
@@ -99,8 +101,13 @@ impl DiscordPresence {
         match active_session {
             Some(session) => {
                 self.idle_start_epoch = None;
-                let (details, state) =
-                    presence_lines(session, effective_limits, resolved_plan, config);
+                let (details, state) = presence_lines(
+                    session,
+                    effective_limits,
+                    resolved_plan,
+                    resolved_service_tier,
+                    config,
+                );
                 let start_epoch = presence_start_epoch(session);
                 let payload = PresencePayload {
                     session_id: Some(session.session_id.clone()),
@@ -466,6 +473,7 @@ fn presence_lines(
     session: &CodexSessionSnapshot,
     effective_limits: Option<&RateLimits>,
     resolved_plan: &ResolvedPlan,
+    resolved_service_tier: &ResolvedServiceTier,
     config: &PresenceConfig,
 ) -> (String, String) {
     if config.privacy.enabled {
@@ -512,7 +520,11 @@ fn presence_lines(
     {
         let label = format!(
             "{} | {}",
-            format_model_name(model),
+            format_model_display(
+                model,
+                session.reasoning_effort,
+                resolved_service_tier.is_fast()
+            ),
             resolved_plan.label(config.openai_plan.show_price)
         );
         state_parts.push(truncate_for_limit(&label, 68));
@@ -751,6 +763,7 @@ mod tests {
     use crate::cost::{PricingSource, TokenCostBreakdown};
     use crate::session::{ContextWindowSnapshot, ContextWindowSource, RateLimits, UsageWindow};
     use crate::telemetry::plan::{DetectedPlanSource, DetectedPlanTier, ResolvedPlan};
+    use crate::telemetry::service_tier::ServiceTier;
     use chrono::TimeZone;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
@@ -773,6 +786,7 @@ mod tests {
             originator: None,
             source: None,
             model: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: None,
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: Some(30_000),
@@ -821,6 +835,19 @@ mod tests {
         }
     }
 
+    fn resolved_service_tier(fast: bool) -> ResolvedServiceTier {
+        ResolvedServiceTier {
+            tier: if fast {
+                ServiceTier::Fast
+            } else {
+                ServiceTier::Standard
+            },
+            raw_tier: Some(if fast { "fast" } else { "standard" }.to_string()),
+            observed_at: None,
+            source_path: None,
+        }
+    }
+
     #[test]
     fn active_presence_uses_recent_activity_epoch() {
         let mut session = sample_session();
@@ -863,7 +890,14 @@ mod tests {
         let session = sample_session();
         let config = PresenceConfig::default();
         let plan = resolved_plan_pro();
-        let (_details, state) = presence_lines(&session, Some(&session.limits), &plan, &config);
+        let service_tier = resolved_service_tier(false);
+        let (_details, state) = presence_lines(
+            &session,
+            Some(&session.limits),
+            &plan,
+            &service_tier,
+            &config,
+        );
         assert!(state.contains("GPT-5.3-Codex | Pro ($200/month)"));
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K tok"));
@@ -878,7 +912,14 @@ mod tests {
         session.model = Some("gpt-5.3-codex-ultra-long-variant-name-for-tests".to_string());
         let config = PresenceConfig::default();
         let plan = resolved_plan_pro();
-        let (_details, state) = presence_lines(&session, Some(&session.limits), &plan, &config);
+        let service_tier = resolved_service_tier(false);
+        let (_details, state) = presence_lines(
+            &session,
+            Some(&session.limits),
+            &plan,
+            &service_tier,
+            &config,
+        );
         let model_pos = state.find("GPT-5.3-Codex-Ultra-Long-Variant-Name-For-Tests | Pro");
         let cost_pos = state.find('$');
         assert!(model_pos.is_some(), "state must keep model+plan");
@@ -899,7 +940,14 @@ mod tests {
         });
         let config = PresenceConfig::default();
         let plan = resolved_plan_pro();
-        let (details, _state) = presence_lines(&session, Some(&session.limits), &plan, &config);
+        let service_tier = resolved_service_tier(false);
+        let (details, _state) = presence_lines(
+            &session,
+            Some(&session.limits),
+            &plan,
+            &service_tier,
+            &config,
+        );
         assert_eq!(
             details,
             "Running command rg --files - project-alpha (feature/main)"
@@ -931,10 +979,34 @@ mod tests {
         });
         let config = PresenceConfig::default();
         let plan = resolved_plan_pro();
-        let (details, state) = presence_lines(&session, Some(&session.limits), &plan, &config);
+        let service_tier = resolved_service_tier(false);
+        let (details, state) = presence_lines(
+            &session,
+            Some(&session.limits),
+            &plan,
+            &service_tier,
+            &config,
+        );
         assert!(details.starts_with("Editing"));
         assert!(details.contains("project-alpha"));
         assert!(state.contains("GPT-5.3-Codex"));
+    }
+
+    #[test]
+    fn state_prefixes_model_with_fast_icon_and_effort() {
+        let mut session = sample_session();
+        session.reasoning_effort = Some(crate::session::ReasoningEffort::XHigh);
+        let config = PresenceConfig::default();
+        let plan = resolved_plan_pro();
+        let service_tier = resolved_service_tier(true);
+        let (_details, state) = presence_lines(
+            &session,
+            Some(&session.limits),
+            &plan,
+            &service_tier,
+            &config,
+        );
+        assert!(state.contains("⚡ GPT-5.3-Codex (Extra High) | Pro ($200/month)"));
     }
 
     #[test]

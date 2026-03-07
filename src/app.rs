@@ -9,10 +9,13 @@ use std::{io, io::IsTerminal};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use tracing::debug;
 
-use crate::config::{self, PresenceConfig, PresenceSurface, RuntimeSettings};
+use crate::config::{
+    self, OpenAiPlanDisplayConfig, PresenceConfig, PresenceSurface, RuntimeSettings,
+    apply_plan_preset, plan_preset_index, plan_presets,
+};
 use crate::discord::DiscordPresence;
 use crate::metrics::MetricsTracker;
 use crate::process_guard::{self, RunningState};
@@ -22,9 +25,10 @@ use crate::session::{
     latest_limits_source, preferred_active_session,
 };
 use crate::telemetry::plan::{PlanDetector, ResolvedPlan, is_model_allowed_for_plan};
+use crate::telemetry::service_tier::{ResolvedServiceTier, resolve_service_tier};
 use crate::ui::{self, RenderData};
 use crate::util::{
-    format_cost, format_model_name, format_since, format_time_until, format_token_triplet,
+    format_cost, format_model_display, format_since, format_time_until, format_token_triplet,
 };
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
@@ -33,6 +37,41 @@ const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
 pub enum AppMode {
     SmartForeground,
     CodexChild { args: Vec<String> },
+}
+
+#[derive(Debug, Default)]
+struct RuntimeSnapshot {
+    sessions: Vec<CodexSessionSnapshot>,
+    limits_source: Option<EffectiveLimitSelection>,
+    resolved_plan: ResolvedPlan,
+    resolved_service_tier: ResolvedServiceTier,
+}
+
+impl RuntimeSnapshot {
+    fn from_sessions(
+        sessions: Vec<CodexSessionSnapshot>,
+        plan_detector: &mut PlanDetector,
+        plan_config: &OpenAiPlanDisplayConfig,
+    ) -> Self {
+        let limits_source = latest_limits_source(&sessions);
+        let resolved_plan = plan_detector.resolve_from_sessions(&sessions, plan_config);
+        let resolved_service_tier = resolve_service_tier();
+
+        Self {
+            sessions,
+            limits_source,
+            resolved_plan,
+            resolved_service_tier,
+        }
+    }
+
+    fn active_session(&self) -> Option<&CodexSessionSnapshot> {
+        preferred_active_session(&self.sessions)
+    }
+
+    fn effective_limits(&self) -> Option<&RateLimits> {
+        self.limits_source.as_ref().map(|source| &source.limits)
+    }
 }
 
 pub fn run(config: PresenceConfig, mode: AppMode, runtime: RuntimeSettings) -> Result<()> {
@@ -94,22 +133,21 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         diagnostics.dropped_outside_sticky
     );
     let mut plan_detector = PlanDetector::new();
-    let resolved_plan = plan_detector.resolve_from_sessions(&sessions);
-    if let Some(active) = preferred_active_session(&sessions) {
-        let limits_source = latest_limits_source(&sessions);
-        if let Some(source) = &limits_source {
+    let snapshot =
+        RuntimeSnapshot::from_sessions(sessions, &mut plan_detector, &config.openai_plan);
+    if let Some(active) = snapshot.active_session() {
+        if let Some(source) = &snapshot.limits_source {
             println!("limits_source_session: {}", source.source_session_id);
             println!("limits_source: {}", source.source_label());
             println!("limits_updated: {}", format_since(source.observed_at));
         }
         print_active_summary(
             active,
-            limits_source.as_ref().map(|source| &source.limits),
-            limits_source.as_ref(),
-            config.privacy.show_activity,
-            config.privacy.show_activity_target,
-            &resolved_plan,
-            config.openai_plan.show_price,
+            snapshot.effective_limits(),
+            snapshot.limits_source.as_ref(),
+            &snapshot.resolved_plan,
+            &snapshot.resolved_service_tier,
+            config,
         );
     }
     Ok(())
@@ -182,7 +220,7 @@ pub fn doctor(config: &PresenceConfig) -> Result<u8> {
     }
 }
 
-fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Result<()> {
+fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> Result<()> {
     let stop = install_stop_signal()?;
     if !io::stdout().is_terminal() {
         if maybe_relaunch_in_terminal()? {
@@ -199,10 +237,12 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
     let sessions_roots = config::sessions_paths();
     let started = Instant::now();
     let mut last_tick = Instant::now() - runtime.poll_interval;
-    let mut sessions: Vec<CodexSessionSnapshot> = Vec::new();
+    let mut snapshot = RuntimeSnapshot::default();
     let mut last_render_signature = String::new();
     let mut last_render_at = Instant::now() - Duration::from_secs(31);
     let mut force_redraw = true;
+    let mut plan_picker_open = false;
+    let mut plan_picker_selected = plan_preset_index(&config.openai_plan);
 
     ui::enter_terminal()?;
 
@@ -213,42 +253,36 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
             }
 
             if last_tick.elapsed() >= runtime.poll_interval {
-                sessions = collect_active_sessions_multi(
+                snapshot = collect_runtime_snapshot(
                     &sessions_roots,
-                    runtime.stale_threshold,
-                    runtime.active_sticky_window,
+                    &runtime,
+                    &config,
                     &mut git_cache,
                     &mut parse_cache,
-                    &config.pricing,
+                    &mut metrics_tracker,
+                    &mut plan_detector,
                 )?;
-                metrics_tracker.update(&sessions);
-                metrics_tracker.persist_if_due();
-                let active = preferred_active_session(&sessions);
-                let effective_limits = latest_limits_source(&sessions);
-                let resolved_plan = plan_detector.resolve_from_sessions(&sessions);
-                if let Err(err) = discord.update(
-                    active,
-                    effective_limits.as_ref().map(|source| &source.limits),
-                    &resolved_plan,
-                    &config,
-                ) {
-                    debug!(error = %err, "discord presence update failed");
-                }
+                publish_runtime_snapshot(&mut discord, &snapshot, &config);
 
-                let plan_display_label = resolved_plan.label(config.openai_plan.show_price);
-                let plan_auto_label = resolved_plan.auto_label();
-                let limits_source_label = effective_limits
+                let active = snapshot.active_session();
+                let plan_display_label =
+                    snapshot.resolved_plan.label(config.openai_plan.show_price);
+                let plan_status_label = snapshot.resolved_plan.status_label();
+                let fast_mode_label = snapshot.resolved_service_tier.fast_mode_label();
+                let limits_source_label = snapshot
+                    .limits_source
                     .as_ref()
                     .map(|selection| selection.source_label())
                     .unwrap_or_else(|| "Awaiting account quota telemetry".to_string());
-                let limits_updated_label = effective_limits
+                let limits_updated_label = snapshot
+                    .limits_source
                     .as_ref()
                     .map(|selection| format_since(selection.observed_at))
                     .unwrap_or_else(|| "not yet synced".to_string());
                 let spark_plan_warning = active
                     .and_then(|session| session.model.as_deref())
                     .and_then(|model| {
-                        (!is_model_allowed_for_plan(model, resolved_plan.tier))
+                        (!is_model_allowed_for_plan(model, snapshot.resolved_plan.tier))
                             .then_some("Spark is Pro-only; received non-Pro telemetry (anomaly)")
                     });
                 let render = RenderData {
@@ -266,7 +300,9 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                     show_activity: config.privacy.show_activity,
                     show_activity_target: config.privacy.show_activity_target,
                     plan_display_label: plan_display_label.as_str(),
-                    plan_auto_label: plan_auto_label.as_str(),
+                    plan_status_label: plan_status_label.as_str(),
+                    fast_mode_label,
+                    fast_active: snapshot.resolved_service_tier.is_fast(),
                     limits_source_label: limits_source_label.as_str(),
                     limits_updated_label: limits_updated_label.as_str(),
                     spark_plan_warning,
@@ -274,9 +310,13 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                     logo_path: config.display.terminal_logo_path.as_deref(),
                     banner_phase: ((started.elapsed().as_millis() / 450) % 8) as u8,
                     active,
-                    effective_limits: effective_limits.as_ref().map(|source| &source.limits),
+                    effective_limits: snapshot.effective_limits(),
                     metrics: metrics_tracker.snapshot(),
-                    sessions: &sessions,
+                    sessions: &snapshot.sessions,
+                    plan_picker: plan_picker_open.then_some(ui::PlanPickerView {
+                        selected_index: plan_picker_selected,
+                        current_index: plan_preset_index(&config.openai_plan),
+                    }),
                 };
                 let signature = ui::frame_signature(&render);
                 let should_draw = force_redraw
@@ -303,7 +343,83 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
             if event::poll(wait_budget)? {
                 match event::read()? {
                     Event::Key(key) => {
-                        if key.code == KeyCode::Char('q')
+                        if matches!(key.kind, KeyEventKind::Release) {
+                            continue;
+                        }
+
+                        if plan_picker_open {
+                            if is_plan_picker_toggle_key(&key)
+                                || (key.code == KeyCode::Esc && key.modifiers.is_empty())
+                            {
+                                plan_picker_open = false;
+                                request_redraw(
+                                    &mut force_redraw,
+                                    &mut last_tick,
+                                    runtime.poll_interval,
+                                );
+                            } else {
+                                match key.code {
+                                    KeyCode::Up | KeyCode::Left => {
+                                        let preset_count = plan_presets().len();
+                                        if preset_count > 0 {
+                                            plan_picker_selected =
+                                                (plan_picker_selected + preset_count - 1)
+                                                    % preset_count;
+                                            request_redraw(
+                                                &mut force_redraw,
+                                                &mut last_tick,
+                                                runtime.poll_interval,
+                                            );
+                                        }
+                                    }
+                                    KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                                        let preset_count = plan_presets().len();
+                                        if preset_count > 0 {
+                                            plan_picker_selected =
+                                                (plan_picker_selected + 1) % preset_count;
+                                            request_redraw(
+                                                &mut force_redraw,
+                                                &mut last_tick,
+                                                runtime.poll_interval,
+                                            );
+                                        }
+                                    }
+                                    KeyCode::Char(digit @ '1'..='7') => {
+                                        let target = (digit as u8 - b'1') as usize;
+                                        if target < plan_presets().len() {
+                                            plan_picker_selected = target;
+                                            request_redraw(
+                                                &mut force_redraw,
+                                                &mut last_tick,
+                                                runtime.poll_interval,
+                                            );
+                                        }
+                                    }
+                                    KeyCode::Enter => {
+                                        apply_plan_preset(
+                                            &mut config.openai_plan,
+                                            plan_picker_selected,
+                                        );
+                                        config.save()?;
+                                        plan_picker_open = false;
+                                        request_redraw(
+                                            &mut force_redraw,
+                                            &mut last_tick,
+                                            runtime.poll_interval,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        } else if is_plan_picker_toggle_key(&key) {
+                            plan_picker_selected = plan_preset_index(&config.openai_plan);
+                            plan_picker_open = true;
+                            request_redraw(
+                                &mut force_redraw,
+                                &mut last_tick,
+                                runtime.poll_interval,
+                            );
+                        } else if key.code == KeyCode::Char('q')
                             || (key.code == KeyCode::Char('c')
                                 && key.modifiers.contains(KeyModifiers::CONTROL))
                         {
@@ -311,7 +427,7 @@ fn run_foreground_tui(config: PresenceConfig, runtime: RuntimeSettings) -> Resul
                         }
                     }
                     Event::Resize(_, _) => {
-                        force_redraw = true;
+                        request_redraw(&mut force_redraw, &mut last_tick, runtime.poll_interval);
                     }
                     _ => {}
                 }
@@ -341,27 +457,16 @@ fn run_headless_foreground(
     println!("Press Ctrl+C to stop.");
 
     while !stop.load(Ordering::Relaxed) {
-        let sessions = collect_active_sessions_multi(
+        let snapshot = collect_runtime_snapshot(
             &sessions_roots,
-            runtime.stale_threshold,
-            runtime.active_sticky_window,
+            &runtime,
+            &config,
             &mut git_cache,
             &mut parse_cache,
-            &config.pricing,
+            &mut metrics_tracker,
+            &mut plan_detector,
         )?;
-        metrics_tracker.update(&sessions);
-        metrics_tracker.persist_if_due();
-        let active = preferred_active_session(&sessions);
-        let effective_limits = latest_limits_source(&sessions);
-        let resolved_plan = plan_detector.resolve_from_sessions(&sessions);
-        if let Err(err) = discord.update(
-            active,
-            effective_limits.as_ref().map(|source| &source.limits),
-            &resolved_plan,
-            &config,
-        ) {
-            debug!(error = %err, "discord presence update failed");
-        }
+        publish_runtime_snapshot(&mut discord, &snapshot, &config);
         thread::sleep(runtime.poll_interval);
     }
 
@@ -538,27 +643,16 @@ fn run_codex_wrapper(
             break;
         }
 
-        let sessions = collect_active_sessions_multi(
+        let snapshot = collect_runtime_snapshot(
             &sessions_roots,
-            runtime.stale_threshold,
-            runtime.active_sticky_window,
+            &runtime,
+            &config,
             &mut git_cache,
             &mut parse_cache,
-            &config.pricing,
+            &mut metrics_tracker,
+            &mut plan_detector,
         )?;
-        metrics_tracker.update(&sessions);
-        metrics_tracker.persist_if_due();
-        let active = preferred_active_session(&sessions);
-        let effective_limits = latest_limits_source(&sessions);
-        let resolved_plan = plan_detector.resolve_from_sessions(&sessions);
-        if let Err(err) = discord.update(
-            active,
-            effective_limits.as_ref().map(|source| &source.limits),
-            &resolved_plan,
-            &config,
-        ) {
-            debug!(error = %err, "discord presence update failed");
-        }
+        publish_runtime_snapshot(&mut discord, &snapshot, &config);
 
         if let Some(status) = child
             .try_wait()
@@ -587,16 +681,57 @@ fn spawn_codex_child(args: Vec<String>) -> Result<Child> {
         .context("failed to spawn `codex` child process")
 }
 
+fn collect_runtime_snapshot(
+    sessions_roots: &[PathBuf],
+    runtime: &RuntimeSettings,
+    config: &PresenceConfig,
+    git_cache: &mut GitBranchCache,
+    parse_cache: &mut SessionParseCache,
+    metrics_tracker: &mut MetricsTracker,
+    plan_detector: &mut PlanDetector,
+) -> Result<RuntimeSnapshot> {
+    let sessions = collect_active_sessions_multi(
+        sessions_roots,
+        runtime.stale_threshold,
+        runtime.active_sticky_window,
+        git_cache,
+        parse_cache,
+        &config.pricing,
+    )?;
+    metrics_tracker.update(&sessions);
+    metrics_tracker.persist_if_due();
+    Ok(RuntimeSnapshot::from_sessions(
+        sessions,
+        plan_detector,
+        &config.openai_plan,
+    ))
+}
+
+fn publish_runtime_snapshot(
+    discord: &mut DiscordPresence,
+    snapshot: &RuntimeSnapshot,
+    config: &PresenceConfig,
+) {
+    if let Err(err) = discord.update(
+        snapshot.active_session(),
+        snapshot.effective_limits(),
+        &snapshot.resolved_plan,
+        &snapshot.resolved_service_tier,
+        config,
+    ) {
+        debug!(error = %err, "discord presence update failed");
+    }
+}
+
 fn print_active_summary(
     active: &CodexSessionSnapshot,
     effective_limits: Option<&RateLimits>,
     limits_source: Option<&EffectiveLimitSelection>,
-    show_activity: bool,
-    show_activity_target: bool,
     resolved_plan: &ResolvedPlan,
-    show_price: bool,
+    resolved_service_tier: &ResolvedServiceTier,
+    config: &PresenceConfig,
 ) {
-    let plan_display_label = resolved_plan.label(show_price);
+    let plan_display_label = resolved_plan.label(config.openai_plan.show_price);
     println!("active_session:");
     println!("  session_id: {}", active.session_id);
     println!("  project: {}", active.project_name);
@@ -615,16 +750,34 @@ fn print_active_summary(
     println!("  recency_source: {}", recency_source_label(active));
     println!(
         "  model: {} | {}",
-        format_model_name(active.model.as_deref().unwrap_or("unknown")),
+        format_model_display(
+            active.model.as_deref().unwrap_or("unknown"),
+            active.reasoning_effort,
+            resolved_service_tier.is_fast(),
+        ),
         plan_display_label
     );
-    println!("  plan: {}", resolved_plan.auto_label());
+    println!("  plan: {}", resolved_plan.status_label());
+    println!("  fast_mode: {}", resolved_service_tier.fast_mode_label());
+    if let Some(raw_tier) = resolved_service_tier.raw_tier.as_deref() {
+        println!("  service_tier: {raw_tier}");
+    }
+    if let Some(reasoning_effort) = active.reasoning_effort {
+        println!("  reasoning_effort: {}", reasoning_effort.label());
+    } else {
+        println!("  reasoning_effort: n/a");
+    }
     println!(
         "  branch: {}",
         active.git_branch.as_deref().unwrap_or("n/a")
     );
-    if show_activity && let Some(activity) = &active.activity {
-        println!("  activity: {}", activity.to_text(show_activity_target));
+    if config.privacy.show_activity
+        && let Some(activity) = &active.activity
+    {
+        println!(
+            "  activity: {}",
+            activity.to_text(config.privacy.show_activity_target)
+        );
     }
     if active.total_cost_usd > 0.0 {
         println!("  cost: {}", format_cost(active.total_cost_usd));
@@ -739,4 +892,20 @@ fn install_stop_signal() -> Result<Arc<AtomicBool>> {
     })
     .context("failed to install Ctrl+C handler")?;
     Ok(stop)
+}
+
+fn is_plan_picker_toggle_key(key: &KeyEvent) -> bool {
+    if !matches!(key.kind, KeyEventKind::Press) {
+        return false;
+    }
+
+    matches!(key.code, KeyCode::Char('p') | KeyCode::Char('P'))
+        && !key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+        && !key.modifiers.contains(KeyModifiers::SUPER)
+}
+
+fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interval: Duration) {
+    *force_redraw = true;
+    *last_tick = Instant::now() - poll_interval;
 }

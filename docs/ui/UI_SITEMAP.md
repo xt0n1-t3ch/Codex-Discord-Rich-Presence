@@ -44,7 +44,9 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 
 3. Active Session
 - Project, activity, model + OpenAI plan tier, context window (`used/total` + `% left`).
-- Plan trace row (`Plan: <tier> (auto)`).
+- Model row can include Fast prefix (`⚡`) and effort suffix (`Extra High`).
+- Fast mode row (`Fast Mode: On/Off`).
+- Plan trace row (`Plan: <tier> (manual|auto-detected|remembered|cached)`).
 - Limits trace rows:
   - `Limits Src: <limit_id> (<scope>)`
   - `Updated: <age>`
@@ -68,7 +70,9 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 - Automatic one-line compact entries in constrained space.
 
 6. Footer
-- Bottom-left: quit hint (`Press q or Ctrl+C to quit.`).
+- Bottom-left:
+  - default: `Press P to change plan | q or Ctrl+C to quit.`
+  - when the selector screen is open: navigation/apply/cancel instructions.
 - Bottom-right credits:
   - full: `XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224`
   - medium: `XT0N1.T3CH | @XT0N1.T3CH`
@@ -113,3 +117,19 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
   - green `>= 60%`
   - yellow `>= 30%`
   - red `< 30%`
+
+## 7. Plan Picker
+
+- Opened with `P` from the smart-foreground TUI.
+- Dedicated full-screen selector view with plan list and current/selected summaries:
+  - `Auto Detect`
+  - `Free`
+  - `Go`
+  - `Plus`
+  - `Pro`
+  - `Business`
+  - `Enterprise`
+- Navigation:
+  - arrow keys or `1-7` select
+  - `Enter` applies and persists to `discord-presence-config.json`
+  - `Esc` or `P` closes without applying

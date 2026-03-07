@@ -2,12 +2,13 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET_ROOT="${PROJECT_ROOT}/.build/target"
 cd "${PROJECT_ROOT}"
 
 echo "Building release binary..."
 cargo build --release
 
-BIN_SRC="${PROJECT_ROOT}/target/release/codex-discord-presence"
+BIN_SRC="${TARGET_ROOT}/release/codex-discord-presence"
 if [[ ! -f "${BIN_SRC}" ]]; then
   echo "Release binary not found at ${BIN_SRC}" >&2
   exit 1

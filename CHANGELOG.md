@@ -6,12 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
-- Build/release output layout is now standardized under `releases/` only.
-- Cargo target output root moved from `dist/target` / `.build/target` to `releases/_build-cache`.
-- Release packaging paths updated:
-  - Windows: `releases/windows/x64/{executables,archives}`
-  - Linux: `releases/linux/distros/x64/{executables,archives}`
-  - macOS: `releases/macos/<arch>/{executables,archives}`
+- Published release artifacts remain standardized under `releases/<platform>/`.
+- Cargo build cache is routed to `.build/target` so root-level `target/` stays out of the workspace.
 - CI and release workflows now upload artifacts from `releases/**`.
 - Active-session selection is now recency-first (`last_activity`) with deterministic tie-breaks:
   - `pending_calls`,

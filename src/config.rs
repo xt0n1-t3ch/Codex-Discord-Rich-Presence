@@ -9,11 +9,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::util::write_json_pretty_atomic;
+
 const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 7;
+const CONFIG_SCHEMA_VERSION: u32 = 8;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -88,9 +90,18 @@ impl OpenAiPlanTier {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiPlanMode {
+    #[default]
+    Auto,
+    Manual,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct OpenAiPlanDisplayConfig {
+    pub mode: OpenAiPlanMode,
     pub tier: OpenAiPlanTier,
     pub show_price: bool,
 }
@@ -107,9 +118,83 @@ impl OpenAiPlanDisplayConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlanPreset {
+    pub mode: OpenAiPlanMode,
+    pub tier: Option<OpenAiPlanTier>,
+    pub label: &'static str,
+}
+
+const PLAN_PRESETS: [PlanPreset; 7] = [
+    PlanPreset {
+        mode: OpenAiPlanMode::Auto,
+        tier: None,
+        label: "Auto Detect",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Free),
+        label: "Free",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Go),
+        label: "Go",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Plus),
+        label: "Plus",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Pro),
+        label: "Pro",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Business),
+        label: "Business",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Enterprise),
+        label: "Enterprise",
+    },
+];
+
+pub fn plan_presets() -> &'static [PlanPreset] {
+    &PLAN_PRESETS
+}
+
+pub fn plan_preset_index(plan: &OpenAiPlanDisplayConfig) -> usize {
+    if matches!(plan.mode, OpenAiPlanMode::Auto) {
+        return 0;
+    }
+
+    PLAN_PRESETS
+        .iter()
+        .position(|preset| {
+            matches!(preset.mode, OpenAiPlanMode::Manual) && preset.tier == Some(plan.tier)
+        })
+        .unwrap_or(4)
+}
+
+pub fn apply_plan_preset(plan: &mut OpenAiPlanDisplayConfig, preset_index: usize) {
+    let Some(preset) = PLAN_PRESETS.get(preset_index).copied() else {
+        return;
+    };
+
+    plan.mode = preset.mode;
+    if let Some(tier) = preset.tier {
+        plan.tier = tier;
+    }
+}
+
 impl Default for OpenAiPlanDisplayConfig {
     fn default() -> Self {
         Self {
+            mode: OpenAiPlanMode::Auto,
             tier: OpenAiPlanTier::Pro,
             show_price: true,
         }
@@ -278,14 +363,8 @@ impl PresenceConfig {
 
     pub fn save(&self) -> Result<()> {
         let path = config_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create config directory {}", parent.display())
-            })?;
-        }
-
-        let data = serde_json::to_string_pretty(self)?;
-        fs::write(&path, data).with_context(|| format!("failed to write {}", path.display()))?;
+        write_json_pretty_atomic(&path, self)
+            .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
     }
 
@@ -472,6 +551,28 @@ pub fn sessions_paths() -> Vec<PathBuf> {
 
 pub fn config_path() -> PathBuf {
     codex_home().join("discord-presence-config.json")
+}
+
+pub fn global_state_paths() -> Vec<PathBuf> {
+    let mut ordered: Vec<PathBuf> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    push_unique_path(
+        &mut ordered,
+        &mut seen,
+        codex_home().join(".codex-global-state.json"),
+    );
+    for sessions_root in sessions_paths() {
+        if let Some(home) = sessions_root.parent() {
+            push_unique_path(
+                &mut ordered,
+                &mut seen,
+                home.join(".codex-global-state.json"),
+            );
+        }
+    }
+
+    ordered
 }
 
 pub fn lock_path() -> PathBuf {
@@ -771,7 +872,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 7);
+        assert_eq!(cfg.schema_version, 8);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
             Some(DEFAULT_DISCORD_CLIENT_ID)
@@ -784,6 +885,7 @@ mod tests {
             cfg.discord_public_key.as_deref(),
             Some(DEFAULT_DISCORD_PUBLIC_KEY)
         );
+        assert_eq!(cfg.openai_plan.mode, OpenAiPlanMode::Auto);
         assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro);
         assert!(cfg.openai_plan.show_price);
     }
@@ -856,6 +958,7 @@ mod tests {
     #[test]
     fn default_openai_plan_is_pro_with_price() {
         let cfg = PresenceConfig::default();
+        assert_eq!(cfg.openai_plan.mode, OpenAiPlanMode::Auto);
         assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro);
         assert!(cfg.openai_plan.show_price);
         assert_eq!(cfg.openai_plan.label(), "Pro ($200/month)");
@@ -864,9 +967,33 @@ mod tests {
     #[test]
     fn openai_plan_label_without_price_uses_tier_name_only() {
         let cfg = OpenAiPlanDisplayConfig {
+            mode: OpenAiPlanMode::Manual,
             tier: OpenAiPlanTier::Go,
             show_price: false,
         };
         assert_eq!(cfg.label(), "Go");
+    }
+
+    #[test]
+    fn plan_preset_index_tracks_auto_and_manual_modes() {
+        assert_eq!(plan_preset_index(&PresenceConfig::default().openai_plan), 0);
+        let plan = OpenAiPlanDisplayConfig {
+            mode: OpenAiPlanMode::Manual,
+            tier: OpenAiPlanTier::Business,
+            show_price: true,
+        };
+        assert_eq!(plan_preset_index(&plan), 5);
+    }
+
+    #[test]
+    fn apply_plan_preset_switches_between_auto_and_manual() {
+        let mut plan = PresenceConfig::default().openai_plan;
+        apply_plan_preset(&mut plan, 3);
+        assert_eq!(plan.mode, OpenAiPlanMode::Manual);
+        assert_eq!(plan.tier, OpenAiPlanTier::Plus);
+
+        apply_plan_preset(&mut plan, 0);
+        assert_eq!(plan.mode, OpenAiPlanMode::Auto);
+        assert_eq!(plan.tier, OpenAiPlanTier::Plus);
     }
 }

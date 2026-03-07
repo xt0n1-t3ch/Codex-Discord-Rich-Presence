@@ -6,8 +6,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::config;
+use crate::config::{OpenAiPlanDisplayConfig, OpenAiPlanMode, OpenAiPlanTier};
 use crate::session::CodexSessionSnapshot;
 use crate::telemetry::limits::RateLimitScope;
+use crate::util::write_json_pretty_atomic;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -53,9 +55,23 @@ impl DetectedPlanTier {
     }
 }
 
+impl From<OpenAiPlanTier> for DetectedPlanTier {
+    fn from(value: OpenAiPlanTier) -> Self {
+        match value {
+            OpenAiPlanTier::Free => Self::Free,
+            OpenAiPlanTier::Go => Self::Go,
+            OpenAiPlanTier::Plus => Self::Plus,
+            OpenAiPlanTier::Business => Self::Business,
+            OpenAiPlanTier::Enterprise => Self::Enterprise,
+            OpenAiPlanTier::Pro => Self::Pro,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DetectedPlanSource {
+    Manual,
     Telemetry,
     Memory,
     Cache,
@@ -66,6 +82,7 @@ pub enum DetectedPlanSource {
 impl DetectedPlanSource {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Manual => "manual",
             Self::Telemetry => "telemetry",
             Self::Memory => "memory",
             Self::Cache => "cache",
@@ -98,8 +115,14 @@ impl ResolvedPlan {
         self.tier.label(show_price)
     }
 
-    pub fn auto_label(&self) -> String {
-        format!("{} (auto-detected)", self.tier.title())
+    pub fn status_label(&self) -> String {
+        match self.source {
+            DetectedPlanSource::Manual => format!("{} (manual)", self.tier.title()),
+            DetectedPlanSource::Telemetry => format!("{} (auto-detected)", self.tier.title()),
+            DetectedPlanSource::Memory => format!("{} (remembered)", self.tier.title()),
+            DetectedPlanSource::Cache => format!("{} (cached)", self.tier.title()),
+            DetectedPlanSource::Unknown => self.tier.title().to_string(),
+        }
     }
 }
 
@@ -132,7 +155,27 @@ impl PlanDetector {
         }
     }
 
-    pub fn resolve_from_sessions(&mut self, sessions: &[CodexSessionSnapshot]) -> ResolvedPlan {
+    pub fn resolve_from_sessions(
+        &mut self,
+        sessions: &[CodexSessionSnapshot],
+        plan_config: &OpenAiPlanDisplayConfig,
+    ) -> ResolvedPlan {
+        let auto_resolved = self.resolve_auto_from_sessions(sessions);
+
+        if matches!(plan_config.mode, OpenAiPlanMode::Manual) {
+            let raw_plan_type = plan_config.tier.title().to_ascii_lowercase();
+            return ResolvedPlan {
+                tier: plan_config.tier.into(),
+                source: DetectedPlanSource::Manual,
+                observed_at: None,
+                raw_plan_type: Some(raw_plan_type),
+            };
+        }
+
+        auto_resolved
+    }
+
+    fn resolve_auto_from_sessions(&mut self, sessions: &[CodexSessionSnapshot]) -> ResolvedPlan {
         if let Some(signal) = select_plan_signal(sessions) {
             let resolved = ResolvedPlan {
                 tier: parse_plan_type(signal.raw_plan_type.as_deref()),
@@ -214,17 +257,13 @@ fn save_plan_cache(plan: &ResolvedPlan) -> std::io::Result<()> {
 }
 
 fn save_plan_cache_to_path(plan: &ResolvedPlan, path: &Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let payload = PlanCacheFile {
         tier: plan.tier,
         source: plan.source,
         observed_at: plan.observed_at,
         raw_plan_type: plan.raw_plan_type.clone(),
     };
-    let data = serde_json::to_string_pretty(&payload)?;
-    fs::write(path, data)
+    write_json_pretty_atomic(path, &payload)
 }
 
 #[derive(Debug)]
@@ -306,6 +345,7 @@ mod tests {
             originator: None,
             source: None,
             model: Some("gpt-5.3-codex".to_string()),
+            reasoning_effort: None,
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: Some(1),
@@ -386,9 +426,27 @@ mod tests {
             sample_session(Some("plus"), RateLimitScope::ModelScoped),
             sample_session(Some("pro"), RateLimitScope::GlobalCodex),
         ];
-        let resolved = detector.resolve_from_sessions(&sessions);
+        let resolved =
+            detector.resolve_from_sessions(&sessions, &OpenAiPlanDisplayConfig::default());
         assert_eq!(resolved.tier, DetectedPlanTier::Pro);
         assert_eq!(resolved.source, DetectedPlanSource::Telemetry);
+    }
+
+    #[test]
+    fn detector_respects_manual_override() {
+        let mut detector = PlanDetector::new();
+        let sessions = vec![sample_session(Some("free"), RateLimitScope::GlobalCodex)];
+        let resolved = detector.resolve_from_sessions(
+            &sessions,
+            &OpenAiPlanDisplayConfig {
+                mode: OpenAiPlanMode::Manual,
+                tier: OpenAiPlanTier::Plus,
+                show_price: false,
+            },
+        );
+        assert_eq!(resolved.tier, DetectedPlanTier::Plus);
+        assert_eq!(resolved.source, DetectedPlanSource::Manual);
+        assert_eq!(resolved.status_label(), "Plus (manual)");
     }
 
     #[test]

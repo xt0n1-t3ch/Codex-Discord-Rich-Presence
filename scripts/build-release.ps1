@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptRoot
+$targetRoot = Join-Path $projectRoot ".build\target"
 Set-Location $projectRoot
 
 $cargoCmd = if (Get-Command cargo -ErrorAction SilentlyContinue) {
@@ -17,7 +18,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "cargo build --release failed with exit code $LASTEXITCODE"
 }
 
-$sourceBinary = Join-Path $projectRoot "target\release\codex-discord-presence.exe"
+$sourceBinary = Join-Path $targetRoot "release\codex-discord-presence.exe"
 if (-not (Test-Path $sourceBinary)) {
     throw "Release binary not found at $sourceBinary"
 }

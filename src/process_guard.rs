@@ -1,12 +1,13 @@
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::config;
+use crate::util::write_json_pretty_atomic;
 use anyhow::{Context, Result, bail};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -272,22 +273,13 @@ fn write_pid_compat(file: &mut File) -> Result<()> {
     Ok(())
 }
 
-fn write_instance_metadata(path: &PathBuf, metadata: &InstanceMetadata) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "failed to create instance metadata directory {}",
-                parent.display()
-            )
-        })?;
-    }
-    let payload = serde_json::to_string_pretty(metadata)?;
-    fs::write(path, payload)
+fn write_instance_metadata(path: &Path, metadata: &InstanceMetadata) -> Result<()> {
+    write_json_pretty_atomic(path, metadata)
         .with_context(|| format!("failed to write instance metadata {}", path.display()))?;
     Ok(())
 }
 
-fn read_instance_metadata(path: &PathBuf) -> Result<Option<InstanceMetadata>> {
+fn read_instance_metadata(path: &Path) -> Result<Option<InstanceMetadata>> {
     if !path.exists() {
         return Ok(None);
     }
@@ -298,7 +290,7 @@ fn read_instance_metadata(path: &PathBuf) -> Result<Option<InstanceMetadata>> {
     Ok(Some(parsed))
 }
 
-fn remove_instance_metadata_if_owned(expected_pid: u32, path: &PathBuf) {
+fn remove_instance_metadata_if_owned(expected_pid: u32, path: &Path) {
     let Ok(Some(metadata)) = read_instance_metadata(path) else {
         return;
     };

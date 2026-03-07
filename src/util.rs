@@ -1,7 +1,13 @@
+use std::io::{self, Write};
+use std::path::Path;
 use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
+use serde::Serialize;
+use tempfile::NamedTempFile;
 use tracing_subscriber::{EnvFilter, fmt};
+
+use crate::session::ReasoningEffort;
 
 pub fn setup_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -46,6 +52,22 @@ pub fn format_model_name(model_id: &str) -> String {
         .map(format_model_component)
         .collect::<Vec<_>>()
         .join("-")
+}
+
+pub fn format_model_display(
+    model_id: &str,
+    reasoning_effort: Option<ReasoningEffort>,
+    fast_active: bool,
+) -> String {
+    let base = format_model_name(model_id);
+    let effort_suffix = reasoning_effort
+        .map(|value| format!(" ({})", value.label()))
+        .unwrap_or_default();
+    if fast_active {
+        format!("⚡ {base}{effort_suffix}")
+    } else {
+        format!("{base}{effort_suffix}")
+    }
 }
 
 fn format_model_component(component: &str) -> String {
@@ -139,9 +161,9 @@ pub fn truncate(input: &str, max_len: usize) -> String {
         return input.to_string();
     }
     if max_len <= 3 {
-        return input[..max_len].to_string();
+        return safe_prefix(input, max_len).to_string();
     }
-    format!("{}...", &input[..max_len - 3])
+    format!("{}...", safe_prefix(input, max_len - 3))
 }
 
 pub fn now_local() -> String {
@@ -158,6 +180,30 @@ pub fn format_since(target: Option<DateTime<Utc>>) -> String {
     }
     let delta = (now - target).to_std().unwrap_or_default();
     format!("{} ago", human_duration(delta))
+}
+
+pub fn write_text_atomic(path: &Path, contents: &str) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+
+    let mut temp = NamedTempFile::new_in(parent)?;
+    temp.write_all(contents.as_bytes())?;
+    temp.flush()?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(path).map(|_| ()).map_err(|err| err.error)
+}
+
+pub fn write_json_pretty_atomic<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
+    let json = serde_json::to_string_pretty(value).map_err(io::Error::other)?;
+    write_text_atomic(path, &json)
+}
+
+fn safe_prefix(input: &str, max_len: usize) -> &str {
+    let mut end = max_len.min(input.len());
+    while end > 0 && !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    &input[..end]
 }
 
 #[cfg(test)]
@@ -199,5 +245,29 @@ mod tests {
             "GPT-5.1-Codex-Mini"
         );
         assert_eq!(format_model_name("o3"), "O3");
+    }
+
+    #[test]
+    fn model_display_includes_fast_icon_and_effort() {
+        assert_eq!(
+            format_model_display("gpt-5.4", Some(ReasoningEffort::XHigh), true),
+            "⚡ GPT-5.4 (Extra High)"
+        );
+    }
+
+    #[test]
+    fn truncate_is_utf8_safe() {
+        assert_eq!(truncate("⚡ GPT-5.4", 6), "⚡...");
+    }
+
+    #[test]
+    fn write_text_atomic_replaces_existing_file_contents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.json");
+
+        write_text_atomic(&path, "first").expect("write first");
+        write_text_atomic(&path, "second").expect("write second");
+
+        assert_eq!(std::fs::read_to_string(path).expect("read"), "second");
     }
 }

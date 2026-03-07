@@ -85,6 +85,43 @@ impl SessionActivitySnapshot {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+}
+
+impl ReasoningEffort {
+    pub fn parse(raw: Option<&str>) -> Option<Self> {
+        let normalized = raw
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .filter(|value| !value.is_empty())?;
+        match normalized.as_str() {
+            "minimal" => Some(Self::Minimal),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "xhigh" | "extra_high" | "extra-high" => Some(Self::XHigh),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Minimal => "Minimal",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::XHigh => "Extra High",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodexSessionSnapshot {
     pub session_id: String,
@@ -94,6 +131,7 @@ pub struct CodexSessionSnapshot {
     pub originator: Option<String>,
     pub source: Option<String>,
     pub model: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub approval_policy: Option<String>,
     pub sandbox_policy: Option<String>,
     pub session_total_tokens: Option<u64>,
@@ -544,6 +582,7 @@ struct SessionAccumulator {
     originator: Option<String>,
     source: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<ReasoningEffort>,
     approval_policy: Option<String>,
     sandbox_policy: Option<String>,
     session_total_tokens: Option<u64>,
@@ -776,6 +815,9 @@ impl SessionAccumulator {
                 if self.model.is_none() {
                     self.model = str_at(payload, &["model"]);
                 }
+                if let Some(reasoning_effort) = turn_context_reasoning_effort(payload) {
+                    self.reasoning_effort = Some(reasoning_effort);
+                }
                 if self.approval_policy.is_none() {
                     self.approval_policy = str_at(payload, &["approval_policy"]);
                 }
@@ -1003,6 +1045,7 @@ impl SessionAccumulator {
             originator: self.originator.clone(),
             source: self.source.clone(),
             model: self.model.clone(),
+            reasoning_effort: self.reasoning_effort,
             approval_policy: self.approval_policy.clone(),
             sandbox_policy: self.sandbox_policy.clone(),
             session_total_tokens: self.session_total_tokens,
@@ -1519,6 +1562,17 @@ fn model_context_window_from_info(payload: &Value) -> Option<u64> {
     uint_at(payload, &["info", "model_context_window"])
 }
 
+fn turn_context_reasoning_effort(payload: &Value) -> Option<ReasoningEffort> {
+    if let Some(raw) = str_at(payload, &["effort"]) {
+        return ReasoningEffort::parse(Some(raw.as_str()));
+    }
+    let nested = str_at(
+        payload,
+        &["collaboration_mode", "settings", "reasoning_effort"],
+    );
+    ReasoningEffort::parse(nested.as_deref())
+}
+
 fn last_input_tokens_from_info(payload: &Value) -> Option<u64> {
     uint_at(payload, &["info", "last_token_usage", "input_tokens"])
 }
@@ -1673,6 +1727,7 @@ mod tests {
             originator: None,
             source: None,
             model: None,
+            reasoning_effort: None,
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: None,
@@ -1831,6 +1886,22 @@ mod tests {
         let activity = snapshot.activity.expect("activity");
         assert_eq!(activity.kind, SessionActivityKind::RunningCommand);
         assert_eq!(activity.target.as_deref(), Some("cargo test"));
+    }
+
+    #[test]
+    fn parses_reasoning_effort_from_turn_context_root_field() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-02-23T03:40:38Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.4","effort":"xhigh"}}"#,
+        );
+        assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::XHigh));
+    }
+
+    #[test]
+    fn falls_back_to_nested_turn_context_reasoning_effort() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-02-23T03:40:38Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.4","collaboration_mode":{"mode":"default","settings":{"reasoning_effort":"high"}}}}"#,
+        );
+        assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::High));
     }
 
     #[test]
@@ -2065,6 +2136,7 @@ mod tests {
             originator: None,
             source: None,
             model: None,
+            reasoning_effort: None,
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: None,
@@ -2119,6 +2191,7 @@ mod tests {
             originator: None,
             source: None,
             model: None,
+            reasoning_effort: None,
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: None,

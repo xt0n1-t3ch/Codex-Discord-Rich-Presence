@@ -61,11 +61,12 @@ codex-discord-presence doctor
 
 ## Build/Release Artifact Layout Contract
 
-All generated build and release outputs are written under `releases/`:
+Published release artifacts are written under `releases/`:
 
 - Windows executable output: `releases/windows/codex-discord-rich-presence.exe`
 - Linux executable output: `releases/linux/codex-discord-rich-presence`
 - macOS executable output: `releases/macos/codex-discord-rich-presence`
+- Internal Cargo build cache is routed to `.build/target` (gitignored) so root-level `target/` stays out of the workspace.
 - Release packaging scripts:
   - `scripts/build-release.ps1` (Windows)
   - `scripts/build-release.sh` (Linux/macOS)
@@ -128,8 +129,12 @@ When privacy mode is disabled:
     - `Thinking - Property Alpha (tony/mobile1)`
 - `state`: prioritized compact telemetry
   - `<model> | <plan> • $cost • N tok • Ctx L% • 5h A% • 7d B%`
-  - model ids are display-formatted (for example `GPT-5.3-Codex`).
-  - plan label is auto-detected from telemetry (`rate_limits.plan_type`) with cache fallback.
+  - model labels can include:
+    - Fast prefix: `⚡ GPT-5.4`
+    - effort suffix: `GPT-5.4 (Extra High)`
+  - plan label is resolved from either:
+    - telemetry/cache (`openai_plan.mode = "auto"`), or
+    - config override (`openai_plan.mode = "manual"`).
   - truncation policy drops lower-priority tail fields first.
   - model + plan and cost remain pinned whenever present.
   - bounded to Discord field limits (2..128 chars).
@@ -163,7 +168,7 @@ Update behavior:
 ## Local Config Contract
 
 - Path: `~/.codex/discord-presence-config.json`
-- Schema: `7`
+- Schema: `8`
 - Key fields:
   - `discord_client_id`
   - `discord_client_id_desktop`
@@ -183,21 +188,36 @@ Update behavior:
   - `display.terminal_logo_path`
   - `pricing.aliases` (model-id alias map)
   - `pricing.overrides` (per-model `input_per_million`, `cached_input_per_million`, `output_per_million`)
-  - `openai_plan.tier` (legacy/deprecated at runtime)
-  - `openai_plan.show_price` (applies to auto-detected plan label)
+  - `openai_plan.mode` (`auto` or `manual`)
+  - `openai_plan.tier` (displayed plan when `openai_plan.mode = "manual"`)
+  - `openai_plan.show_price` (applies to the resolved plan label)
 
 ## Plan Detection Contract
 
 - Runtime plan source priority:
-  1. latest non-null `rate_limits.plan_type` (prefer global `limit_id=codex` signal),
-  2. in-memory last known telemetry value,
-  3. persisted cache `~/.codex/discord-presence-plan-cache.json`,
-  4. fallback `Unknown`.
+  1. `openai_plan.mode = "manual"` => use configured `openai_plan.tier`,
+  2. latest non-null `rate_limits.plan_type` (prefer global `limit_id=codex` signal),
+  3. in-memory last known telemetry value,
+  4. persisted cache `~/.codex/discord-presence-plan-cache.json`,
+  5. fallback `Unknown`.
 - Supported mapped tiers:
   - `free`, `go`, `plus`, `business`, `enterprise`, `pro`, `unknown`.
 - Spark policy:
   - `gpt-5.3-codex-spark` is treated as Pro-only for diagnostics.
   - non-Pro + Spark is flagged as telemetry anomaly in TUI (no crash; Discord remains compact).
+
+## Fast Mode + Effort Contract
+
+- Fast mode is resolved from `~/.codex/.codex-global-state.json`.
+  - source JSON path: `electron-persisted-atom-state.default-service-tier`
+  - `fast` => Fast mode on
+  - any other or missing value => Fast mode off
+- Reasoning effort is resolved from the active session turn context:
+  1. `turn_context.payload.effort`
+  2. fallback `turn_context.payload.collaboration_mode.settings.reasoning_effort`
+- Supported effort labels:
+  - `minimal`, `low`, `medium`, `high`, `xhigh`
+  - `xhigh` is displayed as `Extra High`
 
 ## Context Window Contract
 

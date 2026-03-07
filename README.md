@@ -18,7 +18,7 @@
 
 ## Table of Contents
 
-- [Why This Project](#why-this-project)
+- [About This Project](#why-this-project)
 - [Highlights](#highlights)
 - [Quick Start](#quick-start)
 - [How Surface Routing Works](#how-surface-routing-works)
@@ -74,6 +74,12 @@ cargo build --release
 codex-discord-presence
 ```
 
+While the TUI is open:
+
+- Press `P` to open the account-plan selector screen.
+- Use arrow keys or `1-7` to select `Auto Detect`, `Free`, `Go`, `Plus`, `Pro`, `Business`, or `Enterprise`.
+- Press `Enter` to apply and save immediately, or `P` / `Esc` to close without applying.
+
 ### 4. Validate health
 
 ```bash
@@ -117,7 +123,7 @@ Essential defaults:
 
 | Key | Value |
 | --- | --- |
-| `schema_version` | `7` |
+| `schema_version` | `8` |
 | `discord_client_id` | `1470480085453770854` |
 | `discord_client_id_desktop` | `1478395304624652345` |
 | `display.large_image_key` | `codex-logo` |
@@ -125,8 +131,17 @@ Essential defaults:
 | `display.desktop_large_text` | `Codex App` |
 | `display.small_image_key` | `openai` |
 | `privacy.show_cost` | `true` |
+| `openai_plan.mode` | `auto` |
+| `openai_plan.tier` | `pro` |
 | `openai_plan.show_price` | `true` |
 | `poll_interval_seconds` | `2` |
+
+Plan and model display notes:
+
+- `openai_plan.mode = "manual"` makes `openai_plan.tier` the displayed account plan.
+- `openai_plan.mode = "auto"` keeps telemetry/cache-based plan detection enabled.
+- Fast mode is derived from `~/.codex/.codex-global-state.json` (`default-service-tier = "fast"`).
+- Reasoning effort is derived from `turn_context.effort` with fallback to nested collaboration-mode settings.
 
 Environment overrides:
 
@@ -140,6 +155,8 @@ Environment overrides:
 ## Build and Artifacts
 
 Published binaries are available in [GitHub Releases](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases).
+
+Local Cargo build cache is stored under `.build/target` (gitignored). Final release binaries are copied into `releases/<platform>/`.
 
 Expected artifact layout:
 

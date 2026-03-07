@@ -14,6 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TERM_COLOR: always
+      CARGO_TARGET_DIR: .build/target
     strategy:
       fail-fast: false
       matrix:
@@ -66,7 +67,7 @@ jobs:
             BIN_OUT="${BIN_OUT}-${ARCH}"
           fi
           mkdir -p "${OUT_DIR}"
-          cp "target/${{ matrix.target }}/release/${BIN_SRC}" "${OUT_DIR}/${BIN_OUT}"
+          cp "${CARGO_TARGET_DIR}/${{ matrix.target }}/release/${BIN_SRC}" "${OUT_DIR}/${BIN_OUT}"
           chmod +x "${OUT_DIR}/${BIN_OUT}"
           cp "assets/branding/codex-app.png" "${OUT_DIR}/codex-app.png"
 
@@ -78,7 +79,7 @@ jobs:
           $OS_NAME = "${{ matrix.os_name }}"
           $OUT_DIR = "releases/$OS_NAME"
           New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/$BIN" "$OUT_DIR/codex-discord-rich-presence.exe" -Force
+          Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/$BIN" "$OUT_DIR/codex-discord-rich-presence.exe" -Force
           Copy-Item "assets/branding/codex-app.png" "$OUT_DIR/codex-app.png" -Force
 
       - name: Upload artifacts

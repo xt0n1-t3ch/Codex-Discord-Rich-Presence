@@ -10,12 +10,12 @@ use crossterm::style::{Color, Stylize};
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use viuer::Config as ViuerConfig;
 
-use crate::config::TerminalLogoMode;
+use crate::config::{OpenAiPlanMode, OpenAiPlanTier, PlanPreset, TerminalLogoMode, plan_presets};
 use crate::metrics::MetricsSnapshot;
 use crate::session::{CodexSessionSnapshot, RateLimits, UsageWindow};
 use crate::util::{
-    format_cost, format_model_name, format_time_until, format_token_triplet, format_tokens,
-    human_duration, now_local, progress_bar, truncate,
+    format_cost, format_model_display, format_model_name, format_time_until, format_token_triplet,
+    format_tokens, human_duration, now_local, progress_bar, truncate,
 };
 
 const FOOTER_ROWS: u16 = 1;
@@ -105,7 +105,9 @@ pub struct RenderData<'a> {
     pub show_activity: bool,
     pub show_activity_target: bool,
     pub plan_display_label: &'a str,
-    pub plan_auto_label: &'a str,
+    pub plan_status_label: &'a str,
+    pub fast_mode_label: &'a str,
+    pub fast_active: bool,
     pub limits_source_label: &'a str,
     pub limits_updated_label: &'a str,
     pub spark_plan_warning: Option<&'a str>,
@@ -116,6 +118,13 @@ pub struct RenderData<'a> {
     pub effective_limits: Option<&'a RateLimits>,
     pub metrics: Option<&'a MetricsSnapshot>,
     pub sessions: &'a [CodexSessionSnapshot],
+    pub plan_picker: Option<PlanPickerView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlanPickerView {
+    pub selected_index: usize,
+    pub current_index: usize,
 }
 
 pub fn enter_terminal() -> Result<()> {
@@ -139,14 +148,21 @@ pub fn draw(data: &RenderData<'_>) -> Result<()> {
         return Ok(());
     }
 
+    execute!(out, MoveTo(0, 0), Clear(ClearType::All))?;
+
+    if let Some(plan_picker) = data.plan_picker {
+        render_plan_picker_screen(&mut out, width, height, plan_picker)?;
+        render_footer(&mut out, width as usize, height, true)?;
+        out.flush()?;
+        return Ok(());
+    }
+
     let budget = FrameBudget::new(width, height);
     let max_body_row = budget.body_bottom();
     let layout = select_layout_mode(width, height);
     let w = width as usize;
     let reserved_recent = reserved_recent_rows(layout, max_body_row);
     let top_body_limit = max_body_row.saturating_sub(reserved_recent);
-
-    execute!(out, MoveTo(0, 0), Clear(ClearType::All))?;
 
     let mut row = 0u16;
     let banner_options = BannerRenderOptions {
@@ -171,7 +187,7 @@ pub fn draw(data: &RenderData<'_>) -> Result<()> {
         row = top_body_limit;
     }
     render_recent_section(&mut out, &mut row, max_body_row, w, layout, data)?;
-    render_footer(&mut out, w, height)?;
+    render_footer(&mut out, w, height, false)?;
 
     out.flush()?;
     Ok(())
@@ -181,28 +197,44 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     let mut signature = String::with_capacity(768);
     let _ = write!(
         signature,
-        "{}|{}|{}|{}|{}|{}|{}|{}|",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
         data.mode_label,
         data.discord_status,
         data.client_id_configured,
         data.show_activity,
         data.show_activity_target,
         data.plan_display_label,
+        data.plan_status_label,
+        data.fast_mode_label,
+        data.fast_active,
         data.sessions.len(),
-        data.banner_phase
+        data.banner_phase,
+        data.plan_picker
+            .map(|value| value.selected_index)
+            .unwrap_or(usize::MAX),
+        data.plan_picker
+            .map(|value| value.current_index)
+            .unwrap_or(usize::MAX)
     );
     let _ = write!(
         signature,
-        "plan:{}|ls:{}|lu:{}|",
-        data.plan_auto_label, data.limits_source_label, data.limits_updated_label
+        "plan:{}|fast:{}|ls:{}|lu:{}|",
+        data.plan_status_label,
+        data.fast_mode_label,
+        data.limits_source_label,
+        data.limits_updated_label
     );
 
     if let Some(active) = data.active {
         let _ = write!(
             signature,
-            "active:{}|{}|{}|{}|{}|",
+            "active:{}|{}|{}|{}|{}|{}|",
             active.session_id,
             active.model.as_deref().unwrap_or(""),
+            active
+                .reasoning_effort
+                .map(|value| value.label())
+                .unwrap_or(""),
             active.git_branch.as_deref().unwrap_or(""),
             active.session_total_tokens.unwrap_or(0),
             active.session_delta_tokens.unwrap_or(0),
@@ -366,7 +398,11 @@ fn render_active_section(
 
     let model_line = format!(
         "{} | {}",
-        format_model_name(active.model.as_deref().unwrap_or("unknown")),
+        format_model_display(
+            active.model.as_deref().unwrap_or("unknown"),
+            active.reasoning_effort,
+            data.fast_active,
+        ),
         data.plan_display_label
     );
     if !write_line(
@@ -375,6 +411,15 @@ fn render_active_section(
         max_body_row,
         width,
         &kv_line("Model", &truncate(&model_line, width.saturating_sub(13))),
+    )? {
+        return Ok(());
+    }
+    if !write_line(
+        out,
+        row,
+        max_body_row,
+        width,
+        &kv_line("Fast Mode", data.fast_mode_label),
     )? {
         return Ok(());
     }
@@ -401,7 +446,7 @@ fn render_active_section(
         return Ok(());
     }
     if matches!(layout, UiLayoutMode::Minimal) {
-        let account_line = format!("{} | {}", data.plan_auto_label, data.limits_updated_label);
+        let account_line = format!("{} | Fast {}", data.plan_status_label, data.fast_mode_label);
         if !write_line(
             out,
             row,
@@ -417,7 +462,7 @@ fn render_active_section(
             row,
             max_body_row,
             width,
-            &kv_line("Account Type", data.plan_auto_label),
+            &kv_line("Account Type", data.plan_status_label),
         )? {
             return Ok(());
         }
@@ -948,13 +993,18 @@ fn logo_image_rows(image_width_cells: u32) -> u16 {
     }
 }
 
-fn render_footer(out: &mut impl Write, width: usize, height: u16) -> Result<()> {
+fn render_footer(
+    out: &mut impl Write,
+    width: usize,
+    height: u16,
+    plan_picker_open: bool,
+) -> Result<()> {
     if height == 0 || width == 0 {
         return Ok(());
     }
 
     let row = height - 1;
-    let (left, right) = footer_parts(width);
+    let (left, right) = footer_parts(width, plan_picker_open);
     execute!(out, MoveTo(0, row), Clear(ClearType::CurrentLine))?;
     write!(out, "{left}")?;
 
@@ -966,12 +1016,17 @@ fn render_footer(out: &mut impl Write, width: usize, height: u16) -> Result<()> 
     Ok(())
 }
 
-fn footer_parts(width: usize) -> (String, String) {
+fn footer_parts(width: usize, plan_picker_open: bool) -> (String, String) {
     if width == 0 {
         return (String::new(), String::new());
     }
 
-    let left = truncate("Press q or Ctrl+C to quit.", width);
+    let left_text = if plan_picker_open {
+        "Plan selector: arrows or 1-7 move | Enter apply | P or Esc close"
+    } else {
+        "Press P to change plan | q or Ctrl+C to quit."
+    };
+    let left = truncate(left_text, width);
     if width <= left.len() + 1 {
         return (left, String::new());
     }
@@ -1176,6 +1231,176 @@ fn author_credit(width: usize) -> String {
     }
 }
 
+fn render_plan_picker_screen(
+    out: &mut impl Write,
+    width: u16,
+    height: u16,
+    plan_picker: PlanPickerView,
+) -> Result<()> {
+    let presets = plan_presets();
+    if presets.is_empty() || width < 24 || height < 10 {
+        return Ok(());
+    }
+
+    let width = width as usize;
+    let body_bottom = height.saturating_sub(FOOTER_ROWS);
+    render_plan_picker_backdrop(out, width, body_bottom)?;
+
+    let current_label = presets
+        .get(plan_picker.current_index)
+        .map(|preset| preset.label)
+        .unwrap_or("Auto Detect");
+    let selected_label = presets
+        .get(plan_picker.selected_index)
+        .map(|preset| preset.label)
+        .unwrap_or("Auto Detect");
+
+    let mut lines: Vec<String> = Vec::with_capacity(presets.len() + 10);
+    lines.push("Account Plan Selector".to_string());
+    lines.push("Choose the OpenAI plan shown in Discord and the TUI.".to_string());
+    lines.push("".to_string());
+    lines.push(format!("Current setting : {current_label}"));
+    lines.push(format!("Selected option : {selected_label}"));
+    lines.push("".to_string());
+    for (idx, preset) in presets.iter().copied().enumerate() {
+        let active_suffix = if idx == plan_picker.current_index {
+            " [active]"
+        } else {
+            ""
+        };
+        lines.push(format!(
+            "[{}] {:<10} {}{}",
+            idx + 1,
+            preset.label,
+            plan_preset_detail(preset),
+            active_suffix
+        ));
+    }
+    lines.push("".to_string());
+    lines.push("Enter applies immediately and saves to config.".to_string());
+    lines.push("Press P or Esc to close without changing the plan.".to_string());
+
+    let inner_width = lines
+        .iter()
+        .map(|line| line.len())
+        .max()
+        .unwrap_or(24)
+        .min(width.saturating_sub(6))
+        .max(24);
+    let box_width = inner_width + 4;
+    let box_height = (lines.len() + 2) as u16;
+    let start_col = width.saturating_sub(box_width) / 2;
+    let show_codex_header = width >= banner_ascii_width(&CODEX_ASCII) + 2
+        && body_bottom >= box_height + CODEX_ASCII.len() as u16 + 3;
+    let start_row = if show_codex_header {
+        let group_height = CODEX_ASCII.len() as u16 + 1 + box_height;
+        let group_top = body_bottom.saturating_sub(group_height) / 2;
+        let mut header_row = group_top;
+        draw_codex_ascii_banner(out, &mut header_row, body_bottom, width, 0)?;
+        header_row.saturating_add(1)
+    } else {
+        body_bottom.saturating_sub(box_height) / 2
+    };
+
+    let top = format!("+{}+", "-".repeat(inner_width + 2));
+    let bottom = top.clone();
+    execute!(out, MoveTo(start_col as u16, start_row))?;
+    write!(out, "{}", top.as_str().with(Color::Grey))?;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let row = start_row + idx as u16 + 1;
+        let is_option = idx >= 6 && idx < 6 + presets.len();
+        let mut content = line.clone();
+        if is_option {
+            let option_index = idx - 6;
+            let prefix = if option_index == plan_picker.selected_index {
+                ">"
+            } else {
+                " "
+            };
+            content = format!("{prefix} {line}");
+        }
+        let padded = format!(
+            " {:<width$} ",
+            truncate(&content, inner_width),
+            width = inner_width
+        );
+        execute!(out, MoveTo(start_col as u16, row))?;
+        write!(out, "{}", "|".with(Color::Grey))?;
+        if idx == 0 {
+            write!(out, "{}", padded.as_str().with(Color::White).bold())?;
+        } else if idx == 1 || idx == 3 {
+            write!(out, "{}", padded.as_str().with(Color::Grey))?;
+        } else if idx == 4 {
+            write!(out, "{}", padded.as_str().with(Color::White).bold())?;
+        } else if idx == 5 {
+            write!(out, "{}", padded.as_str().with(Color::DarkGrey))?;
+        } else if is_option && idx - 6 == plan_picker.selected_index {
+            write!(out, "{}", padded.as_str().black().on_white().bold())?;
+        } else if is_option && idx - 6 == plan_picker.current_index {
+            write!(out, "{}", padded.as_str().with(Color::Green))?;
+        } else if is_option {
+            write!(out, "{}", padded.as_str().with(Color::Grey))?;
+        } else if idx + 2 >= lines.len() {
+            write!(out, "{}", padded.as_str().with(Color::DarkGrey))?;
+        } else {
+            write!(out, "{padded}")?;
+        }
+        write!(out, "{}", "|".with(Color::Grey))?;
+    }
+
+    let bottom_row = start_row + box_height - 1;
+    execute!(out, MoveTo(start_col as u16, bottom_row))?;
+    write!(out, "{}", bottom.as_str().with(Color::Grey))?;
+    Ok(())
+}
+
+fn plan_preset_detail(preset: PlanPreset) -> &'static str {
+    match (preset.mode, preset.tier) {
+        (OpenAiPlanMode::Auto, None) => "Use detected account telemetry",
+        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Free)) => "$0 personal plan",
+        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Go)) => "$8 personal plan",
+        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Plus)) => "$20 personal plan",
+        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Pro)) => "$200 power-user plan",
+        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Business)) => "Team workspace plan",
+        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Enterprise)) => "Enterprise workspace plan",
+        _ => "Manual override",
+    }
+}
+
+fn render_plan_picker_backdrop(
+    out: &mut impl Write,
+    width: usize,
+    max_body_row: u16,
+) -> Result<()> {
+    if width < 16 || max_body_row == 0 {
+        return Ok(());
+    }
+
+    const GRID_COL_SPAN: usize = 10;
+    const GRID_ROW_SPAN: u16 = 4;
+
+    for row in 0..max_body_row {
+        let horizontal = row % GRID_ROW_SPAN == 0;
+        let mut line = String::with_capacity(width);
+        for col in 0..width {
+            let vertical = col % GRID_COL_SPAN == 0;
+            let ch = match (horizontal, vertical) {
+                (true, true) => '+',
+                (true, false) => '.',
+                (false, true) => ':',
+                (false, false) => ' ',
+            };
+            line.push(ch);
+        }
+
+        execute!(out, MoveTo(0, row))?;
+        write!(out, "{}", line.as_str().with(Color::DarkGrey))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1216,12 +1441,12 @@ mod tests {
 
     #[test]
     fn footer_parts_never_overlap() {
-        let (left, right) = footer_parts(84);
+        let (left, right) = footer_parts(84, false);
         assert!(left.len() + 1 + right.len() <= 84);
 
-        let (left_small, right_small) = footer_parts(20);
+        let (left_small, right_small) = footer_parts(20, false);
         assert_eq!(right_small, "");
-        assert_eq!(left_small, "Press q or Ctrl+C...");
+        assert_eq!(left_small, "Press P to change...");
     }
 
     #[test]
@@ -1270,5 +1495,11 @@ mod tests {
             select_banner_variant(60, 1, UiLayoutMode::Minimal, false),
             BannerVariant::MinimalText
         );
+    }
+
+    #[test]
+    fn footer_parts_change_when_plan_picker_is_open() {
+        let (left, _right) = footer_parts(80, true);
+        assert!(left.contains("Plan selector"));
     }
 }

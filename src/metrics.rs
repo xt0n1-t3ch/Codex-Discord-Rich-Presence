@@ -7,7 +7,9 @@ use tracing::warn;
 
 use crate::config;
 use crate::session::CodexSessionSnapshot;
-use crate::util::{format_cost, format_tokens, human_duration};
+use crate::util::{
+    format_cost, format_tokens, human_duration, write_json_pretty_atomic, write_text_atomic,
+};
 
 const PERSIST_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -179,31 +181,16 @@ impl Default for MetricsTracker {
 
 fn persist_json(snapshot: &MetricsSnapshot) {
     let path = config::codex_home().join("discord-presence-metrics.json");
-    let tmp = config::codex_home().join("discord-presence-metrics.json.tmp");
-    match serde_json::to_string_pretty(snapshot) {
-        Ok(data) => {
-            if let Err(err) = std::fs::write(&tmp, data) {
-                warn!(error = %err, "failed to write metrics JSON tmp");
-                return;
-            }
-            if let Err(err) = std::fs::rename(&tmp, &path) {
-                warn!(error = %err, "failed to move metrics JSON into place");
-            }
-        }
-        Err(err) => warn!(error = %err, "failed to serialize metrics JSON"),
+    if let Err(err) = write_json_pretty_atomic(&path, snapshot) {
+        warn!(error = %err, "failed to persist metrics JSON");
     }
 }
 
 fn persist_markdown(snapshot: &MetricsSnapshot) {
     let path = config::codex_home().join("discord-presence-metrics.md");
-    let tmp = config::codex_home().join("discord-presence-metrics.md.tmp");
     let markdown = generate_markdown(snapshot);
-    if let Err(err) = std::fs::write(&tmp, markdown) {
-        warn!(error = %err, "failed to write metrics markdown tmp");
-        return;
-    }
-    if let Err(err) = std::fs::rename(&tmp, &path) {
-        warn!(error = %err, "failed to move metrics markdown into place");
+    if let Err(err) = write_text_atomic(&path, &markdown) {
+        warn!(error = %err, "failed to persist metrics markdown");
     }
 }
 
@@ -308,6 +295,7 @@ mod tests {
             originator: None,
             source: None,
             model: Some(model.to_string()),
+            reasoning_effort: None,
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: Some(input + output),

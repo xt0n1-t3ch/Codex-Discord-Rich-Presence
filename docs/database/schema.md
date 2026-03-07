@@ -7,7 +7,7 @@ This project has no relational database.
 ### 1) Config file
 
 - Path: `~/.codex/discord-presence-config.json`
-- Schema version: `7` (non-breaking additions only)
+- Schema version: `8` (non-breaking additions only)
 - Fields:
   - `schema_version: number`
   - `discord_client_id: string | null`
@@ -36,8 +36,9 @@ This project has no relational database.
     - `aliases: Record<string, string>` (normalized lowercase model keys)
     - `overrides: Record<string, { input_per_million: number, cached_input_per_million?: number, output_per_million: number }>`
   - `openai_plan: object`
-    - `tier: "free" | "go" | "plus" | "business" | "enterprise" | "pro"` (legacy/deprecated at runtime)
-    - `show_price: boolean` (used for auto-detected plan label)
+    - `mode: "auto" | "manual"`
+    - `tier: "free" | "go" | "plus" | "business" | "enterprise" | "pro"`
+    - `show_price: boolean` (used for the resolved plan label)
 
 ### Pricing Defaults (Catalog)
 
@@ -47,16 +48,25 @@ This project has no relational database.
 - `gpt-5.1-codex-mini`: input `0.25`, cached input `0.025`, output `2.0`
 - `gpt-5.3-codex` pricing alias defaults to `gpt-5.2-codex` until official pricing exists.
 - `gpt-5.3-codex-spark` pricing alias defaults to `gpt-5.2-codex` until official pricing exists.
-- Default `openai_plan`: `pro` with `show_price = true`.
+- Default `openai_plan`: `mode = "auto"`, `tier = "pro"`, `show_price = true`.
 
 ### 1b) Plan cache file
 
 - Path: `~/.codex/discord-presence-plan-cache.json`
 - Fields:
   - `tier: "free" | "go" | "plus" | "business" | "enterprise" | "pro" | "unknown"`
-  - `source: "telemetry" | "memory" | "cache" | "unknown"`
+  - `source: "manual" | "telemetry" | "memory" | "cache" | "unknown"`
   - `observed_at: datetime (UTC) | null`
   - `raw_plan_type: string | null`
+
+### 1c) Global state file
+
+- Path: `~/.codex/.codex-global-state.json`
+- Relevant field:
+  - `electron-persisted-atom-state.default-service-tier: string | null`
+- Runtime usage:
+  - `fast` => Fast mode enabled
+  - any other or missing value => Fast mode disabled
 
 ### 2) Lock file
 
@@ -107,6 +117,7 @@ Per session:
 - `session_total_tokens`
 - `last_turn_tokens`
 - `session_delta_tokens`
+- `reasoning_effort`
 - `input_tokens_total`
 - `cached_input_tokens_total`
 - `output_tokens_total`
@@ -142,6 +153,7 @@ Per session:
 - `activity.last_effective_signal_at` (new non-breaking runtime field)
 - `activity.idle_candidate_at`
 - `activity.pending_calls`
+- `reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh" | null`
 
 ### Context Window Semantics
 
