@@ -153,7 +153,7 @@ A typical compact presence state can look like:
 ⚡ GPT-5.4 (Extra High) | Pro ($200/month) • $7.13 • 31.5M tok • Ctx 64% left • 5h 100% • 7d 100%
 ```
 
-## How Surface Routing Works
+## Surface Routing 
 
 <p align="center">
   <img src="assets/branding/surface-map.svg" alt="Surface routing flow" width="960" />
