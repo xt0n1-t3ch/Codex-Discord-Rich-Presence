@@ -4,19 +4,27 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [1.5.0] - 2026-05-21
+
 ### Added
 
-- Official pricing catalog entries for `gpt-5.5` ($5 / $0.50 / $30 per 1M) and `gpt-5.5-pro` ($30 / $3 / $180 per 1M).
-- Unit tests covering `gpt-5.5`, `gpt-5.5-pro`, case-and-trim normalization on the new keys, and context-window resolution for the GPT-5.5 family.
+- Official pricing catalog entries for `gpt-5.5` ($5 / $0.50 / $30 per 1M) and `gpt-5.5-pro` ($30 / $3 / $180 per 1M), so Codex sessions on GPT-5.5 resolve to the correct OpenAI pricing the moment the model is selected.
+- Lightning `⚡` Fast-mode prefix coverage is now confirmed for the entire GPT-5.5 family (inherited from the existing service-tier resolver — no new wiring required).
+- Unit tests covering `gpt-5.5`, `gpt-5.5-pro`, case-and-trim normalization on the new keys, and context-window resolution for the GPT-5.5 family. Test suite total now sits at 114 passing.
+- README highlight banner calling out GPT-5.5 + GPT-5.5 Pro support, including pricing chips, rendered identically on github.com and in local Markdown previews.
 
 ### Changed
 
-- Pricing rows in `src/cost.rs` are now centralized as named `ModelPricing` constants (`GPT_5_5`, `GPT_5_5_PRO`, `GPT_5_4`, `GPT_5_2_FAMILY`, `GPT_5_1_FAMILY`, `GPT_5_MINI_FAMILY`, `GPT_5_NANO`, `CODEX_MINI_LATEST`); the Codex session context window is centralized as `CODEX_CONTEXT_WINDOW`.
+- Pricing rows in `src/cost.rs` are now centralized as named `ModelPricing` constants (`GPT_5_5`, `GPT_5_5_PRO`, `GPT_5_4`, `GPT_5_2_FAMILY`, `GPT_5_1_FAMILY`, `GPT_5_MINI_FAMILY`, `GPT_5_NANO`, `CODEX_MINI_LATEST`); the Codex session context window is centralized as `CODEX_CONTEXT_WINDOW: u64 = 400_000`.
+- README badge row upgraded to `for-the-badge` style with real brand logos (GitHub Actions, semver, Rust, Discord, OpenAI) — same visual language across github.com and Markdown previews.
 - README model-label examples and Fast-mode visibility examples refer to GPT-5.5.
 
 ### Fixed
 
-- `.gitignore` now excludes the GitNexus boilerplate (`CLAUDE.md`, `AGENTS.md`, `.claude/`) that GitNexus MCP injects per workspace.
+- `clippy::collapsible_match` warning in `src/session/activity.rs` (surfaced on Rust 1.95.0 stable) is collapsed into a single match guard so `cargo clippy -- -D warnings` stays green on the current toolchain.
+- `.gitignore` now excludes the GitNexus MCP boilerplate (`CLAUDE.md`, `AGENTS.md`, `.claude/`) that GitNexus injects per workspace and that previously surfaced as untracked.
 
 ## [1.1.0] - 2026-03-07
 
