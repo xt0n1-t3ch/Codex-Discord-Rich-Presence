@@ -28,7 +28,7 @@ Codex Discord Rich Presence reads local Codex session telemetry, detects the act
 | ------------ | ------------------------- | --------------------------------------------------------------------- |
 | Surface      | `Codex App` / `Codex CLI` | Auto-routed from `session_meta.originator` and `session_meta.source`  |
 | Activity     | `Reading session.rs`      | Derived from response items, tool calls, and commentary signals       |
-| Model        | `⚡ GPT-5.4 (Extra High)` | Fast mode adds the lightning prefix; reasoning effort adds the suffix |
+| Model        | `⚡ GPT-5.5 (Extra High)` | Fast mode adds the lightning prefix; reasoning effort adds the suffix |
 | Plan         | `Pro ($200/month)`        | Auto-detected from telemetry or forced manually from the TUI/config   |
 | Live context | `Ctx 64% left`            | Derived from active-turn usage and model context window               |
 | Limits       | `5h 100% • 7d 100%`       | Tracks global account quota freshness and remaining percentages       |
@@ -119,7 +119,7 @@ The runtime reads `~/.codex/.codex-global-state.json` and checks:
 If the value is `fast`, the model is shown with a lightning prefix:
 
 ```text
-⚡ GPT-5.4
+⚡ GPT-5.5
 ```
 
 ### Reasoning effort visibility
@@ -132,9 +132,9 @@ Reasoning effort is resolved from the active session in this order:
 Rendered examples:
 
 ```text
-GPT-5.4 (Low)
-GPT-5.4 (High)
-⚡ GPT-5.4 (Extra High)
+GPT-5.5 (Low)
+GPT-5.5 (High)
+⚡ GPT-5.5 (Extra High)
 ```
 
 ### Interactive plan selector
@@ -150,7 +150,7 @@ Plan display supports both automatic detection and manual override.
 A typical compact presence state can look like:
 
 ```text
-⚡ GPT-5.4 (Extra High) | Pro ($200/month) • $7.13 • 31.5M tok • Ctx 64% left • 5h 100% • 7d 100%
+⚡ GPT-5.5 (Extra High) | Pro ($200/month) • $7.13 • 31.5M tok • Ctx 64% left • 5h 100% • 7d 100%
 ```
 
 ## How Surface Routing Works

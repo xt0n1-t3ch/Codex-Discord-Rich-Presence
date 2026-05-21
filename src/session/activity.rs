@@ -396,17 +396,15 @@ impl SessionAccumulator {
                         event_timestamp,
                     );
                 }
-                Some("message") => {
-                    if str_at(payload, &["role"]).as_deref() == Some("assistant") {
-                        if str_at(payload, &["phase"]).as_deref() == Some("commentary") {
-                            self.activity_tracker.note_commentary(event_timestamp);
-                        } else {
-                            self.activity_tracker.mark_activity(
-                                SessionActivityKind::WaitingInput,
-                                None,
-                                event_timestamp,
-                            );
-                        }
+                Some("message") if str_at(payload, &["role"]).as_deref() == Some("assistant") => {
+                    if str_at(payload, &["phase"]).as_deref() == Some("commentary") {
+                        self.activity_tracker.note_commentary(event_timestamp);
+                    } else {
+                        self.activity_tracker.mark_activity(
+                            SessionActivityKind::WaitingInput,
+                            None,
+                            event_timestamp,
+                        );
                     }
                 }
                 _ => {}
@@ -662,7 +660,6 @@ fn extract_read_target(command: &str) -> Option<String> {
         return None;
     }
 
-    // Heuristic-only parser for common read-only shell command patterns.
     let prefixes = [
         "Get-Content ",
         "cat ",

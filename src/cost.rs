@@ -9,6 +9,56 @@ pub struct ModelPricing {
     pub output_per_million: f64,
 }
 
+const CODEX_CONTEXT_WINDOW: u64 = 400_000;
+
+const GPT_5_5: ModelPricing = ModelPricing {
+    input_per_million: 5.0,
+    cached_input_per_million: 0.5,
+    output_per_million: 30.0,
+};
+
+const GPT_5_5_PRO: ModelPricing = ModelPricing {
+    input_per_million: 30.0,
+    cached_input_per_million: 3.0,
+    output_per_million: 180.0,
+};
+
+const GPT_5_4: ModelPricing = ModelPricing {
+    input_per_million: 2.5,
+    cached_input_per_million: 0.25,
+    output_per_million: 15.0,
+};
+
+const GPT_5_2_FAMILY: ModelPricing = ModelPricing {
+    input_per_million: 1.75,
+    cached_input_per_million: 0.175,
+    output_per_million: 14.0,
+};
+
+const GPT_5_1_FAMILY: ModelPricing = ModelPricing {
+    input_per_million: 1.25,
+    cached_input_per_million: 0.125,
+    output_per_million: 10.0,
+};
+
+const GPT_5_MINI_FAMILY: ModelPricing = ModelPricing {
+    input_per_million: 0.25,
+    cached_input_per_million: 0.025,
+    output_per_million: 2.0,
+};
+
+const GPT_5_NANO: ModelPricing = ModelPricing {
+    input_per_million: 0.05,
+    cached_input_per_million: 0.005,
+    output_per_million: 0.4,
+};
+
+const CODEX_MINI_LATEST: ModelPricing = ModelPricing {
+    input_per_million: 1.5,
+    cached_input_per_million: 0.375,
+    output_per_million: 6.0,
+};
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PricingSource {
@@ -160,78 +210,45 @@ pub fn normalize_model_key(model: &str) -> String {
 pub fn default_model_context_window(model_id: &str) -> Option<u64> {
     let key = normalize_model_key(model_id);
     if key.starts_with("gpt-5") || key.starts_with("codex") {
-        return Some(400_000);
+        return Some(CODEX_CONTEXT_WINDOW);
     }
     None
 }
 
 fn fallback_pricing() -> ModelPricing {
-    // Official OpenAI API pricing fallback (gpt-5-codex)
-    ModelPricing {
-        input_per_million: 1.25,
-        cached_input_per_million: 0.125,
-        output_per_million: 10.0,
-    }
+    GPT_5_1_FAMILY
 }
 
 fn default_alias_target(model: &str) -> Option<&'static str> {
     match model {
-        // Spark variants are internal Codex labels, not standalone API catalog entries.
         "gpt-5.3-codex-spark" | "gpt-5.3-codex-spark-latest" => Some("gpt-5.3-codex"),
         _ => None,
     }
 }
 
 fn default_model_pricing(model: &str) -> Option<ModelPricing> {
-    // Sources:
     // - https://openai.com/api/pricing/
-    // - https://developers.openai.com/api/docs/models/gpt-5.3-codex/
+    // - https://openai.com/index/introducing-gpt-5-5/
+    // - https://developers.openai.com/api/docs/models/gpt-5.5/
     // - https://developers.openai.com/api/docs/models/gpt-5.4/
-    // Prices below reflect standard API rates as of March 7, 2026.
-    // GPT-5.4 has a documented surcharge for prompts with >272K input tokens, which this
-    // aggregate session-level estimator does not currently model per request.
+    // - https://developers.openai.com/api/docs/models/gpt-5.3-codex/
+    // GPT-5.5 and GPT-5.4 apply a 2x input / 1.5x output surcharge for prompts
     let pricing = match model {
-        "gpt-5.4" | "gpt-5.4-2026-03-05" => ModelPricing {
-            input_per_million: 2.5,
-            cached_input_per_million: 0.25,
-            output_per_million: 15.0,
-        },
-        "gpt-5.3-codex" | "gpt-5.3-codex-latest" => ModelPricing {
-            input_per_million: 1.75,
-            cached_input_per_million: 0.175,
-            output_per_million: 14.0,
-        },
-        "gpt-5.2" | "gpt-5.2-chat-latest" | "gpt-5.2-codex" => ModelPricing {
-            input_per_million: 1.75,
-            cached_input_per_million: 0.175,
-            output_per_million: 14.0,
-        },
+        "gpt-5.5" => GPT_5_5,
+        "gpt-5.5-pro" => GPT_5_5_PRO,
+        "gpt-5.4" | "gpt-5.4-2026-03-05" => GPT_5_4,
+        "gpt-5.3-codex" | "gpt-5.3-codex-latest" => GPT_5_2_FAMILY,
+        "gpt-5.2" | "gpt-5.2-chat-latest" | "gpt-5.2-codex" => GPT_5_2_FAMILY,
         "gpt-5.1"
         | "gpt-5.1-chat-latest"
         | "gpt-5.1-codex"
         | "gpt-5.1-codex-max"
         | "gpt-5"
         | "gpt-5-chat-latest"
-        | "gpt-5-codex" => ModelPricing {
-            input_per_million: 1.25,
-            cached_input_per_million: 0.125,
-            output_per_million: 10.0,
-        },
-        "gpt-5-mini" | "gpt-5.1-codex-mini" => ModelPricing {
-            input_per_million: 0.25,
-            cached_input_per_million: 0.025,
-            output_per_million: 2.0,
-        },
-        "gpt-5-nano" => ModelPricing {
-            input_per_million: 0.05,
-            cached_input_per_million: 0.005,
-            output_per_million: 0.4,
-        },
-        "codex-mini-latest" => ModelPricing {
-            input_per_million: 1.5,
-            cached_input_per_million: 0.375,
-            output_per_million: 6.0,
-        },
+        | "gpt-5-codex" => GPT_5_1_FAMILY,
+        "gpt-5-mini" | "gpt-5.1-codex-mini" => GPT_5_MINI_FAMILY,
+        "gpt-5-nano" => GPT_5_NANO,
+        "codex-mini-latest" => CODEX_MINI_LATEST,
         _ => return None,
     };
 
@@ -298,6 +315,37 @@ mod tests {
     }
 
     #[test]
+    fn resolves_exact_pricing_for_gpt_5_5() {
+        let config = PricingConfig::default();
+        let resolved = resolve_model_pricing("gpt-5.5", &config);
+        assert_eq!(resolved.source, PricingSource::Exact);
+        assert_eq!(resolved.resolved_model, "gpt-5.5");
+        assert!((resolved.pricing.input_per_million - 5.0).abs() < 0.0001);
+        assert!((resolved.pricing.cached_input_per_million - 0.5).abs() < 0.0001);
+        assert!((resolved.pricing.output_per_million - 30.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn resolves_exact_pricing_for_gpt_5_5_pro() {
+        let config = PricingConfig::default();
+        let resolved = resolve_model_pricing("gpt-5.5-pro", &config);
+        assert_eq!(resolved.source, PricingSource::Exact);
+        assert_eq!(resolved.resolved_model, "gpt-5.5-pro");
+        assert!((resolved.pricing.input_per_million - 30.0).abs() < 0.0001);
+        assert!((resolved.pricing.cached_input_per_million - 3.0).abs() < 0.0001);
+        assert!((resolved.pricing.output_per_million - 180.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn resolves_pricing_for_gpt_5_5_after_case_and_trim_normalization() {
+        let config = PricingConfig::default();
+        let resolved = resolve_model_pricing("  GPT-5.5  ", &config);
+        assert_eq!(resolved.source, PricingSource::Exact);
+        assert_eq!(resolved.resolved_model, "gpt-5.5");
+        assert!((resolved.pricing.input_per_million - 5.0).abs() < 0.0001);
+    }
+
+    #[test]
     fn override_takes_precedence_over_defaults() {
         let mut config = PricingConfig::default();
         config.overrides.insert(
@@ -336,6 +384,16 @@ mod tests {
     fn pricing_catalog_matches_required_models() {
         let config = PricingConfig::default();
 
+        let p55 = resolve_model_pricing("gpt-5.5", &config);
+        assert!((p55.pricing.input_per_million - 5.0).abs() < 0.0001);
+        assert!((p55.pricing.cached_input_per_million - 0.5).abs() < 0.0001);
+        assert!((p55.pricing.output_per_million - 30.0).abs() < 0.0001);
+
+        let p55pro = resolve_model_pricing("gpt-5.5-pro", &config);
+        assert!((p55pro.pricing.input_per_million - 30.0).abs() < 0.0001);
+        assert!((p55pro.pricing.cached_input_per_million - 3.0).abs() < 0.0001);
+        assert!((p55pro.pricing.output_per_million - 180.0).abs() < 0.0001);
+
         let p54 = resolve_model_pricing("gpt-5.4", &config);
         assert!((p54.pricing.input_per_million - 2.5).abs() < 0.0001);
         assert!((p54.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
@@ -371,6 +429,8 @@ mod tests {
             Some(400_000)
         );
         assert_eq!(default_model_context_window("gpt-5.3-codex"), Some(400_000));
+        assert_eq!(default_model_context_window("gpt-5.5"), Some(400_000));
+        assert_eq!(default_model_context_window("gpt-5.5-pro"), Some(400_000));
     }
 
     #[test]
