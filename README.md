@@ -4,17 +4,26 @@
   <img src="assets/branding/social-card.svg" alt="Codex Discord Rich Presence hero banner" width="980" />
 </p>
 
-<div align="center">
+<p align="center">
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/xt0n1-t3ch/Codex-Discord-Rich-Presence/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI&labelColor=0D0D0D" alt="CI" /></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases"><img src="https://img.shields.io/github/v/release/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=for-the-badge&logo=semver&logoColor=white&color=00D9FF&label=Release&labelColor=0D0D0D" alt="Latest Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=for-the-badge&color=4CAF50&label=License&labelColor=0D0D0D" alt="License" /></a>
+  <img src="https://img.shields.io/badge/Rust-2024-F74C00?style=for-the-badge&logo=rust&logoColor=white&labelColor=0D0D0D" alt="Rust 2024" />
+  <img src="https://img.shields.io/badge/Discord-IPC-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=0D0D0D" alt="Discord IPC" />
+  <img src="https://img.shields.io/badge/OpenAI-Codex-10A37F?style=for-the-badge&logo=openai&logoColor=white&labelColor=0D0D0D" alt="OpenAI Codex" />
+</p>
 
-[![CI](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml/badge.svg)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml)
-[![Release](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/release.yml/badge.svg)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/release.yml)
-[![Latest Release](https://img.shields.io/github/v/release/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=flat)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases)
-[![License](https://img.shields.io/github/license/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=flat)](LICENSE)
-![Rust 2024](https://img.shields.io/badge/Rust-2024-black?logo=rust)
+<p align="center">
+  <b>A polished Discord Rich Presence runtime for Codex CLI, Codex VS Code Extension, and Codex App.</b>
+</p>
 
-**A polished Discord Rich Presence runtime for Codex CLI, Codex VS Code Extension, and Codex App.**
+<table align="center"><tr><td align="center">
 
-</div>
+<img src="https://img.shields.io/badge/NEW-GPT--5.5%20Support%20Shipped-FF3D71?style=for-the-badge&labelColor=0D0D0D" alt="NEW: GPT-5.5 Support" />
+
+<sub>First-class pricing, model label, and <code>⚡ Fast</code> mode visibility for both <b>GPT-5.5</b> and <b>GPT-5.5 Pro</b> — official OpenAI rates applied the moment Codex switches models, no config touch required.</sub>
+
+</td></tr></table>
 
 > Local-first by design: the runtime reads your Codex session files on disk, talks to Discord over local IPC. Nothing is stored in the cloud.
 
@@ -28,7 +37,7 @@ Codex Discord Rich Presence reads local Codex session telemetry, detects the act
 | ------------ | ------------------------- | --------------------------------------------------------------------- |
 | Surface      | `Codex App` / `Codex CLI` | Auto-routed from `session_meta.originator` and `session_meta.source`  |
 | Activity     | `Reading session.rs`      | Derived from response items, tool calls, and commentary signals       |
-| Model        | `⚡ GPT-5.4 (Extra High)` | Fast mode adds the lightning prefix; reasoning effort adds the suffix |
+| Model        | `⚡ GPT-5.5 (Extra High)` | Fast mode adds the lightning prefix; reasoning effort adds the suffix |
 | Plan         | `Pro ($200/month)`        | Auto-detected from telemetry or forced manually from the TUI/config   |
 | Live context | `Ctx 64% left`            | Derived from active-turn usage and model context window               |
 | Limits       | `5h 100% • 7d 100%`       | Tracks global account quota freshness and remaining percentages       |
@@ -119,7 +128,7 @@ The runtime reads `~/.codex/.codex-global-state.json` and checks:
 If the value is `fast`, the model is shown with a lightning prefix:
 
 ```text
-⚡ GPT-5.4
+⚡ GPT-5.5
 ```
 
 ### Reasoning effort visibility
@@ -132,9 +141,9 @@ Reasoning effort is resolved from the active session in this order:
 Rendered examples:
 
 ```text
-GPT-5.4 (Low)
-GPT-5.4 (High)
-⚡ GPT-5.4 (Extra High)
+GPT-5.5 (Low)
+GPT-5.5 (High)
+⚡ GPT-5.5 (Extra High)
 ```
 
 ### Interactive plan selector
@@ -150,7 +159,7 @@ Plan display supports both automatic detection and manual override.
 A typical compact presence state can look like:
 
 ```text
-⚡ GPT-5.4 (Extra High) | Pro ($200/month) • $7.13 • 31.5M tok • Ctx 64% left • 5h 100% • 7d 100%
+⚡ GPT-5.5 (Extra High) | Pro ($200/month) • $7.13 • 31.5M tok • Ctx 64% left • 5h 100% • 7d 100%
 ```
 
 ## Surface Routing 

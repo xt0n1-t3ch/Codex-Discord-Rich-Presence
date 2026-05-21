@@ -4,7 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- Official pricing catalog entries for `gpt-5.5` ($5 / $0.50 / $30 per 1M) and `gpt-5.5-pro` ($30 / $3 / $180 per 1M).
+- Unit tests covering `gpt-5.5`, `gpt-5.5-pro`, case-and-trim normalization on the new keys, and context-window resolution for the GPT-5.5 family.
+
+### Changed
+
+- Pricing rows in `src/cost.rs` are now centralized as named `ModelPricing` constants (`GPT_5_5`, `GPT_5_5_PRO`, `GPT_5_4`, `GPT_5_2_FAMILY`, `GPT_5_1_FAMILY`, `GPT_5_MINI_FAMILY`, `GPT_5_NANO`, `CODEX_MINI_LATEST`); the Codex session context window is centralized as `CODEX_CONTEXT_WINDOW`.
+- README model-label examples and Fast-mode visibility examples refer to GPT-5.5.
+
+### Fixed
+
+- `.gitignore` now excludes the GitNexus boilerplate (`CLAUDE.md`, `AGENTS.md`, `.claude/`) that GitNexus MCP injects per workspace.
 
 ## [1.1.0] - 2026-03-07
 
