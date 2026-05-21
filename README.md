@@ -16,6 +16,10 @@
 
 </div>
 
+> [!TIP]
+> **🆕 New — GPT-5.5 support shipped.**  
+> First-class pricing, model label, and `⚡ Fast` mode visibility for both the **GPT-5.5** and **GPT-5.5 Pro** API variants. The runtime resolves official OpenAI rates the moment Codex switches models — no config touch required.
+
 > Local-first by design: the runtime reads your Codex session files on disk, talks to Discord over local IPC. Nothing is stored in the cloud.
 
 ## Overview
