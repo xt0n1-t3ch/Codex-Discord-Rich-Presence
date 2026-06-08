@@ -161,10 +161,19 @@ jobs:
             CHANGELOG_SECTION=$'### Summary\n\n- See commit history and repository changelog for release details.'
           fi
 
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [[ -n "${PREVIOUS_TAG}" ]]; then
+            FULL_CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${GITHUB_REF_NAME}"
+          else
+            FULL_CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}"
+          fi
+
           {
             echo "# Codex Discord Rich Presence ${VERSION_LABEL}"
             echo
-            echo "Stable release for Codex CLI, Codex VS Code Extension, and Codex App."
+            echo "Stable release for Codex CLI, Codex VS Code Extension, Codex App, and OpenCode-hosted Codex sessions."
+            echo
+            echo "## What Changed"
             echo
             echo "${CHANGELOG_SECTION}"
             echo
@@ -174,6 +183,9 @@ jobs:
             echo "- Codex Discord Rich Presence - macOS x64"
             echo "- Codex Discord Rich Presence - macOS arm64"
             echo "- Codex Discord Rich Presence - Codex App Logo.png"
+            echo
+            echo "## Full Changelog"
+            echo "${FULL_CHANGELOG_URL}"
           } > RELEASE_NOTES.md
 
       - name: Create release

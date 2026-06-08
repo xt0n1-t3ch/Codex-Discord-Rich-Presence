@@ -713,6 +713,15 @@ mod tests {
     }
 
     #[test]
+    fn session_meta_treats_opencode_as_codex_app_surface() {
+        let snapshot = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"opencode","cwd":"C:\\repo\\app","originator":"opencode","source":"terminal"}}"#,
+        );
+        assert_eq!(snapshot.originator.as_deref(), Some("opencode"));
+        assert!(snapshot.is_desktop_surface());
+    }
+
+    #[test]
     fn session_meta_ignores_non_string_source_values() {
         let snapshot = parse_one(
             r#"{"type":"session_meta","payload":{"id":"subagent","cwd":"C:\\repo\\app","originator":"codex_vscode","source":{"subagent":{"thread_spawn":{"depth":1}}}}}"#,

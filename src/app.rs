@@ -18,6 +18,7 @@ use crate::config::{
 };
 use crate::discord::DiscordPresence;
 use crate::metrics::MetricsTracker;
+use crate::opencode::collect_opencode_sessions_for_directory;
 use crate::process_guard::{self, RunningState};
 use crate::session::{
     CodexSessionSnapshot, EffectiveLimitSelection, GitBranchCache, RateLimits, SessionParseCache,
@@ -25,10 +26,11 @@ use crate::session::{
     latest_limits_source, preferred_active_session,
 };
 use crate::telemetry::plan::{PlanDetector, ResolvedPlan, is_model_allowed_for_plan};
-use crate::telemetry::service_tier::{ResolvedServiceTier, resolve_service_tier};
+use crate::telemetry::service_tier::{ResolvedServiceTier, ServiceTier, resolve_service_tier};
 use crate::ui::{self, RenderData};
 use crate::util::{
     format_cost, format_model_display, format_since, format_time_until, format_token_triplet,
+    model_uses_fast_mode,
 };
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
@@ -55,7 +57,14 @@ impl RuntimeSnapshot {
     ) -> Self {
         let limits_source = latest_limits_source(&sessions);
         let resolved_plan = plan_detector.resolve_from_sessions(&sessions, plan_config);
-        let resolved_service_tier = resolve_service_tier();
+        let mut resolved_service_tier = resolve_service_tier();
+        if preferred_active_session(&sessions)
+            .and_then(|session| session.model.as_deref())
+            .is_some_and(model_uses_fast_mode)
+        {
+            resolved_service_tier.tier = ServiceTier::Fast;
+            resolved_service_tier.raw_tier = Some("fast".to_string());
+        }
 
         Self {
             sessions,
@@ -86,7 +95,7 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
     let session_roots = config::sessions_paths();
     let mut cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
-    let (sessions, diagnostics) = collect_active_sessions_multi_with_diagnostics(
+    let (mut sessions, diagnostics) = collect_active_sessions_multi_with_diagnostics(
         &session_roots,
         runtime.stale_threshold,
         runtime.active_sticky_window,
@@ -94,6 +103,12 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         &mut parse_cache,
         &config.pricing,
     )?;
+    sessions.extend(collect_opencode_sessions_for_directory(
+        &env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        runtime.stale_threshold,
+        runtime.active_sticky_window,
+        &config.pricing,
+    ));
     let running = process_guard::inspect_running_instance()?;
     let (is_running, running_pid) = match running {
         RunningState::NotRunning => (false, None),
@@ -107,6 +122,7 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
     }
     println!("config: {}", config::config_path().display());
     print_session_roots("sessions_dirs", &session_roots);
+    println!("runtime_surface: {}", surface_label(runtime_surface_hint()));
     let default_client_id = config.effective_client_id_for_surface(PresenceSurface::Default);
     let desktop_client_id = config.effective_client_id_for_surface(PresenceSurface::Desktop);
     println!(
@@ -235,6 +251,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
     let mut metrics_tracker = MetricsTracker::new();
     let mut plan_detector = PlanDetector::new();
     let sessions_roots = config::sessions_paths();
+    let runtime_surface = runtime_surface_hint();
     let started = Instant::now();
     let mut last_tick = Instant::now() - runtime.poll_interval;
     let mut snapshot = RuntimeSnapshot::default();
@@ -262,7 +279,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     &mut metrics_tracker,
                     &mut plan_detector,
                 )?;
-                publish_runtime_snapshot(&mut discord, &snapshot, &config);
+                publish_runtime_snapshot(&mut discord, &snapshot, &config, runtime_surface);
 
                 let active = snapshot.active_session();
                 let plan_display_label =
@@ -453,6 +470,7 @@ fn run_headless_foreground(
     let mut metrics_tracker = MetricsTracker::new();
     let mut plan_detector = PlanDetector::new();
     let sessions_roots = config::sessions_paths();
+    let runtime_surface = runtime_surface_hint();
     println!("No interactive terminal detected; running in headless foreground mode.");
     println!("Press Ctrl+C to stop.");
 
@@ -466,7 +484,7 @@ fn run_headless_foreground(
             &mut metrics_tracker,
             &mut plan_detector,
         )?;
-        publish_runtime_snapshot(&mut discord, &snapshot, &config);
+        publish_runtime_snapshot(&mut discord, &snapshot, &config, runtime_surface);
         thread::sleep(runtime.poll_interval);
     }
 
@@ -634,6 +652,7 @@ fn run_codex_wrapper(
     let mut metrics_tracker = MetricsTracker::new();
     let mut plan_detector = PlanDetector::new();
     let sessions_roots = config::sessions_paths();
+    let runtime_surface = PresenceSurface::Desktop;
 
     println!("codex child started; Discord presence tracking is active.");
 
@@ -652,7 +671,7 @@ fn run_codex_wrapper(
             &mut metrics_tracker,
             &mut plan_detector,
         )?;
-        publish_runtime_snapshot(&mut discord, &snapshot, &config);
+        publish_runtime_snapshot(&mut discord, &snapshot, &config, runtime_surface);
 
         if let Some(status) = child
             .try_wait()
@@ -698,6 +717,13 @@ fn collect_runtime_snapshot(
         parse_cache,
         &config.pricing,
     )?;
+    let mut sessions = sessions;
+    sessions.extend(collect_opencode_sessions_for_directory(
+        &env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        runtime.stale_threshold,
+        runtime.active_sticky_window,
+        &config.pricing,
+    ));
     metrics_tracker.update(&sessions);
     metrics_tracker.persist_if_due();
     Ok(RuntimeSnapshot::from_sessions(
@@ -711,6 +737,7 @@ fn publish_runtime_snapshot(
     discord: &mut DiscordPresence,
     snapshot: &RuntimeSnapshot,
     config: &PresenceConfig,
+    fallback_surface: PresenceSurface,
 ) {
     if let Err(err) = discord.update(
         snapshot.active_session(),
@@ -718,9 +745,78 @@ fn publish_runtime_snapshot(
         &snapshot.resolved_plan,
         &snapshot.resolved_service_tier,
         config,
+        fallback_surface,
     ) {
         debug!(error = %err, "discord presence update failed");
     }
+}
+
+fn runtime_surface_hint() -> PresenceSurface {
+    if env::vars().any(|(key, value)| looks_like_opencode(&key) || looks_like_opencode(&value)) {
+        return PresenceSurface::Desktop;
+    }
+    if process_list_contains_opencode() {
+        PresenceSurface::Desktop
+    } else {
+        PresenceSurface::Default
+    }
+}
+
+fn surface_label(surface: PresenceSurface) -> &'static str {
+    match surface {
+        PresenceSurface::Default => "Codex CLI / Codex VS Code Extension",
+        PresenceSurface::Desktop => "Codex App",
+    }
+}
+
+fn process_list_contains_opencode() -> bool {
+    process_list_text()
+        .map(|text| surface_from_process_list(&text) == PresenceSurface::Desktop)
+        .unwrap_or(false)
+}
+
+fn surface_from_process_list(text: &str) -> PresenceSurface {
+    if text.lines().any(looks_like_opencode) {
+        PresenceSurface::Desktop
+    } else {
+        PresenceSurface::Default
+    }
+}
+
+fn looks_like_opencode(value: &str) -> bool {
+    value.to_ascii_lowercase().contains("opencode")
+}
+
+#[cfg(windows)]
+fn process_list_text() -> Option<String> {
+    let output = Command::new("powershell")
+        .arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-Command")
+        .arg("Get-CimInstance Win32_Process | Select-Object -ExpandProperty CommandLine")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(not(windows))]
+fn process_list_text() -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-eo", "comm,args"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn print_active_summary(
@@ -798,10 +894,10 @@ fn print_active_summary(
     );
     if let Some(context) = &active.context_window {
         println!(
-            "  context: {}/{} used ({:.0}% left)",
+            "  context: {}/{} used ({:.0}% used)",
             crate::util::format_tokens(context.used_tokens),
             crate::util::format_tokens(context.window_tokens),
-            context.remaining_percent
+            (100.0 - context.remaining_percent).clamp(0.0, 100.0)
         );
     } else {
         println!("  context: n/a");
@@ -908,4 +1004,33 @@ fn is_plan_picker_toggle_key(key: &KeyEvent) -> bool {
 fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interval: Duration) {
     *force_redraw = true;
     *last_tick = Instant::now() - poll_interval;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opencode_process_list_selects_codex_app_surface() {
+        let processes = "WindowsTerminal.exe\nopencode.exe --project app\ncmd.exe";
+        assert_eq!(
+            surface_from_process_list(processes),
+            PresenceSurface::Desktop
+        );
+    }
+
+    #[test]
+    fn process_list_without_opencode_selects_default_surface() {
+        let processes = "WindowsTerminal.exe\ncodex.exe\ncmd.exe";
+        assert_eq!(
+            surface_from_process_list(processes),
+            PresenceSurface::Default
+        );
+    }
+
+    #[test]
+    fn opencode_environment_value_is_detected_case_insensitively() {
+        assert!(looks_like_opencode("OpenCode Desktop"));
+        assert!(looks_like_opencode("OPENCODE_SESSION"));
+    }
 }

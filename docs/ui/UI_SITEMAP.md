@@ -46,7 +46,7 @@ This keeps `Recent Sessions` visible by default while allowing an explicit extre
 
 3. Active Session
 
-- Project, activity, model + OpenAI plan tier, context window (`used/total` + `% left`).
+- Project, activity, model + OpenAI plan tier, context window (`used/total` + `% used`).
 - Model row can include Fast prefix (`⚡`) and effort suffix (`Extra High`).
 - Fast mode row (`Fast Mode: On/Off`).
 - Plan trace row (`Plan: <tier> (manual|auto-detected|remembered|cached)`).

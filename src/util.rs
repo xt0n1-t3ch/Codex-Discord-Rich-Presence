@@ -54,16 +54,31 @@ pub fn format_model_name(model_id: &str) -> String {
         .join("-")
 }
 
+pub fn model_display_parts(model_id: &str) -> (String, bool) {
+    let trimmed = model_id.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if let Some(base) = lower.strip_suffix("-fast")
+        && base.starts_with("gpt-")
+    {
+        return (format_model_name(base), true);
+    }
+    (format_model_name(trimmed), false)
+}
+
+pub fn model_uses_fast_mode(model_id: &str) -> bool {
+    model_display_parts(model_id).1
+}
+
 pub fn format_model_display(
     model_id: &str,
     reasoning_effort: Option<ReasoningEffort>,
     fast_active: bool,
 ) -> String {
-    let base = format_model_name(model_id);
+    let (base, model_fast) = model_display_parts(model_id);
     let effort_suffix = reasoning_effort
         .map(|value| format!(" ({})", value.label()))
         .unwrap_or_default();
-    if fast_active {
+    if fast_active || model_fast {
         format!("⚡ {base}{effort_suffix}")
     } else {
         format!("{base}{effort_suffix}")

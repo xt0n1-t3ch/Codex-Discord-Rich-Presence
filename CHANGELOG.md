@@ -6,6 +6,32 @@ All notable changes to this project are documented in this file.
 
 No unreleased changes.
 
+## [1.6.0] - 2026-06-08
+
+Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQLite state, publishes it through the official `Codex App` Discord identity, shows GPT-5.5 Fast labels correctly, and reports the active context window from OpenCode's latest step instead of the lifetime session total.
+
+### Added
+
+- OpenCode session collection from `~/.local/share/opencode/opencode*.db`, filtered to the current workspace and mapped into the same model, token, cost, activity, and context fields used by Codex JSONL sessions.
+- Official `Codex App` Discord identity support for desktop/OpenCode sessions with client id `1478395304624652345` and the `codex-app` asset.
+- Generic `gpt-*-fast` display support, so models like `gpt-5.5-fast` render as `⚡ GPT-5.5` while pricing and context-window lookup use the base model.
+- Priority presence republishing every two seconds, keeping Codex above browser/PreMiD Discord activities while preserving the original session timer.
+- Regression coverage for OpenCode activity parsing, OpenCode context-window parsing, Codex App surface fallback, GPT-5.5 Fast labels, and Codex-only identity migration.
+- Project maps for docs and tests through `docs/index.md` and `tests/index.md`, plus a Taskfile mirror for the core quality commands.
+
+### Changed
+
+- Discord context copy now shows used context (`Ctx 19% used`) instead of remaining context, matching the way OpenCode surfaces its context bar.
+- `status` now reports the runtime surface and prints context as `used / window` with the used percentage.
+- README and API docs now describe CLI, VS Code, Codex App, and OpenCode host behavior under the Codex-only identity policy.
+
+### Fixed
+
+- Long OpenCode sessions no longer show impossible context values such as multi-million tokens over a 400K window; the parser uses the latest `step-finish.tokens` snapshot and hides context when no reliable active-window value exists.
+- Persisted non-Codex Discord client IDs and assets are rewritten back to the approved Codex identities before publish.
+- GPT-5.5 and GPT-5.5 Pro pricing, context-window, and Fast-mode labels resolve consistently across standard and Fast variants.
+- Transitive `rand` and `rustls-webpki` lockfile entries are updated to patched versions, resolving the two stale Dependabot PRs without leaving red checks behind.
+
 ## [1.5.0] - 2026-05-21
 
 ### Added
@@ -24,7 +50,7 @@ No unreleased changes.
 ### Fixed
 
 - `clippy::collapsible_match` warning in `src/session/activity.rs` (surfaced on Rust 1.95.0 stable) is collapsed into a single match guard so `cargo clippy -- -D warnings` stays green on the current toolchain.
-- `.gitignore` now excludes the GitNexus MCP boilerplate (`CLAUDE.md`, `AGENTS.md`, `.claude/`) that GitNexus injects per workspace and that previously surfaced as untracked.
+- `.gitignore` now excludes injected local assistant boilerplate that previously surfaced as untracked.
 
 ## [1.1.0] - 2026-03-07
 

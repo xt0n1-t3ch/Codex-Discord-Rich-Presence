@@ -204,7 +204,13 @@ fn lookup_override(
 }
 
 pub fn normalize_model_key(model: &str) -> String {
-    model.trim().to_ascii_lowercase()
+    let key = model.trim().to_ascii_lowercase();
+    if let Some(base) = key.strip_suffix("-fast")
+        && base.starts_with("gpt-")
+    {
+        return base.to_string();
+    }
+    key
 }
 
 pub fn default_model_context_window(model_id: &str) -> Option<u64> {
@@ -237,6 +243,7 @@ fn default_model_pricing(model: &str) -> Option<ModelPricing> {
         "gpt-5.5" => GPT_5_5,
         "gpt-5.5-pro" => GPT_5_5_PRO,
         "gpt-5.4" | "gpt-5.4-2026-03-05" => GPT_5_4,
+        "gpt-5.4-mini" => GPT_5_MINI_FAMILY,
         "gpt-5.3-codex" | "gpt-5.3-codex-latest" => GPT_5_2_FAMILY,
         "gpt-5.2" | "gpt-5.2-chat-latest" | "gpt-5.2-codex" => GPT_5_2_FAMILY,
         "gpt-5.1"
@@ -312,6 +319,17 @@ mod tests {
         assert!((resolved.pricing.input_per_million - 2.5).abs() < 0.0001);
         assert!((resolved.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
         assert!((resolved.pricing.output_per_million - 15.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn resolves_exact_pricing_for_gpt_5_4_mini() {
+        let config = PricingConfig::default();
+        let resolved = resolve_model_pricing("gpt-5.4-mini", &config);
+        assert_eq!(resolved.source, PricingSource::Exact);
+        assert_eq!(resolved.resolved_model, "gpt-5.4-mini");
+        assert!((resolved.pricing.input_per_million - 0.25).abs() < 0.0001);
+        assert!((resolved.pricing.cached_input_per_million - 0.025).abs() < 0.0001);
+        assert!((resolved.pricing.output_per_million - 2.0).abs() < 0.0001);
     }
 
     #[test]
@@ -399,6 +417,11 @@ mod tests {
         assert!((p54.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
         assert!((p54.pricing.output_per_million - 15.0).abs() < 0.0001);
 
+        let p54mini = resolve_model_pricing("gpt-5.4-mini", &config);
+        assert!((p54mini.pricing.input_per_million - 0.25).abs() < 0.0001);
+        assert!((p54mini.pricing.cached_input_per_million - 0.025).abs() < 0.0001);
+        assert!((p54mini.pricing.output_per_million - 2.0).abs() < 0.0001);
+
         let p53codex = resolve_model_pricing("gpt-5.3-codex", &config);
         assert!((p53codex.pricing.input_per_million - 1.75).abs() < 0.0001);
         assert!((p53codex.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
@@ -429,6 +452,7 @@ mod tests {
             Some(400_000)
         );
         assert_eq!(default_model_context_window("gpt-5.3-codex"), Some(400_000));
+        assert_eq!(default_model_context_window("gpt-5.4-mini"), Some(400_000));
         assert_eq!(default_model_context_window("gpt-5.5"), Some(400_000));
         assert_eq!(default_model_context_window("gpt-5.5-pro"), Some(400_000));
     }
