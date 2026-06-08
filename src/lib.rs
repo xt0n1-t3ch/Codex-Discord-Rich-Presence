@@ -4,6 +4,7 @@ pub mod config;
 pub mod cost;
 pub mod discord;
 pub mod metrics;
+pub mod opencode;
 pub mod process_guard;
 pub mod session;
 pub mod telemetry;

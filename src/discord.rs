@@ -31,7 +31,7 @@ pub struct DiscordPresence {
 const DISCORD_MIN_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
 const DISCORD_ASSET_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 const DISCORD_ASSET_FETCH_TIMEOUT: Duration = Duration::from_secs(2);
-const DISCORD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+const DISCORD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 const RECONNECT_MIN_BACKOFF: Duration = Duration::from_secs(5);
 const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(60);
 
@@ -75,8 +75,9 @@ impl DiscordPresence {
         resolved_plan: &ResolvedPlan,
         resolved_service_tier: &ResolvedServiceTier,
         config: &PresenceConfig,
+        fallback_surface: PresenceSurface,
     ) -> Result<()> {
-        self.surface = detect_surface(active_session).unwrap_or(self.surface);
+        self.surface = detect_surface(active_session, fallback_surface);
         let desired_client_id = config.effective_client_id_for_surface(self.surface);
         self.switch_client_if_needed(desired_client_id);
 
@@ -137,8 +138,6 @@ impl DiscordPresence {
                 let (large_image_key, small_image_key) =
                     normalize_asset_pair(resolved_large_key, resolved_small_key);
 
-                // Discord can occasionally keep stale data for same app/client.
-                // Clearing before a changed payload forces a hard refresh.
                 if payload_changed && let Some(client) = self.client.as_mut() {
                     let _ = client.clear_activity();
                 }
@@ -364,14 +363,15 @@ struct SurfaceDisplay<'a> {
     idle_details: &'a str,
 }
 
-fn detect_surface(active_session: Option<&CodexSessionSnapshot>) -> Option<PresenceSurface> {
-    active_session.map(|session| {
-        if session.is_desktop_surface() {
-            PresenceSurface::Desktop
-        } else {
-            PresenceSurface::Default
-        }
-    })
+fn detect_surface(
+    active_session: Option<&CodexSessionSnapshot>,
+    fallback_surface: PresenceSurface,
+) -> PresenceSurface {
+    if active_session.is_some_and(CodexSessionSnapshot::is_desktop_surface) {
+        PresenceSurface::Desktop
+    } else {
+        fallback_surface
+    }
 }
 
 fn display_branding<'a>(
@@ -571,7 +571,10 @@ fn token_state_part(session: &CodexSessionSnapshot) -> Option<String> {
 
 fn context_state_part(session: &CodexSessionSnapshot) -> Option<String> {
     let context = session.context_window.as_ref()?;
-    Some(format!("Ctx {:.0}%", context.remaining_percent))
+    Some(format!(
+        "Ctx {:.0}% used",
+        (100.0 - context.remaining_percent).clamp(0.0, 100.0)
+    ))
 }
 
 fn usage_state_part(session: &CodexSessionSnapshot, show_tokens: bool) -> Option<String> {
@@ -878,6 +881,17 @@ mod tests {
     }
 
     #[test]
+    fn update_republishes_same_payload_on_priority_heartbeat() {
+        let payload = PresencePayload {
+            session_id: Some("session-1".to_string()),
+            start_epoch: 100,
+            details: "Editing src/main.rs".to_string(),
+            state: "GPT-5.3-Codex".to_string(),
+        };
+        assert!(!should_skip_publish(&Some(payload.clone()), &payload, true));
+    }
+
+    #[test]
     fn idle_presence_keeps_idle_start_behavior() {
         let mut idle = None;
         let first = idle_start_epoch(&mut idle);
@@ -901,7 +915,7 @@ mod tests {
         assert!(state.contains("GPT-5.3-Codex | Pro ($200/month)"));
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K tok"));
-        assert!(state.contains("Ctx 94%"));
+        assert!(state.contains("Ctx 6% used"));
         assert!(state.contains("5h 64%"));
         assert!(state.contains("7d 18%"));
     }
@@ -1074,8 +1088,25 @@ mod tests {
         let mut session = sample_session();
         session.originator = Some("Codex Desktop".to_string());
         assert_eq!(
-            detect_surface(Some(&session)),
-            Some(PresenceSurface::Desktop)
+            detect_surface(Some(&session), PresenceSurface::Default),
+            PresenceSurface::Desktop
+        );
+    }
+
+    #[test]
+    fn detect_surface_uses_desktop_fallback_for_opencode_idle() {
+        assert_eq!(
+            detect_surface(None, PresenceSurface::Desktop),
+            PresenceSurface::Desktop
+        );
+    }
+
+    #[test]
+    fn detect_surface_uses_desktop_fallback_for_opencode_session() {
+        let session = sample_session();
+        assert_eq!(
+            detect_surface(Some(&session), PresenceSurface::Desktop),
+            PresenceSurface::Desktop
         );
     }
 

@@ -1,295 +1,125 @@
 # Codex Discord Rich Presence
 
 <p align="center">
-  <img src="assets/branding/social-card.svg" alt="Codex Discord Rich Presence hero banner" width="980" />
+  <img src="assets/branding/social-card.svg" alt="Codex Discord Rich Presence" width="100%" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/xt0n1-t3ch/Codex-Discord-Rich-Presence/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI&labelColor=0D0D0D" alt="CI" /></a>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases"><img src="https://img.shields.io/github/v/release/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=for-the-badge&logo=semver&logoColor=white&color=00D9FF&label=Release&labelColor=0D0D0D" alt="Latest Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=for-the-badge&color=4CAF50&label=License&labelColor=0D0D0D" alt="License" /></a>
-  <img src="https://img.shields.io/badge/Rust-2024-F74C00?style=for-the-badge&logo=rust&logoColor=white&labelColor=0D0D0D" alt="Rust 2024" />
-  <img src="https://img.shields.io/badge/Discord-IPC-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=0D0D0D" alt="Discord IPC" />
-  <img src="https://img.shields.io/badge/OpenAI-Codex-10A37F?style=for-the-badge&logo=openai&logoColor=white&labelColor=0D0D0D" alt="OpenAI Codex" />
+  <b>Discord Rich Presence for Codex CLI, Codex VS Code, Codex App, and OpenCode-hosted Codex sessions.</b><br/>
+  Local-first Rust runtime. Reads local session state, publishes one clean Discord IPC payload, and never phones home.
 </p>
 
 <p align="center">
-  <b>A polished Discord Rich Presence runtime for Codex CLI, Codex VS Code Extension, and Codex App.</b>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=flat&color=0a0a0a&logo=github&logoColor=white"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/xt0n1-t3ch/Codex-Discord-Rich-Presence/ci.yml?branch=main&style=flat&color=0a0a0a&label=ci&logo=githubactions&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/xt0n1-t3ch/Codex-Discord-Rich-Presence?style=flat&color=0a0a0a"></a>
+  <a href="https://xt0n1.com"><img alt="Author" src="https://img.shields.io/badge/by-xt0n1-0a0a0a?style=flat"></a>
 </p>
 
-<table align="center"><tr><td align="center">
+## What It Shows
 
-<img src="https://img.shields.io/badge/NEW-GPT--5.5%20Support%20Shipped-FF3D71?style=for-the-badge&labelColor=0D0D0D" alt="NEW: GPT-5.5 Support" />
+| Signal | Example | Source |
+|:---|:---|:---|
+| Activity | `Running command cargo test` | Codex JSONL or OpenCode SQLite parts |
+| Surface | `Codex App` | Codex/OpenCode host detection |
+| Model | `⚡ GPT-5.5` | Session model plus Fast mode |
+| Plan | `Pro ($200/month)` | Codex telemetry or local override |
+| Tokens | `31.5M tok` | Local token events |
+| Cost | `$7.13` | Local pricing catalog |
+| Context | `Ctx 19% used` | Active context-window snapshot |
+| Limits | `5h 100% • 7d 100%` | Codex quota envelopes |
 
-<sub>First-class pricing, model label, and <code>⚡ Fast</code> mode visibility for both <b>GPT-5.5</b> and <b>GPT-5.5 Pro</b> — official OpenAI rates applied the moment Codex switches models, no config touch required.</sub>
+Discord state example:
 
-</td></tr></table>
-
-> Local-first by design: the runtime reads your Codex session files on disk, talks to Discord over local IPC. Nothing is stored in the cloud.
-
-## Overview
-
-Codex Discord Rich Presence reads local Codex session telemetry, detects the active Codex surface, renders a live terminal dashboard, and publishes a clean Discord presence with activity, model, Fast mode, reasoning effort, account plan, token usage, cost, context window, and quota visibility.
-
-## What it shows
-
-| Signal       | Example                   | Notes                                                                 |
-| ------------ | ------------------------- | --------------------------------------------------------------------- |
-| Surface      | `Codex App` / `Codex CLI` | Auto-routed from `session_meta.originator` and `session_meta.source`  |
-| Activity     | `Reading session.rs`      | Derived from response items, tool calls, and commentary signals       |
-| Model        | `⚡ GPT-5.5 (Extra High)` | Fast mode adds the lightning prefix; reasoning effort adds the suffix |
-| Plan         | `Pro ($200/month)`        | Auto-detected from telemetry or forced manually from the TUI/config   |
-| Live context | `Ctx 64% left`            | Derived from active-turn usage and model context window               |
-| Limits       | `5h 100% • 7d 100%`       | Tracks global account quota freshness and remaining percentages       |
-| Cost         | `$7.13`                   | Uses pricing aliases and overrides from local config                  |
-
-## Highlights
-
-- Surface-aware Discord profile switching for Codex CLI / VS Code and Codex App.
-- Fast mode visibility driven by Codex global state, with a lightning-marked model label.
-- Reasoning effort visibility from live `turn_context` telemetry, including `Extra High`.
-- Full-screen plan selector in the TUI, with instant save to config.
-- Stable activity interpretation for long sessions, commentary turns, waiting states, and idle transitions.
-- Deterministic active-session ranking when multiple Codex sessions are open at once.
-- Compact but information-dense Discord payload formatting that stays within Discord limits.
-- Local build and release layout that keeps Cargo cache under `.build/target` and final artifacts under `releases/<platform>/`.
-
-## Quick Start
-
-### 1. Configure Discord assets
-
-Create or update your Discord Developer applications with the image keys used by the runtime:
-
-- Codex CLI / VS Code profile:
-  - `codex-logo`
-  - `openai`
-- Codex App desktop profile:
-  - `codex-app`
-  - `openai`
-
-### 2. Build
-
-- Windows:
-
-```powershell
-./scripts/build-release.ps1
+```text
+⚡ GPT-5.5 | Pro ($200/month) • $7.13 • 31.5M tok • Ctx 19% used • 5h 100% • 7d 100%
 ```
 
-- Linux / macOS:
+## Presence Priority
 
-```bash
-./scripts/build-release.sh
+Codex wins the Discord activity stack. The runtime republishes the active Codex payload every two seconds, so browser presences such as PreMiD can appear only until the next Codex tick. The session start timestamp stays stable, so elapsed time still reads correctly.
+
+## Identity
+
+Only Codex identities publish.
+
+| Surface | Discord app | Client ID | Large asset |
+|:---|:---|:---|:---|
+| Codex CLI | `Codex` | `1470480085453770854` | `codex-logo` |
+| Codex VS Code | `Codex` | `1470480085453770854` | `codex-logo` |
+| Codex App | `Codex App` | `1478395304624652345` | `codex-app` |
+| OpenCode host | `Codex App` | `1478395304624652345` | `codex-app` |
+
+Persisted non-Codex IDs and assets are normalized before publish.
+
+## Install
+
+Download Windows, Linux, or macOS binaries from [GitHub Releases](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest).
+
+Windows local artifact:
+
+```pwsh
+.\releases\windows\codex-discord-rich-presence.exe
 ```
 
-Or build directly with Cargo:
+Health checks:
 
-```bash
-cargo build --release
-```
-
-### 3. Run
-
-```bash
-codex-discord-presence
-```
-
-### 4. Use the TUI
-
-While the terminal UI is open:
-
-- Press `P` to open the full-screen account plan selector.
-- Use arrow keys or `1-7` to select:
-  - `Auto Detect`
-  - `Free`
-  - `Go`
-  - `Plus`
-  - `Pro`
-  - `Business`
-  - `Enterprise`
-- Press `Enter` to apply and save immediately.
-- Press `P` or `Esc` to close without changing the current plan.
-- Press `q` or `Ctrl+C` to quit the runtime.
-
-### 5. Validate health
-
-```bash
+```pwsh
 codex-discord-presence status
 codex-discord-presence doctor
 ```
 
-## Feature Spotlight
+## Build
 
-### Fast mode visibility
+Prerequisite: Rust stable.
 
-The runtime reads `~/.codex/.codex-global-state.json` and checks:
-
-- `electron-persisted-atom-state.default-service-tier`
-
-If the value is `fast`, the model is shown with a lightning prefix:
-
-```text
-⚡ GPT-5.5
+```pwsh
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build --release
 ```
 
-### Reasoning effort visibility
+Windows package:
 
-Reasoning effort is resolved from the active session in this order:
-
-1. `turn_context.payload.effort`
-2. `turn_context.payload.collaboration_mode.settings.reasoning_effort`
-
-Rendered examples:
-
-```text
-GPT-5.5 (Low)
-GPT-5.5 (High)
-⚡ GPT-5.5 (Extra High)
+```pwsh
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1
 ```
 
-### Interactive plan selector
+Release outputs:
 
-Plan display supports both automatic detection and manual override.
+| Platform | Artifact |
+|:---|:---|
+| Windows x64 | `releases/windows/codex-discord-rich-presence.exe` |
+| Linux x64 | `releases/linux/codex-discord-rich-presence` |
+| macOS x64 | `releases/macos/codex-discord-rich-presence-x64` |
+| macOS arm64 | `releases/macos/codex-discord-rich-presence-arm64` |
 
-- `Auto Detect` uses session telemetry, in-memory cache, and persisted cache fallback.
-- Manual mode writes the selected plan to `~/.codex/discord-presence-config.json`.
-- The selector is designed for live correction when Codex telemetry says `Unknown`, lags behind, or you simply want Discord/TUI to reflect the plan you actually use.
+## Config
 
-### Example Discord state
+Config lives at `~/.codex/discord-presence-config.json`.
 
-A typical compact presence state can look like:
+| Variable | Purpose |
+|:---|:---|
+| `CODEX_HOME` | Alternate Codex home |
+| `CODEX_PRESENCE_POLL_SECONDS` | Poll interval |
+| `CODEX_PRESENCE_STALE_SECONDS` | Session stale cutoff |
+| `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` | Active-session stickiness window |
 
-```text
-⚡ GPT-5.5 (Extra High) | Pro ($200/month) • $7.13 • 31.5M tok • Ctx 64% left • 5h 100% • 7d 100%
-```
+OpenCode data is read from `~/.local/share/opencode/opencode*.db`, including channel-specific databases such as `opencode-prod.db`.
 
-## Surface Routing 
+## Project Map
 
-<p align="center">
-  <img src="assets/branding/surface-map.svg" alt="Surface routing flow" width="960" />
-</p>
+| Path | Purpose |
+|:---|:---|
+| `src/` | Runtime, Discord IPC, TUI, parsers, pricing, telemetry |
+| `tests/` | Cross-module regressions and test map |
+| `docs/` | Runtime, database, and UI contracts |
+| `scripts/` | Release build scripts |
+| `assets/branding/` | Codex/OpenAI app assets |
 
-| Active Surface                      | Discord App Profile | Client ID Field             | Main Large Asset |
-| ----------------------------------- | ------------------- | --------------------------- | ---------------- |
-| Codex CLI / Codex VS Code Extension | `Codex`             | `discord_client_id`         | `codex-logo`     |
-| Codex App Desktop                   | `Codex App`         | `discord_client_id_desktop` | `codex-app`      |
-
-Detection priority:
-
-1. `session_meta.originator` contains `desktop`
-2. fallback: `session_meta.source` contains `desktop`
-3. otherwise: Codex CLI / Codex VS Code Extension profile
-
-## Command Reference
-
-| Command                                  | Purpose                                                                                                |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `codex-discord-presence`                 | Starts the runtime, TUI, and Discord IPC loop                                                          |
-| `codex-discord-presence codex [args...]` | Runs as a Codex passthrough wrapper while keeping presence active                                      |
-| `codex-discord-presence status`          | Prints health, active session state, limits source, model label, plan, Fast mode, and reasoning effort |
-| `codex-discord-presence doctor`          | Runs diagnostics for session roots, config, Discord IDs, and command availability                      |
-
-## Configuration
-
-Config file location:
-
-- `~/.codex/discord-presence-config.json`
-
-Essential defaults:
-
-| Key                               | Value                 |
-| --------------------------------- | --------------------- |
-| `schema_version`                  | `8`                   |
-| `discord_client_id`               | `1470480085453770854` |
-| `discord_client_id_desktop`       | `1478395304624652345` |
-| `display.large_image_key`         | `codex-logo`          |
-| `display.desktop_large_image_key` | `codex-app`           |
-| `display.desktop_large_text`      | `Codex App`           |
-| `display.small_image_key`         | `openai`              |
-| `privacy.show_cost`               | `true`                |
-| `openai_plan.mode`                | `auto`                |
-| `openai_plan.tier`                | `pro`                 |
-| `openai_plan.show_price`          | `true`                |
-| `poll_interval_seconds`           | `2`                   |
-
-Example:
-
-```json
-{
-  "schema_version": 8,
-  "discord_client_id": "1470480085453770854",
-  "discord_client_id_desktop": "1478395304624652345",
-  "poll_interval_seconds": 2,
-  "privacy": {
-    "show_cost": true
-  },
-  "openai_plan": {
-    "mode": "auto",
-    "tier": "pro",
-    "show_price": true
-  }
-}
-```
-
-Plan and model display notes:
-
-- `openai_plan.mode = "manual"` makes `openai_plan.tier` the displayed account plan.
-- `openai_plan.mode = "auto"` keeps telemetry and cache-based plan detection enabled.
-- The TUI plan selector writes the same config file used at startup.
-- Fast mode is derived from `~/.codex/.codex-global-state.json`.
-- Reasoning effort is derived from live `turn_context` telemetry.
-
-Environment overrides:
-
-- `CODEX_DISCORD_CLIENT_ID`
-- `CODEX_DISCORD_CLIENT_ID_DESKTOP`
-- `CODEX_PRESENCE_STALE_SECONDS`
-- `CODEX_PRESENCE_POLL_SECONDS`
-- `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`
-- `CODEX_HOME`
-
-## Build and Artifacts
-
-Published binaries are available in [GitHub Releases](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases).
-
-Local Cargo build cache is stored under `.build/target` and final release binaries are copied into `releases/<platform>/`.
-
-Expected artifact layout:
-
-- `releases/windows/codex-discord-rich-presence.exe`
-- `releases/linux/codex-discord-rich-presence`
-- `releases/macos/codex-discord-rich-presence`
-- `releases/macos/codex-discord-rich-presence-x64`
-- `releases/macos/codex-discord-rich-presence-arm64`
-
-Windows executable icon source:
-
-- `assets/branding/codex-app.png`
-
-## Documentation
-
-- [Docs Index](docs/README.md)
-- [CLI and Presence Contract](docs/api/codex-presence.md)
-- [Local Data and Schema Contracts](docs/database/schema.md)
-- [TUI Information Architecture](docs/ui/UI_SITEMAP.md)
-
-## Security and Privacy
-
-- Reads local Codex session files only.
-- Uses Discord local IPC for activity publishing.
-- Does not add an external telemetry backend.
-- See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
-
-## Credits
-
-<p align="center">
-  <img src="assets/branding/credits-ribbon.svg" alt="Project credits" width="980" />
-</p>
-
-## OpenAI Brand Note
-
-OpenAI marks and logos are trademarks of OpenAI.  
-Follow official brand policy: https://openai.com/brand/
+Docs start at [docs/index.md](docs/index.md). Tests start at [tests/index.md](tests/index.md).
 
 ## License
 
-MIT ([LICENSE](LICENSE))
+MIT. See [LICENSE](LICENSE).

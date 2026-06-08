@@ -10,8 +10,8 @@ This project has no relational database.
 - Schema version: `8` (non-breaking additions only)
 - Fields:
   - `schema_version: number`
-  - `discord_client_id: string | null`
-  - `discord_client_id_desktop: string | null`
+  - `discord_client_id: string | null` normalized to the Codex CLI / VS Code Discord app ID
+  - `discord_client_id_desktop: string | null` normalized to the Codex App Discord app ID
   - `discord_public_key: string | null` (metadata only)
   - `privacy: object`
     - `enabled`, `show_project_name`, `show_git_branch`, `show_model`
@@ -105,6 +105,7 @@ This project has no relational database.
 ## External Read-Only Input
 
 - Session logs: `~/.codex/sessions/**/*.jsonl`
+- OpenCode SQLite databases: `~/.local/share/opencode/opencode*.db`
 - Main consumed event families:
   - `session_meta`
   - `turn_context`
@@ -165,9 +166,16 @@ Per session:
   2. model catalog fallback (`cost::default_model_context_window`)
 - `used_tokens` priority:
   1. `event_msg.token_count.info.last_token_usage.total_tokens` (active-turn context usage)
-  2. `event_msg.token_count.info.total_token_usage.total_tokens` only when `<= window_tokens`
+  2. OpenCode `part.data` with `type = "step-finish"` and `tokens.total` or summed step token fields
+  3. `event_msg.token_count.info.total_token_usage.total_tokens` only when `<= window_tokens`
 - If only cumulative totals exist and they already exceed the context window, `context_window` is omitted (`None`) to avoid displaying inaccurate usage.
 - Display semantics are incremental for the active context segment (`used/total`), not "remaining as used".
+
+## Discord Priority Presence
+
+- The runtime republishes unchanged active and idle payloads every `2s` while connected.
+- This keeps Codex above browser presences such as PreMiD without changing the session timestamp.
+- Changed payloads still clear the previous same-client activity before publishing.
 
 ## Activity Lifecycle Rules
 

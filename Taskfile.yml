@@ -1,0 +1,25 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Full Rust test suite
+    cmds:
+      - cargo test --workspace
+
+  test:integration:
+    desc: Cross-module regression tests
+    cmds:
+      - cargo test --test integration
+
+  check:
+    desc: Format, lint, tests, and release compile
+    cmds:
+      - cargo fmt --check
+      - cargo clippy --workspace --all-targets -- -D warnings
+      - cargo test --workspace
+      - cargo build --release
+
+  build:windows:
+    desc: Build the Windows release artifact
+    cmds:
+      - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1

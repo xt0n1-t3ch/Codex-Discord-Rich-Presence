@@ -128,7 +128,7 @@ When privacy mode is disabled:
     - `Reading app.rs - MCP Servers`
     - `Thinking - Property Alpha (tony/mobile1)`
 - `state`: prioritized compact telemetry
-  - `<model> | <plan> • $cost • N tok • Ctx L% • 5h A% • 7d B%`
+  - `<model> | <plan> • $cost • N tok • Ctx C% used • 5h A% • 7d B%`
   - model labels can include:
     - Fast prefix: `⚡ GPT-5.4`
     - effort suffix: `GPT-5.4 (Extra High)`
@@ -148,17 +148,17 @@ Update behavior:
 
 - deduplicates identical payloads,
 - rate-limits publish bursts via minimum interval.
-- sends heartbeat re-publish every `30s` even when payload is unchanged.
+- sends priority re-publish every `2s` while connected, even when payload is unchanged, so Codex stays above browser/PreMiD activities in Discord.
 - reconnects IPC with exponential backoff (`5s` to `60s`) when Discord is unavailable.
 - keeps an explicit idle card (`Codex CLI / Codex VS Code Extension` or `Codex App` / `Waiting for session`) instead of clearing activity.
 - can switch Discord application/client dynamically when surface changes (Codex CLI / Codex VS Code Extension <-> Desktop).
+- treats OpenCode host processes, environment, and session metadata as the Codex App surface.
+- reads active OpenCode `gpt-*` sessions from `~/.local/share/opencode/opencode*.db` for model, Fast mode, tokens, cost, tool activity, and context-window parity.
 - validates configured image keys against Discord app assets when available.
 - skips invalid image keys and falls back to safe icon payload (avoids `?` placeholder on Discord mobile).
 
 ## Environment Variables
 
-- `CODEX_DISCORD_CLIENT_ID`
-- `CODEX_DISCORD_CLIENT_ID_DESKTOP`
 - `CODEX_PRESENCE_STALE_SECONDS`
 - `CODEX_PRESENCE_POLL_SECONDS`
 - `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS`
@@ -169,6 +169,7 @@ Update behavior:
 
 - Path: `~/.codex/discord-presence-config.json`
 - Schema: `8`
+- Discord identity fields are normalized to the approved Codex app IDs on load.
 - Key fields:
   - `discord_client_id`
   - `discord_client_id_desktop`
@@ -224,6 +225,7 @@ Update behavior:
 - Preferred window source: `event_msg.token_count.info.model_context_window`.
 - Fallback window source: model catalog context window (for known families, e.g. GPT-5/Codex `400_000`).
 - `used_tokens` is taken from active-turn usage (`info.last_token_usage.total_tokens`) when available.
+- OpenCode snapshots use the latest `step-finish.tokens.total`, falling back to the same input/output/reasoning/cache token fields OpenCode stores for that step.
 - Fallback to session total is allowed only when the session total does not exceed the window.
 - This prevents false values like multi-million cumulative totals being shown as current context usage.
 

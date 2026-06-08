@@ -345,7 +345,7 @@ impl PresenceConfig {
                 .with_context(|| format!("failed to read {}", cfg_path.display()))?;
             let mut parsed: PresenceConfig = serde_json::from_str(&raw)
                 .with_context(|| format!("invalid JSON in {}", cfg_path.display()))?;
-            if parsed.normalize_and_migrate() {
+            if parsed.normalize_for_runtime() {
                 parsed.save()?;
             }
             Ok(parsed)
@@ -368,31 +368,11 @@ impl PresenceConfig {
     }
 
     pub fn effective_client_id_for_surface(&self, surface: PresenceSurface) -> Option<String> {
-        if matches!(surface, PresenceSurface::Desktop) {
-            if let Some(desktop_env) = env_client_id("CODEX_DISCORD_CLIENT_ID_DESKTOP") {
-                return Some(desktop_env);
-            }
-            if let Some(configured_desktop) = self
-                .discord_client_id_desktop
-                .as_ref()
-                .and_then(|value| non_empty_trimmed_string(value))
-            {
-                return Some(configured_desktop);
-            }
-        }
-        self.effective_default_client_id()
+        Some(codex_client_id_for_surface(surface).to_string())
     }
 
-    fn effective_default_client_id(&self) -> Option<String> {
-        let from_env = env_client_id("CODEX_DISCORD_CLIENT_ID");
-
-        if from_env.is_some() {
-            return from_env;
-        }
-
-        self.discord_client_id
-            .as_ref()
-            .and_then(|value| non_empty_trimmed_string(value))
+    pub fn normalize_for_runtime(&mut self) -> bool {
+        self.normalize_and_migrate()
     }
 
     fn normalize_and_migrate(&mut self) -> bool {
@@ -404,16 +384,19 @@ impl PresenceConfig {
             changed = true;
         }
 
-        if is_missing(&self.discord_client_id) {
+        if self.discord_client_id.as_deref() != Some(DEFAULT_DISCORD_CLIENT_ID) {
             self.discord_client_id = Some(DEFAULT_DISCORD_CLIENT_ID.to_string());
             changed = true;
         }
-        if is_missing(&self.discord_client_id_desktop) {
+        if self.discord_client_id_desktop.as_deref() != Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID) {
             self.discord_client_id_desktop = Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID.to_string());
             changed = true;
         }
         if is_missing(&self.discord_public_key) {
             self.discord_public_key = Some(DEFAULT_DISCORD_PUBLIC_KEY.to_string());
+            changed = true;
+        }
+        if normalize_codex_display(&mut self.display, &default_display) {
             changed = true;
         }
 
@@ -470,18 +453,10 @@ impl PresenceConfig {
     }
 }
 
-fn env_client_id(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .and_then(|value| non_empty_trimmed_string(&value))
-}
-
-fn non_empty_trimmed_string(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
+fn codex_client_id_for_surface(surface: PresenceSurface) -> &'static str {
+    match surface {
+        PresenceSurface::Default => DEFAULT_DISCORD_CLIENT_ID,
+        PresenceSurface::Desktop => DEFAULT_DISCORD_DESKTOP_CLIENT_ID,
     }
 }
 
@@ -588,6 +563,48 @@ fn env_u64(name: &str, default: u64) -> u64 {
 
 fn is_missing(value: &Option<String>) -> bool {
     value.as_ref().map(|v| v.trim().is_empty()).unwrap_or(true)
+}
+
+fn normalize_codex_display(display: &mut DisplayConfig, default_display: &DisplayConfig) -> bool {
+    let mut changed = false;
+    if display.large_image_key.as_str() != default_display.large_image_key {
+        display.large_image_key = default_display.large_image_key.clone();
+        changed = true;
+    }
+    if display.large_text.as_str() != default_display.large_text {
+        display.large_text = default_display.large_text.clone();
+        changed = true;
+    }
+    if display.desktop_large_image_key.as_str() != default_display.desktop_large_image_key {
+        display.desktop_large_image_key = default_display.desktop_large_image_key.clone();
+        changed = true;
+    }
+    if display.desktop_large_text.as_str() != default_display.desktop_large_text {
+        display.desktop_large_text = default_display.desktop_large_text.clone();
+        changed = true;
+    }
+    if display.small_image_key.as_str() != default_display.small_image_key {
+        display.small_image_key = default_display.small_image_key.clone();
+        changed = true;
+    }
+    if display.small_text.as_str() != default_display.small_text {
+        display.small_text = default_display.small_text.clone();
+        changed = true;
+    }
+    if has_activity_image_overrides(&display.activity_small_image_keys) {
+        display.activity_small_image_keys = ActivitySmallImageKeys::default();
+        changed = true;
+    }
+    changed
+}
+
+fn has_activity_image_overrides(keys: &ActivitySmallImageKeys) -> bool {
+    keys.thinking.is_some()
+        || keys.reading.is_some()
+        || keys.editing.is_some()
+        || keys.running.is_some()
+        || keys.waiting.is_some()
+        || keys.idle.is_some()
 }
 
 fn normalize_optional_string(value: &mut Option<String>) -> bool {
@@ -856,13 +873,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn configured_client_id_is_returned() {
+    fn configured_client_id_is_rewritten_to_codex_default() {
         let cfg = PresenceConfig {
             discord_client_id: Some("from-config".to_string()),
             discord_client_id_desktop: None,
             ..PresenceConfig::default()
         };
-        assert_eq!(cfg.effective_client_id().as_deref(), Some("from-config"));
+        assert_eq!(
+            cfg.effective_client_id().as_deref(),
+            Some(DEFAULT_DISCORD_CLIENT_ID)
+        );
     }
 
     #[test]
@@ -909,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_surface_client_id_uses_desktop_config_when_present() {
+    fn desktop_surface_client_id_uses_codex_app_default() {
         let cfg = PresenceConfig {
             discord_client_id: Some("default-id".to_string()),
             discord_client_id_desktop: Some("desktop-id".to_string()),
@@ -918,7 +938,7 @@ mod tests {
         assert_eq!(
             cfg.effective_client_id_for_surface(PresenceSurface::Desktop)
                 .as_deref(),
-            Some("desktop-id")
+            Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID)
         );
     }
 

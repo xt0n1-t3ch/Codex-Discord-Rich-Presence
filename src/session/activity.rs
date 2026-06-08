@@ -523,7 +523,8 @@ impl SessionAccumulator {
 }
 
 pub(super) fn looks_like_desktop_surface(value: &str) -> bool {
-    value.to_ascii_lowercase().contains("desktop")
+    let normalized = value.to_ascii_lowercase();
+    normalized.contains("desktop") || normalized.contains("opencode")
 }
 
 fn classify_shell_command(arguments: &str) -> PendingActivity {
