@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -15,7 +15,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 8;
+const CONFIG_SCHEMA_VERSION: u32 = 9;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -63,8 +63,24 @@ pub enum OpenAiPlanTier {
     Plus,
     Business,
     Enterprise,
+    #[serde(
+        rename = "pro_5x",
+        alias = "pro5x",
+        alias = "pro-5x",
+        alias = "pro_100",
+        alias = "pro-100"
+    )]
+    Pro5x,
     #[default]
-    Pro,
+    #[serde(
+        rename = "pro_20x",
+        alias = "pro",
+        alias = "pro20x",
+        alias = "pro-20x",
+        alias = "pro_200",
+        alias = "pro-200"
+    )]
+    Pro20x,
 }
 
 impl OpenAiPlanTier {
@@ -75,7 +91,8 @@ impl OpenAiPlanTier {
             Self::Plus => "Plus",
             Self::Business => "Business",
             Self::Enterprise => "Enterprise",
-            Self::Pro => "Pro",
+            Self::Pro5x => "Pro 5x",
+            Self::Pro20x => "Pro 20x",
         }
     }
 
@@ -84,7 +101,8 @@ impl OpenAiPlanTier {
             Self::Free => Some(0),
             Self::Go => Some(8),
             Self::Plus => Some(20),
-            Self::Pro => Some(200),
+            Self::Pro5x => Some(100),
+            Self::Pro20x => Some(200),
             Self::Business | Self::Enterprise => None,
         }
     }
@@ -125,7 +143,7 @@ pub struct PlanPreset {
     pub label: &'static str,
 }
 
-const PLAN_PRESETS: [PlanPreset; 7] = [
+const PLAN_PRESETS: [PlanPreset; 8] = [
     PlanPreset {
         mode: OpenAiPlanMode::Auto,
         tier: None,
@@ -148,8 +166,13 @@ const PLAN_PRESETS: [PlanPreset; 7] = [
     },
     PlanPreset {
         mode: OpenAiPlanMode::Manual,
-        tier: Some(OpenAiPlanTier::Pro),
-        label: "Pro",
+        tier: Some(OpenAiPlanTier::Pro5x),
+        label: "Pro 5x ($100/month)",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Pro20x),
+        label: "Pro 20x ($200/month)",
     },
     PlanPreset {
         mode: OpenAiPlanMode::Manual,
@@ -177,7 +200,7 @@ pub fn plan_preset_index(plan: &OpenAiPlanDisplayConfig) -> usize {
         .position(|preset| {
             matches!(preset.mode, OpenAiPlanMode::Manual) && preset.tier == Some(plan.tier)
         })
-        .unwrap_or(4)
+        .unwrap_or(5)
 }
 
 pub fn apply_plan_preset(plan: &mut OpenAiPlanDisplayConfig, preset_index: usize) {
@@ -195,7 +218,7 @@ impl Default for OpenAiPlanDisplayConfig {
     fn default() -> Self {
         Self {
             mode: OpenAiPlanMode::Auto,
-            tier: OpenAiPlanTier::Pro,
+            tier: OpenAiPlanTier::Pro20x,
             show_price: true,
         }
     }
@@ -504,8 +527,10 @@ pub fn sessions_paths() -> Vec<PathBuf> {
 
     #[cfg(windows)]
     {
-        for candidate in windows_wsl_sessions_candidates() {
-            push_unique_path(&mut ordered, &mut seen, candidate);
+        if include_wsl_session_roots() {
+            for candidate in windows_wsl_sessions_candidates() {
+                push_unique_path(&mut ordered, &mut seen, candidate);
+            }
         }
     }
 
@@ -768,6 +793,20 @@ fn running_in_wsl() -> bool {
 }
 
 #[cfg(windows)]
+fn include_wsl_session_roots() -> bool {
+    parse_bool_flag(env::var("CODEX_PRESENCE_INCLUDE_WSL").ok().as_deref())
+        || parse_bool_flag(env::var("CC_PRESENCE_INCLUDE_WSL").ok().as_deref())
+}
+
+#[cfg(any(windows, test))]
+fn parse_bool_flag(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+#[cfg(windows)]
 fn windows_wsl_sessions_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let distros = windows_wsl_distro_names();
@@ -793,7 +832,7 @@ fn windows_wsl_sessions_candidates() -> Vec<PathBuf> {
 
 #[cfg(windows)]
 fn windows_wsl_distro_names() -> Vec<String> {
-    let output = Command::new("wsl.exe")
+    let output = crate::util::silent_command("wsl.exe")
         .args(["-l", "-q"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -815,7 +854,7 @@ fn windows_wsl_distro_names() -> Vec<String> {
 
 #[cfg(windows)]
 fn wsl_home_for_distro(distro: &str) -> Option<String> {
-    let output = Command::new("wsl.exe")
+    let output = crate::util::silent_command("wsl.exe")
         .args(["-d", distro, "--", "sh", "-lc", "printf %s \"$HOME\""])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -901,7 +940,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 8);
+        assert_eq!(cfg.schema_version, 9);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
             Some(DEFAULT_DISCORD_CLIENT_ID)
@@ -915,7 +954,7 @@ mod tests {
             Some(DEFAULT_DISCORD_PUBLIC_KEY)
         );
         assert_eq!(cfg.openai_plan.mode, OpenAiPlanMode::Auto);
-        assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro);
+        assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro20x);
         assert!(cfg.openai_plan.show_price);
     }
 
@@ -990,12 +1029,39 @@ mod tests {
     }
 
     #[test]
-    fn default_openai_plan_is_pro_with_price() {
+    fn default_openai_plan_is_pro_20x_with_price() {
         let cfg = PresenceConfig::default();
         assert_eq!(cfg.openai_plan.mode, OpenAiPlanMode::Auto);
-        assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro);
+        assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro20x);
         assert!(cfg.openai_plan.show_price);
-        assert_eq!(cfg.openai_plan.label(), "Pro ($200/month)");
+        assert_eq!(cfg.openai_plan.label(), "Pro 20x ($200/month)");
+    }
+
+    #[test]
+    fn plan_presets_include_distinct_pro_usage_tiers() {
+        let labels: Vec<&str> = plan_presets().iter().map(|preset| preset.label).collect();
+
+        assert!(labels.contains(&"Pro 5x ($100/month)"));
+        assert!(labels.contains(&"Pro 20x ($200/month)"));
+        assert_eq!(
+            plan_presets()
+                .iter()
+                .filter(|preset| matches!(
+                    preset.tier,
+                    Some(OpenAiPlanTier::Pro5x | OpenAiPlanTier::Pro20x)
+                ))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn legacy_pro_plan_deserializes_to_pro_20x() {
+        let raw = r#"{"mode":"manual","tier":"pro","show_price":true}"#;
+        let plan: OpenAiPlanDisplayConfig = serde_json::from_str(raw).expect("plan");
+
+        assert_eq!(plan.tier, OpenAiPlanTier::Pro20x);
+        assert_eq!(plan.label(), "Pro 20x ($200/month)");
     }
 
     #[test]
@@ -1016,7 +1082,7 @@ mod tests {
             tier: OpenAiPlanTier::Business,
             show_price: true,
         };
-        assert_eq!(plan_preset_index(&plan), 5);
+        assert_eq!(plan_preset_index(&plan), 6);
     }
 
     #[test]
@@ -1029,5 +1095,40 @@ mod tests {
         apply_plan_preset(&mut plan, 0);
         assert_eq!(plan.mode, OpenAiPlanMode::Auto);
         assert_eq!(plan.tier, OpenAiPlanTier::Plus);
+    }
+
+    #[test]
+    fn windows_wsl_probe_commands_use_hidden_launcher() {
+        let source = include_str!("config.rs");
+        let direct_spawn = ["Command::new(", "\"wsl.exe\"", ")"].concat();
+        let hidden_spawn = ["crate::util::silent_command(", "\"wsl.exe\"", ")"].concat();
+
+        assert!(
+            !source.contains(&direct_spawn),
+            "WSL probes must not use visible Windows subprocess launches"
+        );
+        assert_eq!(
+            source.matches(&hidden_spawn).count(),
+            2,
+            "both WSL discovery probes must use the hidden command helper"
+        );
+    }
+
+    #[test]
+    fn windows_wsl_roots_are_explicit_opt_in() {
+        let source = include_str!("config.rs");
+
+        assert!(!parse_bool_flag(None));
+        assert!(!parse_bool_flag(Some("")));
+        assert!(!parse_bool_flag(Some("0")));
+        assert!(!parse_bool_flag(Some("false")));
+        assert!(parse_bool_flag(Some("1")));
+        assert!(parse_bool_flag(Some("true")));
+        assert!(parse_bool_flag(Some("yes")));
+        assert!(parse_bool_flag(Some("on")));
+        assert!(
+            source.contains("if include_wsl_session_roots()"),
+            "Windows WSL session scanning must stay opt-in before invoking wsl.exe"
+        );
     }
 }

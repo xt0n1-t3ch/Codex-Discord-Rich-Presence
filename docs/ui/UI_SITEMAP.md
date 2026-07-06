@@ -14,26 +14,23 @@ The foreground terminal is a Ratatui dashboard over the same daemon runtime that
 
 | Widget | Contract |
 |:---|:---|
-| Runtime header | Codex ASCII/real-logo indicator, animated spinner, mode, Discord status, poll cadence |
+| Runtime header | Large centered Codex wordmark, local-first subtitle, animated spinner, mode, Discord status, poll cadence |
 | Active session | Project, branch, model, reasoning effort, Fast state, cost, token triplet, context use, activity target |
 | Quota + context | Primary/secondary gauges, plan label, Fast label, source freshness, OAuth/API context copy |
 | Usage snapshot | Total cost, cache hit ratio, cached-input savings, uptime, spend sparkline by model |
 | Recent sessions | Responsive list of recent project/model/token summaries |
-| Plan picker | Centered selector using current plan presets with keyboard footer |
+| Plan picker | Centered selector with Auto Detect plus Free, Go, Plus, Pro 5x, Pro 20x, Business, and Enterprise presets |
 | Footer | Author credit plus available keyboard actions; collapses safely on narrow terminals |
 
 ## Theme
 
-The theme is Codex dark with restrained pastel accents:
+The theme is Codex dark with a restrained black-and-white terminal palette:
 
 | Role | Use |
 |:---|:---|
-| Cyan | Codex identity, borders, spinner, sparklines |
-| Pink | Fast mode, selected plan, model emphasis |
-| Green | Healthy remaining quota/cache/savings |
-| Yellow | Warnings, spend, medium quota |
-| Red | Low remaining quota |
-| Slate | Muted metadata and panel borders |
+| White | Codex identity, selected plan, active model, connected state, sparklines |
+| Gray | Metadata, inactive states, medium quota, footer text |
+| Dark gray | Panel borders and structural separation |
 
 ## Motion
 
@@ -41,7 +38,7 @@ Animation is tick-driven by `RenderData.banner_phase`. The frame signature inclu
 
 ## Logo Policy
 
-`assets/branding/codex-app.png` is the real Codex App source image. The terminal advertises image readiness when `TerminalLogoMode::Image` or `Auto` has a logo path, with clean ASCII fallback for terminals where image protocols are unavailable.
+`assets/branding/codex-app.png` remains the real Codex App source image for README and Discord preview assets. The terminal header intentionally uses a text wordmark instead of duplicating the app icon, so Codex stays large, centered, and readable on every platform terminal.
 
 ## Accessibility + Resilience
 

@@ -19,13 +19,12 @@ const FULL_RECENT_RESERVED_ROWS: u16 = 5;
 const COMPACT_RECENT_RESERVED_ROWS: u16 = 3;
 const MINIMAL_RECENT_RESERVED_ROWS: u16 = 1;
 
-const CODEX_ASCII: [&str; 6] = [
-    "  ______          __",
-    " / ____/___  ____/ /__  _  __",
-    "/ /   / __ \\/ __  / _ \\| |/_/",
-    "/ /___/ /_/ / /_/ /  __/>  <",
-    "\\____/\\____/\\__,_/\\___/_/|_|",
-    "local-first Discord Rich Presence",
+const CODEX_ASCII: [&str; 5] = [
+    " ██████╗ ██████╗ ██████╗ ███████╗██╗  ██╗",
+    "██╔════╝██╔═══██╗██╔══██╗██╔════╝╚██╗██╔╝",
+    "██║     ██║   ██║██║  ██║█████╗   ╚███╔╝ ",
+    "██║     ██║   ██║██║  ██║██╔══╝   ██╔██╗ ",
+    "╚██████╗╚██████╔╝██████╔╝███████╗██╔╝ ██╗",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +36,6 @@ pub enum UiLayoutMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BannerVariant {
-    Image,
     AsciiDual,
     CompactText,
     MinimalText,
@@ -186,8 +184,8 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
 
 fn body_layout(layout: UiLayoutMode, area: Rect) -> std::rc::Rc<[Rect]> {
     let header_height = match layout {
-        UiLayoutMode::Full => 8,
-        UiLayoutMode::Compact => 5,
+        UiLayoutMode::Full => 9,
+        UiLayoutMode::Compact => 7,
         UiLayoutMode::Minimal => 3,
     }
     .min(area.height);
@@ -206,35 +204,30 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
         ) && data.logo_path.is_some(),
     );
     match variant {
-        BannerVariant::Image => {
-            lines.push(Line::from(vec![
-                Span::styled("▰ ", Style::default().fg(theme::PINK)),
-                Span::styled("Codex", theme::title()),
-                Span::styled(" real logo ready", Style::default().fg(theme::MUTED)),
-            ]));
-            if let Some(path) = data.logo_path {
-                lines.push(Line::from(Span::styled(
-                    truncate(path, area.width as usize),
-                    theme::muted(),
-                )));
-            }
-        }
         BannerVariant::AsciiDual => {
             for line in CODEX_ASCII
                 .iter()
-                .take(area.height.saturating_sub(2) as usize)
+                .take(area.height.saturating_sub(3) as usize)
             {
                 lines.push(Line::from(Span::styled(*line, theme::title())));
             }
+            lines.push(Line::from(Span::styled(
+                header_subtitle(layout),
+                theme::muted(),
+            )));
         }
         BannerVariant::CompactText => {
-            lines.push(Line::from(Span::styled("Codex Presence", theme::title())))
+            lines.push(Line::from(Span::styled("CODEX", theme::title())));
+            lines.push(Line::from(Span::styled(
+                header_subtitle(layout),
+                theme::muted(),
+            )));
         }
-        BannerVariant::MinimalText => lines.push(Line::from(Span::styled("Codex", theme::title()))),
+        BannerVariant::MinimalText => lines.push(Line::from(Span::styled("CODEX", theme::title()))),
     }
     let spinner = spinner(data.banner_phase);
     lines.push(Line::from(vec![
-        Span::styled(format!("{spinner} "), Style::default().fg(theme::CYAN)),
+        Span::styled(format!("{spinner} "), Style::default().fg(theme::TEXT)),
         Span::styled(data.mode_label, Style::default().fg(theme::TEXT)),
         Span::styled(" · ", theme::muted()),
         Span::styled(data.discord_status, status_style(data.discord_status)),
@@ -242,11 +235,22 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
         Span::styled(format!("{} poll", data.poll_interval_secs), theme::muted()),
     ]));
 
-    let block = panel("runtime", Some(theme::CYAN));
+    let block = panel("", Some(theme::BORDER));
     frame.render_widget(
-        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
+        Paragraph::new(lines)
+            .block(block)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn header_subtitle(layout: UiLayoutMode) -> &'static str {
+    match layout {
+        UiLayoutMode::Full => "local-first Discord Rich Presence for Codex App, CLI, and VS Code",
+        UiLayoutMode::Compact => "Discord Rich Presence · Codex App · CLI · VS Code",
+        UiLayoutMode::Minimal => "Discord Rich Presence",
+    }
 }
 
 fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
@@ -319,7 +323,7 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
     }
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel("active session", Some(theme::PINK)))
+            .block(panel("Session", Some(theme::BORDER)))
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -366,7 +370,7 @@ fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
     ];
     frame.render_widget(
         Paragraph::new(line)
-            .block(panel("quota + context", Some(theme::GREEN)))
+            .block(panel("Plan + context", Some(theme::BORDER)))
             .wrap(Wrap { trim: true }),
         rows[2],
     );
@@ -398,7 +402,7 @@ fn render_metrics(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
     let Some(metrics) = data.metrics else {
         frame.render_widget(
             Paragraph::new("Metrics warm up after the first session scan.")
-                .block(panel("usage snapshot", Some(theme::YELLOW))),
+                .block(panel("Usage", Some(theme::BORDER))),
             area,
         );
         return;
@@ -430,13 +434,13 @@ fn render_metrics(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
         ]),
     ];
     frame.render_widget(
-        Paragraph::new(text).block(panel("usage snapshot", Some(theme::YELLOW))),
+        Paragraph::new(text).block(panel("Usage", Some(theme::BORDER))),
         inner[0],
     );
     frame.render_widget(
         Sparkline::default()
-            .block(panel("model spend sparkline", Some(theme::CYAN)))
-            .style(Style::default().fg(theme::CYAN))
+            .block(panel("Spend trend", Some(theme::BORDER)))
+            .style(Style::default().fg(theme::TEXT))
             .data(&samples),
         inner[1],
     );
@@ -481,7 +485,7 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
         List::new(items)
     };
     frame.render_widget(
-        list.block(panel("recent sessions", Some(theme::CYAN))),
+        list.block(panel("Recent sessions", Some(theme::BORDER))),
         area,
     );
 }
@@ -491,7 +495,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool) {
     let mut spans = vec![Span::styled(left, theme::muted())];
     if !right.is_empty() {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(right, Style::default().fg(theme::PINK)));
+        spans.push(Span::styled(right, Style::default().fg(theme::TEXT)));
     }
     let line = Line::from(spans);
     frame.render_widget(Paragraph::new(line), area);
@@ -499,15 +503,15 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool) {
 
 fn render_plan_picker(frame: &mut Frame<'_>, area: Rect, view: PlanPickerView) {
     let presets = plan_presets();
-    let width = area.width.min(84);
-    let height = area.height.min((presets.len() as u16 + 4).max(8));
+    let width = area.width.min(96);
+    let height = area.height.min((presets.len() as u16 + 5).max(9));
     let panel_area = centered_rect(width, height, area);
     let items: Vec<ListItem<'_>> = presets
         .iter()
         .enumerate()
         .map(|(index, preset)| {
             let marker = if index == view.selected_index {
-                "▶"
+                "›"
             } else {
                 " "
             };
@@ -517,7 +521,7 @@ fn render_plan_picker(frame: &mut Frame<'_>, area: Rect, view: PlanPickerView) {
                 ""
             };
             ListItem::new(Line::from(vec![
-                Span::styled(marker, Style::default().fg(theme::PINK)),
+                Span::styled(marker, Style::default().fg(theme::TEXT).bold()),
                 Span::raw(" "),
                 Span::styled(plan_label(*preset), Style::default().fg(theme::TEXT)),
                 Span::styled(current, theme::muted()),
@@ -525,7 +529,7 @@ fn render_plan_picker(frame: &mut Frame<'_>, area: Rect, view: PlanPickerView) {
         })
         .collect();
     frame.render_widget(
-        List::new(items).block(panel("Plan selector", Some(theme::PINK))),
+        List::new(items).block(panel("Change plan", Some(theme::TEXT))),
         panel_area,
     );
     let footer = Rect {
@@ -548,10 +552,12 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 
 fn panel(title: &str, accent: Option<Color>) -> Block<'_> {
     let style = Style::default().fg(accent.unwrap_or(theme::BORDER));
-    Block::default()
-        .borders(Borders::ALL)
-        .border_style(style)
-        .title(Span::styled(format!(" {title} "), style))
+    let block = Block::default().borders(Borders::ALL).border_style(style);
+    if title.trim().is_empty() {
+        block
+    } else {
+        block.title(Span::styled(format!(" {title} "), style))
+    }
 }
 
 pub fn frame_signature(data: &RenderData<'_>) -> String {
@@ -646,11 +652,8 @@ fn select_banner_variant(
     width: u16,
     available_rows: u16,
     layout: UiLayoutMode,
-    image_enabled: bool,
+    _image_enabled: bool,
 ) -> BannerVariant {
-    if image_enabled && width >= 80 && available_rows >= 4 {
-        return BannerVariant::Image;
-    }
     match layout {
         UiLayoutMode::Full if width >= 96 && available_rows >= 7 => BannerVariant::AsciiDual,
         UiLayoutMode::Compact if width >= 72 && available_rows >= 5 => BannerVariant::AsciiDual,
@@ -664,20 +667,18 @@ fn select_banner_variant(
 
 fn limit_color(remaining_percent: f64) -> Color {
     if remaining_percent >= 60.0 {
-        theme::GREEN
+        theme::TEXT
     } else if remaining_percent >= 25.0 {
-        theme::YELLOW
+        theme::MUTED
     } else {
-        theme::RED
+        theme::TEXT
     }
 }
 
 fn status_style(status: &str) -> Style {
     let normalized = status.to_ascii_lowercase();
     if normalized.contains("connected") {
-        Style::default().fg(theme::GREEN)
-    } else if normalized.contains("missing") {
-        Style::default().fg(theme::YELLOW)
+        Style::default().fg(theme::TEXT).bold()
     } else {
         Style::default().fg(theme::MUTED)
     }
@@ -685,7 +686,7 @@ fn status_style(status: &str) -> Style {
 
 fn fast_style(active: bool) -> Style {
     if active {
-        Style::default().fg(theme::PINK).bold()
+        Style::default().fg(theme::TEXT).bold()
     } else {
         Style::default().fg(theme::MUTED)
     }
@@ -753,14 +754,13 @@ fn plan_label(preset: PlanPreset) -> &'static str {
 mod theme {
     use ratatui::prelude::*;
 
-    pub const TEXT: Color = Color::Rgb(237, 242, 247);
-    pub const MUTED: Color = Color::Rgb(148, 163, 184);
-    pub const BORDER: Color = Color::Rgb(71, 85, 105);
-    pub const CYAN: Color = Color::Rgb(125, 211, 252);
-    pub const PINK: Color = Color::Rgb(244, 114, 182);
-    pub const GREEN: Color = Color::Rgb(134, 239, 172);
-    pub const YELLOW: Color = Color::Rgb(253, 224, 71);
-    pub const RED: Color = Color::Rgb(248, 113, 113);
+    pub const TEXT: Color = Color::Rgb(245, 245, 245);
+    pub const MUTED: Color = Color::Rgb(150, 150, 150);
+    pub const BORDER: Color = Color::Rgb(82, 82, 82);
+    pub const CYAN: Color = TEXT;
+    pub const PINK: Color = TEXT;
+    pub const GREEN: Color = TEXT;
+    pub const YELLOW: Color = MUTED;
 
     pub fn title() -> Style {
         Style::default().fg(CYAN).bold()
@@ -774,6 +774,45 @@ mod theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn sample_render_data(plan_picker: Option<PlanPickerView>) -> RenderData<'static> {
+        RenderData {
+            running_for: Duration::from_secs(7),
+            mode_label: "daemon",
+            discord_status: "connected",
+            client_id_configured: true,
+            poll_interval_secs: 2,
+            stale_secs: 90,
+            show_activity: true,
+            show_activity_target: true,
+            plan_display_label: "Pro 20x ($200/month)",
+            plan_status_label: "Pro 20x (manual)",
+            fast_mode_label: "Fast off",
+            fast_active: false,
+            limits_source_label: "local",
+            limits_updated_label: "just now",
+            spark_plan_warning: None,
+            logo_mode: TerminalLogoMode::Auto,
+            logo_path: Some("assets/branding/codex-app.png"),
+            banner_phase: 0,
+            active: None,
+            effective_limits: None,
+            metrics: None,
+            sessions: &[],
+            plan_picker,
+        }
+    }
+
+    fn render_test_text(width: u16, height: u16, data: &RenderData<'_>) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render_frame(frame, data))
+            .expect("draw");
+        terminal.backend().to_string()
+    }
 
     #[test]
     fn header_rule_respects_requested_width() {
@@ -783,9 +822,51 @@ mod tests {
 
     #[test]
     fn limit_color_thresholds() {
-        assert_eq!(limit_color(80.0), theme::GREEN);
-        assert_eq!(limit_color(45.0), theme::YELLOW);
-        assert_eq!(limit_color(12.0), theme::RED);
+        assert_eq!(limit_color(80.0), theme::TEXT);
+        assert_eq!(limit_color(45.0), theme::MUTED);
+        assert_eq!(limit_color(12.0), theme::TEXT);
+    }
+
+    #[test]
+    fn codex_wordmark_uses_large_monochrome_terminal_art() {
+        assert!(CODEX_ASCII[0].contains("██████"));
+        assert!(
+            !CODEX_ASCII
+                .iter()
+                .any(|line| line.to_ascii_lowercase().contains("local-first")),
+            "the header subtitle is rendered separately so the wordmark stays visually clean"
+        );
+    }
+
+    #[test]
+    fn theme_is_monochrome_codex_terminal_palette() {
+        assert_eq!(theme::CYAN, theme::TEXT);
+        assert_eq!(theme::PINK, theme::TEXT);
+        assert_eq!(theme::GREEN, theme::TEXT);
+        assert_eq!(theme::YELLOW, theme::MUTED);
+    }
+
+    #[test]
+    fn rendered_full_header_shows_centered_codex_wordmark() {
+        let data = sample_render_data(None);
+        let rendered = render_test_text(132, 36, &data);
+
+        assert!(rendered.contains("██████"));
+        assert!(rendered.contains("local-first Discord Rich Presence"));
+        assert!(!rendered.contains("real logo ready"));
+    }
+
+    #[test]
+    fn rendered_plan_picker_lists_split_pro_tiers() {
+        let data = sample_render_data(Some(PlanPickerView {
+            selected_index: 4,
+            current_index: 5,
+        }));
+        let rendered = render_test_text(120, 32, &data);
+
+        assert!(rendered.contains("Change plan"));
+        assert!(rendered.contains("Pro 5x ($100/month)"));
+        assert!(rendered.contains("Pro 20x ($200/month)"));
     }
 
     #[test]
@@ -848,10 +929,10 @@ mod tests {
     }
 
     #[test]
-    fn banner_variant_allows_image_in_compact_when_enabled() {
+    fn banner_variant_ignores_logo_image_when_wordmark_fits() {
         assert_eq!(
             select_banner_variant(100, 20, UiLayoutMode::Compact, true),
-            BannerVariant::Image
+            BannerVariant::AsciiDual
         );
     }
 

@@ -2,9 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.7.1] - 2026-07-06
 
-No unreleased changes.
+### Changed
+
+- The Ratatui foreground dashboard now uses a centered monochrome Codex wordmark and black/white panel treatment instead of the previous neon accent palette.
+- The README now follows the Pulse-style launch structure with What's New, About, Screenshots, Features, Usage, Roadmap, Security, and brand-true Shields/Simple Icons badges.
+
+### Fixed
+
+- Windows WSL session discovery is now explicit opt-in via `CODEX_PRESENCE_INCLUDE_WSL=1` or `CC_PRESENCE_INCLUDE_WSL=1`; by default the runtime does not invoke `wsl.exe`, and the opt-in path uses the hidden subprocess helper to avoid visible console windows.
+- The terminal plan selector now distinguishes `Pro 5x ($100/month)` from `Pro 20x ($200/month)`, with legacy `pro` config/cache values mapped to `Pro 20x`.
+
+### Validated
+
+- `cargo test windows_wsl`
+- `cargo test plan --lib`
+- `cargo test ui::tests --lib`
 
 ## [1.7.0] - 2026-07-05
 

@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use std::path::Path;
+use std::process::Command;
 use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
@@ -12,6 +13,22 @@ use crate::session::ReasoningEffort;
 pub fn setup_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = fmt().with_env_filter(filter).without_time().try_init();
+}
+
+pub fn silent_command(program: &str) -> Command {
+    let cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let mut cmd = cmd;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd
+    }
+    #[cfg(not(windows))]
+    {
+        cmd
+    }
 }
 
 pub fn format_tokens(tokens: u64) -> String {

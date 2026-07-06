@@ -6,13 +6,15 @@ All data stays on the user's machine. The daemon reads Codex/OpenCode local stat
 
 Path: `~/.codex/discord-presence-config.json`
 
+Current schema version: `9`.
+
 | Owner | Fields |
 |:---|:---|
 | Identity | Discord client IDs, Codex asset keys, desktop asset keys |
 | Runtime | Poll interval, stale cutoff, active sticky window |
 | Display | Terminal logo mode, logo path, large/small image text |
 | Pricing | Model aliases and overrides |
-| Plan | Local plan override and preset selection |
+| Plan | Local plan override and preset selection. Manual tiers include `Pro 5x ($100/month)` and `Pro 20x ($200/month)`; legacy `pro` maps to Pro 20x. |
 
 ## Session Snapshot
 
