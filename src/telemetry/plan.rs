@@ -19,7 +19,23 @@ pub enum DetectedPlanTier {
     Plus,
     Business,
     Enterprise,
-    Pro,
+    #[serde(
+        rename = "pro_5x",
+        alias = "pro5x",
+        alias = "pro-5x",
+        alias = "pro_100",
+        alias = "pro-100"
+    )]
+    Pro5x,
+    #[serde(
+        rename = "pro_20x",
+        alias = "pro",
+        alias = "pro20x",
+        alias = "pro-20x",
+        alias = "pro_200",
+        alias = "pro-200"
+    )]
+    Pro20x,
     #[default]
     Unknown,
 }
@@ -32,7 +48,8 @@ impl DetectedPlanTier {
             Self::Plus => "Plus",
             Self::Business => "Business",
             Self::Enterprise => "Enterprise",
-            Self::Pro => "Pro",
+            Self::Pro5x => "Pro 5x",
+            Self::Pro20x => "Pro 20x",
             Self::Unknown => "Unknown",
         }
     }
@@ -42,7 +59,8 @@ impl DetectedPlanTier {
             Self::Free => Some(0),
             Self::Go => Some(8),
             Self::Plus => Some(20),
-            Self::Pro => Some(200),
+            Self::Pro5x => Some(100),
+            Self::Pro20x => Some(200),
             Self::Business | Self::Enterprise | Self::Unknown => None,
         }
     }
@@ -63,7 +81,8 @@ impl From<OpenAiPlanTier> for DetectedPlanTier {
             OpenAiPlanTier::Plus => Self::Plus,
             OpenAiPlanTier::Business => Self::Business,
             OpenAiPlanTier::Enterprise => Self::Enterprise,
-            OpenAiPlanTier::Pro => Self::Pro,
+            OpenAiPlanTier::Pro5x => Self::Pro5x,
+            OpenAiPlanTier::Pro20x => Self::Pro20x,
         }
     }
 }
@@ -214,7 +233,10 @@ pub fn parse_plan_type(raw: Option<&str>) -> DetectedPlanTier {
         "plus" => DetectedPlanTier::Plus,
         "business" => DetectedPlanTier::Business,
         "enterprise" => DetectedPlanTier::Enterprise,
-        "pro" => DetectedPlanTier::Pro,
+        "pro" | "pro20x" | "pro_20x" | "pro-20x" | "pro200" | "pro_200" | "pro-200" => {
+            DetectedPlanTier::Pro20x
+        }
+        "pro5x" | "pro_5x" | "pro-5x" | "pro100" | "pro_100" | "pro-100" => DetectedPlanTier::Pro5x,
         _ => DetectedPlanTier::Unknown,
     }
 }
@@ -230,7 +252,7 @@ pub fn is_model_allowed_for_plan(model_id: &str, tier: DetectedPlanTier) -> bool
     if !is_spark_model(model_id) {
         return true;
     }
-    tier == DetectedPlanTier::Pro
+    matches!(tier, DetectedPlanTier::Pro5x | DetectedPlanTier::Pro20x)
 }
 
 fn plan_cache_path() -> PathBuf {
@@ -412,7 +434,11 @@ mod tests {
             parse_plan_type(Some("enterprise")),
             DetectedPlanTier::Enterprise
         );
-        assert_eq!(parse_plan_type(Some("pro")), DetectedPlanTier::Pro);
+        assert_eq!(parse_plan_type(Some("pro")), DetectedPlanTier::Pro20x);
+        assert_eq!(parse_plan_type(Some("pro_5x")), DetectedPlanTier::Pro5x);
+        assert_eq!(parse_plan_type(Some("pro-20x")), DetectedPlanTier::Pro20x);
+        assert_eq!(parse_plan_type(Some("pro_100")), DetectedPlanTier::Pro5x);
+        assert_eq!(parse_plan_type(Some("pro_200")), DetectedPlanTier::Pro20x);
         assert_eq!(
             parse_plan_type(Some("unexpected")),
             DetectedPlanTier::Unknown
@@ -428,7 +454,7 @@ mod tests {
         ];
         let resolved =
             detector.resolve_from_sessions(&sessions, &OpenAiPlanDisplayConfig::default());
-        assert_eq!(resolved.tier, DetectedPlanTier::Pro);
+        assert_eq!(resolved.tier, DetectedPlanTier::Pro20x);
         assert_eq!(resolved.source, DetectedPlanSource::Telemetry);
     }
 
@@ -450,10 +476,31 @@ mod tests {
     }
 
     #[test]
+    fn detector_respects_manual_pro_usage_tiers() {
+        let mut detector = PlanDetector::new();
+        let resolved = detector.resolve_from_sessions(
+            &[],
+            &OpenAiPlanDisplayConfig {
+                mode: OpenAiPlanMode::Manual,
+                tier: OpenAiPlanTier::Pro5x,
+                show_price: true,
+            },
+        );
+
+        assert_eq!(resolved.tier, DetectedPlanTier::Pro5x);
+        assert_eq!(resolved.label(true), "Pro 5x ($100/month)");
+        assert_eq!(resolved.status_label(), "Pro 5x (manual)");
+    }
+
+    #[test]
     fn spark_is_pro_only() {
         assert!(is_model_allowed_for_plan(
             "gpt-5.3-codex-spark",
-            DetectedPlanTier::Pro
+            DetectedPlanTier::Pro5x
+        ));
+        assert!(is_model_allowed_for_plan(
+            "gpt-5.3-codex-spark",
+            DetectedPlanTier::Pro20x
         ));
         assert!(!is_model_allowed_for_plan(
             "gpt-5.3-codex-spark",
@@ -470,7 +517,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("plan-cache.json");
         let payload = ResolvedPlan {
-            tier: DetectedPlanTier::Pro,
+            tier: DetectedPlanTier::Pro20x,
             source: DetectedPlanSource::Telemetry,
             observed_at: Utc.timestamp_opt(10, 0).single(),
             raw_plan_type: Some("pro".to_string()),
@@ -478,7 +525,7 @@ mod tests {
 
         save_plan_cache_to_path(&payload, &path).expect("save");
         let loaded = load_plan_cache_from_path(&path).expect("load");
-        assert_eq!(loaded.tier, DetectedPlanTier::Pro);
+        assert_eq!(loaded.tier, DetectedPlanTier::Pro20x);
         assert_eq!(loaded.raw_plan_type.as_deref(), Some("pro"));
     }
 }

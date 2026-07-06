@@ -798,7 +798,7 @@ mod tests {
 
     fn resolved_plan_pro() -> ResolvedPlan {
         ResolvedPlan {
-            tier: DetectedPlanTier::Pro,
+            tier: DetectedPlanTier::Pro20x,
             source: DetectedPlanSource::Telemetry,
             observed_at: None,
             raw_plan_type: Some("pro".to_string()),
@@ -938,7 +938,7 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("GPT-5.3-Codex | Pro ($200/month)"));
+        assert!(state.contains("GPT-5.3-Codex | Pro 20x ($200/month)"));
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K tok"));
         assert!(state.contains("Ctx 6% used"));
@@ -1046,7 +1046,7 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("⚡ GPT-5.3-Codex (Extra High) | Pro ($200/month)"));
+        assert!(state.contains("⚡ GPT-5.3-Codex (Extra High) | Pro 20x ($200/month)"));
     }
 
     #[test]

@@ -19,9 +19,11 @@
 | Fast mode | `src/cost.rs` multipliers and `tests/integration/model_display.rs` labels |
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
 | Discord branding | `src/discord.rs` sticky desktop surface and Codex App asset tests |
-| Terminal layout | `src/ui.rs` layout, banner, footer, spinner, reserved rows |
+| Terminal layout | `src/ui.rs` layout, monochrome Codex wordmark, plan picker, footer, spinner, reserved rows |
+| Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
 | Config migration | `tests/integration/config_migration.rs` identity normalization |
 | Session parsing | `src/session.rs` and `src/session/*` JSONL, activity, context, ranking |
 | OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
+| Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
 
 Rule: bugs that cross module seams get an integration regression; module-local bugs can stay beside the Rust module.
