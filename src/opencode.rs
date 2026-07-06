@@ -31,8 +31,7 @@ struct OpenCodeSessionRow {
     time_updated: i64,
 }
 
-pub fn collect_opencode_sessions_for_directory(
-    directory: &Path,
+pub fn collect_opencode_sessions(
     stale_threshold: Duration,
     active_sticky_window: Duration,
     pricing_config: &PricingConfig,
@@ -40,14 +39,7 @@ pub fn collect_opencode_sessions_for_directory(
     opencode_database_paths()
         .into_iter()
         .filter_map(|path| {
-            collect_from_database(
-                &path,
-                directory,
-                stale_threshold,
-                active_sticky_window,
-                pricing_config,
-            )
-            .ok()
+            collect_from_database(&path, stale_threshold, active_sticky_window, pricing_config).ok()
         })
         .flatten()
         .collect()
@@ -111,14 +103,12 @@ fn dedupe_existing_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 
 fn collect_from_database(
     db_path: &Path,
-    directory: &Path,
     stale_threshold: Duration,
     active_sticky_window: Duration,
     pricing_config: &PricingConfig,
 ) -> rusqlite::Result<Vec<CodexSessionSnapshot>> {
     let connection =
         Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let directory_key = path_key(directory);
     let mut statement = connection.prepare(
         "select id, directory, title, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated from session order by time_updated desc limit 32",
     )?;
@@ -143,9 +133,6 @@ fn collect_from_database(
     let now = SystemTime::now();
     let mut snapshots = Vec::new();
     for row in rows.flatten() {
-        if path_key(Path::new(&row.directory)) != directory_key {
-            continue;
-        }
         let Some(snapshot) = row_to_snapshot(
             &connection,
             db_path,
@@ -422,12 +409,6 @@ fn project_name(directory: &str, title: &str) -> String {
         .unwrap_or_else(|| title.trim().to_string())
 }
 
-fn path_key(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "/")
-        .to_ascii_lowercase()
-}
-
 fn millis_to_system_time(value: i64) -> Option<SystemTime> {
     if value < 0 {
         return None;
@@ -442,6 +423,7 @@ fn millis_to_datetime(value: i64) -> Option<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::preferred_active_session;
 
     #[test]
     fn parses_fast_gpt_model_from_opencode_json() {
@@ -521,5 +503,171 @@ mod tests {
         assert_eq!(context.used_tokens, 400_000);
         assert_eq!(context.remaining_tokens, 0);
         assert_eq!(context.remaining_percent, 0.0);
+    }
+
+    #[test]
+    fn collects_live_gpt_sessions_from_all_opencode_workspaces() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("opencode.db");
+        let connection = rusqlite::Connection::open(&db_path).expect("database");
+        create_opencode_schema(&connection);
+        let now = current_millis();
+
+        insert_opencode_session(
+            &connection,
+            TestOpenCodeSession {
+                id: "current-workspace",
+                directory: "D:/X/2-Dev/MCP-Servers/Codex-Discord-Rich-Presence",
+                title: "Presence",
+                model: r#"{"id":"gpt-5.5-fast","providerID":"openai"}"#,
+                updated_at: now - 4_000,
+            },
+        );
+        insert_opencode_part(
+            &connection,
+            "current-workspace",
+            r#"{"type":"text"}"#,
+            now - 4_000,
+        );
+        insert_opencode_session(
+            &connection,
+            TestOpenCodeSession {
+                id: "other-workspace",
+                directory: "D:/X/1-Work/OpenClaw",
+                title: "Auditoria y reparacion integral de sitio web",
+                model: r#"{"id":"gpt-5.5-fast","providerID":"openai"}"#,
+                updated_at: now - 500,
+            },
+        );
+        insert_opencode_part(
+            &connection,
+            "other-workspace",
+            r#"{"type":"tool","tool":"bash","state":{"status":"running","input":{"command":"pnpm test"}}}"#,
+            now - 500,
+        );
+        insert_opencode_session(
+            &connection,
+            TestOpenCodeSession {
+                id: "stale-workspace",
+                directory: "D:/X/1-Work/Stale",
+                title: "Stale",
+                model: "gpt-5.5",
+                updated_at: now - 10_000,
+            },
+        );
+        insert_opencode_session(
+            &connection,
+            TestOpenCodeSession {
+                id: "non-gpt-workspace",
+                directory: "D:/X/1-Work/OtherModel",
+                title: "Other Model",
+                model: "claude-sonnet-4-6",
+                updated_at: now - 250,
+            },
+        );
+        drop(connection);
+
+        let sessions = collect_from_database(
+            &db_path,
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+            &PricingConfig::default(),
+        )
+        .expect("sessions");
+        let session_ids: Vec<&str> = sessions
+            .iter()
+            .map(|session| session.session_id.as_str())
+            .collect();
+
+        assert_eq!(sessions.len(), 2);
+        assert!(session_ids.contains(&"opencode:current-workspace"));
+        assert!(session_ids.contains(&"opencode:other-workspace"));
+        let active = preferred_active_session(&sessions).expect("active session");
+        assert_eq!(active.session_id, "opencode:other-workspace");
+        assert_eq!(active.project_name, "OpenClaw");
+        assert_eq!(active.cwd, PathBuf::from("D:/X/1-Work/OpenClaw"));
+        assert_eq!(
+            active
+                .activity
+                .as_ref()
+                .map(|activity| activity.pending_calls),
+            Some(1)
+        );
+    }
+
+    struct TestOpenCodeSession<'a> {
+        id: &'a str,
+        directory: &'a str,
+        title: &'a str,
+        model: &'a str,
+        updated_at: i64,
+    }
+
+    fn create_opencode_schema(connection: &rusqlite::Connection) {
+        connection
+            .execute_batch(
+                "create table session (
+                    id text primary key,
+                    directory text not null,
+                    title text not null,
+                    agent text,
+                    model text,
+                    cost real not null,
+                    tokens_input integer not null,
+                    tokens_output integer not null,
+                    tokens_reasoning integer not null,
+                    tokens_cache_read integer not null,
+                    tokens_cache_write integer not null,
+                    time_created integer not null,
+                    time_updated integer not null
+                );
+                create table part (
+                    session_id text not null,
+                    data text not null,
+                    time_created integer not null,
+                    time_updated integer not null
+                );",
+            )
+            .expect("schema");
+    }
+
+    fn insert_opencode_session(
+        connection: &rusqlite::Connection,
+        session: TestOpenCodeSession<'_>,
+    ) {
+        connection
+            .execute(
+                "insert into session (id, directory, title, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated) values (?1, ?2, ?3, 'build', ?4, 0.0, 1000, 200, 300, 400, 0, ?5, ?6)",
+                params![
+                    session.id,
+                    session.directory,
+                    session.title,
+                    session.model,
+                    session.updated_at - 1_000,
+                    session.updated_at
+                ],
+            )
+            .expect("insert session");
+    }
+
+    fn insert_opencode_part(
+        connection: &rusqlite::Connection,
+        session_id: &str,
+        data: &str,
+        updated_at: i64,
+    ) {
+        connection
+            .execute(
+                "insert into part (session_id, data, time_created, time_updated) values (?1, ?2, ?3, ?3)",
+                params![session_id, data, updated_at],
+            )
+            .expect("insert part");
+    }
+
+    fn current_millis() -> i64 {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time")
+            .as_millis() as i64
     }
 }

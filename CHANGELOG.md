@@ -6,6 +6,29 @@ All notable changes to this project are documented in this file.
 
 No unreleased changes.
 
+## [1.7.0] - 2026-07-05
+
+Codex Rich Presence now has the full Codex App-quality runtime: sticky desktop identity, accurate GPT-5.4/GPT-5.5 context and Fast-mode economics, a Ratatui terminal dashboard, and polished local-first docs/assets. No public configuration key was removed.
+
+### Added
+
+- Ratatui dashboard with Codex dark styling, responsive layouts, animated status widgets, cache/context/cost panels, recent-session cards, and optional Codex App logo rendering.
+- Unified Codex usage snapshot for input, cached input, output, context-window utilization, cache hit ratio, cached-input savings, and service-tier adjusted cost.
+- GPT-5.4 and GPT-5.5 metadata for OAuth and API contexts: 400K visible OAuth cap, API-only 1,050,000-token metadata, 272K input threshold, 128K output reserve, and Fast multipliers of 2x / 2.5x.
+- Codex App process detection for the official desktop runtime, plus README hero/screenshot assets that match the Codex visual language.
+
+### Changed
+
+- Discord payload construction now uses one surface/branding policy across active and idle states instead of recomputing generic CLI defaults.
+- Cost, cache, context, model, surface, and terminal display strings now flow from centralized owners instead of duplicated local fallbacks.
+- Documentation and README were refreshed around install, privacy, model economics, identity, UI, schema, and test coverage.
+
+### Fixed
+
+- Idle no longer drops a Codex App session back to the generic Codex CLI / VS Code identity. If the last detected surface was Codex App, Discord keeps the `Codex App` app identity and shows `Idling...`.
+- Desktop/OpenCode collection keeps recent Codex activity visible for the intended sticky window instead of aging to idle after a near-instant gap.
+- Cache savings and context display now use the same accounting summary in terminal, Discord, status, and tests.
+
 ## [1.6.0] - 2026-06-08
 
 Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQLite state, publishes it through the official `Codex App` Discord identity, shows GPT-5.5 Fast labels correctly, and reports the active context window from OpenCode's latest step instead of the lifetime session total.

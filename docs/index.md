@@ -2,9 +2,9 @@
 
 | Doc | Contract |
 |:---|:---|
-| [api/codex-presence.md](api/codex-presence.md) | CLI commands, Discord payloads, priority republish, surface detection, context windows, release artifacts |
-| [database/schema.md](database/schema.md) | Local config, Codex JSONL, OpenCode SQLite, global state, plan cache, metrics snapshots |
-| [ui/UI_SITEMAP.md](ui/UI_SITEMAP.md) | Terminal layout, plan picker, status cards, footer behavior |
+| [api/codex-presence.md](api/codex-presence.md) | Runtime modules, Discord payload policy, sticky surface detection, GPT-5 context metadata, Fast multipliers |
+| [database/schema.md](database/schema.md) | Local config, session snapshots, cost/cache metrics, OAuth/API context windows |
+| [ui/UI_SITEMAP.md](ui/UI_SITEMAP.md) | Ratatui layout modes, widgets, theme, animation, logo fallback, footer behavior |
 
 Root references: [README.md](../README.md), [CHANGELOG.md](../CHANGELOG.md), [tests/index.md](../tests/index.md).
 
@@ -12,7 +12,7 @@ Root references: [README.md](../README.md), [CHANGELOG.md](../CHANGELOG.md), [te
 
 | Rule | Standard |
 |:---|:---|
-| Runtime facts | Backed by code or tests |
+| Runtime facts | Backed by source or tests |
 | External facts | Include source URL and access date |
 | Release facts | Match `.github/workflows/release.yml` |
 | Scope | Durable contracts only; no plans or handoffs |

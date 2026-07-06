@@ -1,21 +1,17 @@
 use std::fmt::Write as _;
-use std::io::{Write, stdout};
-use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{Hide, MoveTo, Show};
-use crossterm::execute;
-use crossterm::style::{Color, Stylize};
-use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
-use viuer::Config as ViuerConfig;
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkline, Wrap};
 
-use crate::config::{OpenAiPlanMode, OpenAiPlanTier, PlanPreset, TerminalLogoMode, plan_presets};
+use crate::config::{PlanPreset, TerminalLogoMode, plan_presets};
 use crate::metrics::MetricsSnapshot;
 use crate::session::{CodexSessionSnapshot, RateLimits, UsageWindow};
 use crate::util::{
-    format_cost, format_model_display, format_model_name, format_time_until, format_token_triplet,
-    format_tokens, human_duration, now_local, progress_bar, truncate,
+    format_cost, format_model_display, format_time_until, format_token_triplet, format_tokens,
+    human_duration, truncate,
 };
 
 const FOOTER_ROWS: u16 = 1;
@@ -23,41 +19,14 @@ const FULL_RECENT_RESERVED_ROWS: u16 = 5;
 const COMPACT_RECENT_RESERVED_ROWS: u16 = 3;
 const MINIMAL_RECENT_RESERVED_ROWS: u16 = 1;
 
-const OPENAI_ASCII: [&str; 8] = [
-    "        .-========-.       ",
-    "      .'  .----.    '.     ",
-    "     /   .' __ '.     \\    ",
-    "    ;   /  /  \\  \\     ;   ",
-    "    ;   \\  \\__/  /     ;   ",
-    "     \\   '.____.'     /    ",
-    "      '.          _ .'     ",
-    "        '-.____.-'         ",
+const CODEX_ASCII: [&str; 6] = [
+    "  ______          __",
+    " / ____/___  ____/ /__  _  __",
+    "/ /   / __ \\/ __  / _ \\| |/_/",
+    "/ /___/ /_/ / /_/ /  __/>  <",
+    "\\____/\\____/\\__,_/\\___/_/|_|",
+    "local-first Discord Rich Presence",
 ];
-
-const CODEX_ASCII: [&str; 8] = [
-    "   _____   ____   _____   ______  __   __   ",
-    "  / ____| / __ \\ |  __ \\ |  ____| \\ \\ / /   ",
-    " | |     | |  | || |  | || |__     \\ V /    ",
-    " | |     | |  | || |  | ||  __|     > <     ",
-    " | |____ | |__| || |__| || |____   / . \\    ",
-    "  \\_____| \\____/ |_____/ |______| /_/ \\_\\   ",
-    " Presence for CLI + Codex VS Code Ext + App  ",
-    "       Live activity + account usage         ",
-];
-
-const COMPACT_BANNER: [&str; 2] = ["OPENAI x CODEX PRESENCE", "Live activity + account usage"];
-
-const MINIMAL_BANNER: &str = "CODEX Presence";
-const BANNER_TEXT_ROWS: u16 = 2;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BannerVariant {
-    Image,
-    AsciiDual,
-    AsciiCodex,
-    CompactText,
-    MinimalText,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiLayoutMode {
@@ -66,12 +35,12 @@ pub enum UiLayoutMode {
     Minimal,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct BannerRenderOptions<'a> {
-    layout: UiLayoutMode,
-    logo_mode: &'a TerminalLogoMode,
-    logo_path: Option<&'a str>,
-    phase: u8,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BannerVariant {
+    Image,
+    AsciiDual,
+    CompactText,
+    MinimalText,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -127,77 +96,469 @@ pub struct PlanPickerView {
     pub current_index: usize,
 }
 
+type UiTerminal = ratatui::DefaultTerminal;
+
+static TERMINAL: OnceLock<Mutex<Option<UiTerminal>>> = OnceLock::new();
+
 pub fn enter_terminal() -> Result<()> {
-    let mut out = stdout();
-    terminal::enable_raw_mode()?;
-    execute!(out, EnterAlternateScreen, Hide)?;
+    let terminal = ratatui::init();
+    *terminal_cell().lock().expect("terminal lock") = Some(terminal);
     Ok(())
 }
 
 pub fn leave_terminal() -> Result<()> {
-    let mut out = stdout();
-    execute!(out, Show, LeaveAlternateScreen)?;
-    terminal::disable_raw_mode()?;
+    *terminal_cell().lock().expect("terminal lock") = None;
+    ratatui::restore();
     Ok(())
 }
 
 pub fn draw(data: &RenderData<'_>) -> Result<()> {
-    let mut out = stdout();
-    let (width, height) = terminal::size()?;
-    if width == 0 || height == 0 {
-        return Ok(());
+    let mut guard = terminal_cell().lock().expect("terminal lock");
+    if guard.is_none() {
+        *guard = Some(ratatui::init());
     }
-
-    execute!(out, MoveTo(0, 0), Clear(ClearType::All))?;
-
-    if let Some(plan_picker) = data.plan_picker {
-        render_plan_picker_screen(&mut out, width, height, plan_picker)?;
-        render_footer(&mut out, width as usize, height, true)?;
-        out.flush()?;
-        return Ok(());
+    if let Some(terminal) = guard.as_mut() {
+        terminal.draw(|frame| render_frame(frame, data))?;
     }
-
-    let budget = FrameBudget::new(width, height);
-    let max_body_row = budget.body_bottom();
-    let layout = select_layout_mode(width, height);
-    let w = width as usize;
-    let reserved_recent = reserved_recent_rows(layout, max_body_row);
-    let top_body_limit = max_body_row.saturating_sub(reserved_recent);
-
-    let mut row = 0u16;
-    let banner_options = BannerRenderOptions {
-        layout,
-        logo_mode: &data.logo_mode,
-        logo_path: data.logo_path,
-        phase: data.banner_phase,
-    };
-    draw_banner(&mut out, &mut row, top_body_limit, w, banner_options)?;
-    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
-
-    render_runtime_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
-    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
-
-    render_active_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
-    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
-
-    render_metrics_section(&mut out, &mut row, top_body_limit, w, layout, data)?;
-    write_section_gap(&mut out, &mut row, top_body_limit, w, layout)?;
-
-    if row < top_body_limit {
-        row = top_body_limit;
-    }
-    render_recent_section(&mut out, &mut row, max_body_row, w, layout, data)?;
-    render_footer(&mut out, w, height, false)?;
-
-    out.flush()?;
     Ok(())
+}
+
+fn terminal_cell() -> &'static Mutex<Option<UiTerminal>> {
+    TERMINAL.get_or_init(|| Mutex::new(None))
+}
+
+fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
+    let area = frame.area();
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let layout = select_layout_mode(area.width, area.height);
+    if let Some(plan_picker) = data.plan_picker {
+        render_plan_picker(frame, area, plan_picker);
+        return;
+    }
+
+    let budget = FrameBudget::new(area.width, area.height);
+    let footer_height = budget.footer_rows;
+    let _recent_rows = reserved_recent_rows(layout, area.height);
+    let _body_bottom = budget.body_bottom();
+    let root =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).split(area);
+
+    let body = body_layout(layout, root[0]);
+    render_header(frame, body[0], layout, data);
+
+    match layout {
+        UiLayoutMode::Full => {
+            let columns =
+                Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+                    .split(body[1]);
+            let left =
+                Layout::vertical([Constraint::Length(9), Constraint::Min(8)]).split(columns[0]);
+            let right =
+                Layout::vertical([Constraint::Length(9), Constraint::Min(8)]).split(columns[1]);
+            render_active(frame, left[0], data);
+            render_usage(frame, left[1], data);
+            render_metrics(frame, right[0], data);
+            render_recent(frame, right[1], layout, data);
+        }
+        UiLayoutMode::Compact => {
+            let rows = Layout::vertical([
+                Constraint::Length(8),
+                Constraint::Length(8),
+                Constraint::Min(5),
+            ])
+            .split(body[1]);
+            render_active(frame, rows[0], data);
+            render_usage(frame, rows[1], data);
+            render_recent(frame, rows[2], layout, data);
+        }
+        UiLayoutMode::Minimal => {
+            let rows = Layout::vertical([Constraint::Length(5), Constraint::Min(3)]).split(body[1]);
+            render_active(frame, rows[0], data);
+            render_recent(frame, rows[1], layout, data);
+        }
+    }
+
+    render_footer(frame, root[1], false);
+}
+
+fn body_layout(layout: UiLayoutMode, area: Rect) -> std::rc::Rc<[Rect]> {
+    let header_height = match layout {
+        UiLayoutMode::Full => 8,
+        UiLayoutMode::Compact => 5,
+        UiLayoutMode::Minimal => 3,
+    }
+    .min(area.height);
+    Layout::vertical([Constraint::Length(header_height), Constraint::Min(0)]).split(area)
+}
+
+fn render_header(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: &RenderData<'_>) {
+    let mut lines = Vec::new();
+    let variant = select_banner_variant(
+        area.width,
+        area.height,
+        layout,
+        matches!(
+            data.logo_mode,
+            TerminalLogoMode::Image | TerminalLogoMode::Auto
+        ) && data.logo_path.is_some(),
+    );
+    match variant {
+        BannerVariant::Image => {
+            lines.push(Line::from(vec![
+                Span::styled("▰ ", Style::default().fg(theme::PINK)),
+                Span::styled("Codex", theme::title()),
+                Span::styled(" real logo ready", Style::default().fg(theme::MUTED)),
+            ]));
+            if let Some(path) = data.logo_path {
+                lines.push(Line::from(Span::styled(
+                    truncate(path, area.width as usize),
+                    theme::muted(),
+                )));
+            }
+        }
+        BannerVariant::AsciiDual => {
+            for line in CODEX_ASCII
+                .iter()
+                .take(area.height.saturating_sub(2) as usize)
+            {
+                lines.push(Line::from(Span::styled(*line, theme::title())));
+            }
+        }
+        BannerVariant::CompactText => {
+            lines.push(Line::from(Span::styled("Codex Presence", theme::title())))
+        }
+        BannerVariant::MinimalText => lines.push(Line::from(Span::styled("Codex", theme::title()))),
+    }
+    let spinner = spinner(data.banner_phase);
+    lines.push(Line::from(vec![
+        Span::styled(format!("{spinner} "), Style::default().fg(theme::CYAN)),
+        Span::styled(data.mode_label, Style::default().fg(theme::TEXT)),
+        Span::styled(" · ", theme::muted()),
+        Span::styled(data.discord_status, status_style(data.discord_status)),
+        Span::styled(" · ", theme::muted()),
+        Span::styled(format!("{} poll", data.poll_interval_secs), theme::muted()),
+    ]));
+
+    let block = panel("runtime", Some(theme::CYAN));
+    frame.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
+    let mut lines = Vec::new();
+    if let Some(session) = data.active {
+        lines.push(Line::from(vec![
+            Span::styled(
+                truncate(&session.project_name, 28),
+                Style::default().fg(theme::TEXT).bold(),
+            ),
+            Span::styled("  ", theme::muted()),
+            Span::styled(
+                session.git_branch.as_deref().unwrap_or("no branch"),
+                Style::default().fg(theme::GREEN),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("model ", theme::muted()),
+            Span::styled(
+                format_model_display(
+                    session.model.as_deref().unwrap_or("unknown"),
+                    session.reasoning_effort,
+                    data.fast_active,
+                ),
+                Style::default().fg(theme::PINK),
+            ),
+            Span::styled(" · ", theme::muted()),
+            Span::styled(
+                format_cost(session.total_cost_usd),
+                Style::default().fg(theme::YELLOW),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("tokens ", theme::muted()),
+            Span::raw(format_token_triplet(
+                session.session_delta_tokens,
+                session.last_turn_tokens,
+                session.session_total_tokens,
+            )),
+        ]));
+        if let Some(context) = &session.context_window {
+            lines.push(Line::from(vec![
+                Span::styled("context ", theme::muted()),
+                Span::raw(format_tokens(context.used_tokens)),
+                Span::styled(" / ", theme::muted()),
+                Span::raw(format_tokens(context.window_tokens)),
+                Span::styled(
+                    format!(" ({:.0}% free)", context.remaining_percent),
+                    Style::default().fg(limit_color(context.remaining_percent)),
+                ),
+            ]));
+        }
+        if data.show_activity
+            && let Some(activity) = &session.activity
+        {
+            lines.push(Line::from(vec![
+                Span::styled("activity ", theme::muted()),
+                Span::raw(activity.to_text(data.show_activity_target)),
+            ]));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            "No active Codex session",
+            theme::muted(),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Idle keeps the last detected surface, so Codex App stays Codex App.",
+            Style::default().fg(theme::TEXT),
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel("active session", Some(theme::PINK)))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
+    let rows = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Min(2),
+    ])
+    .split(area);
+    let limits = data.effective_limits;
+    render_usage_gauge(
+        frame,
+        rows[0],
+        "primary",
+        limits.and_then(|value| value.primary.as_ref()),
+    );
+    render_usage_gauge(
+        frame,
+        rows[1],
+        "secondary",
+        limits.and_then(|value| value.secondary.as_ref()),
+    );
+    let warning = data
+        .spark_plan_warning
+        .unwrap_or("OAuth Codex context is capped at 400K; API metadata is tracked separately.");
+    let line = vec![
+        Line::from(vec![
+            Span::styled("plan ", theme::muted()),
+            Span::styled(data.plan_display_label, Style::default().fg(theme::TEXT)),
+            Span::styled(" · ", theme::muted()),
+            Span::styled(data.fast_mode_label, fast_style(data.fast_active)),
+        ]),
+        Line::from(Span::styled(warning, Style::default().fg(theme::YELLOW))),
+        Line::from(Span::styled(
+            format!(
+                "limits {} · {}",
+                data.limits_source_label, data.limits_updated_label
+            ),
+            theme::muted(),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(line)
+            .block(panel("quota + context", Some(theme::GREEN)))
+            .wrap(Wrap { trim: true }),
+        rows[2],
+    );
+}
+
+fn render_usage_gauge(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    label: &str,
+    window: Option<&UsageWindow>,
+) {
+    let used = window
+        .map(|value| value.used_percent)
+        .unwrap_or(0.0)
+        .clamp(0.0, 100.0);
+    let title = window
+        .and_then(|value| value.resets_at)
+        .map(|reset| format!("{label} · resets {}", format_time_until(Some(reset))))
+        .unwrap_or_else(|| label.to_string());
+    let gauge = Gauge::default()
+        .block(panel(&title, Some(limit_color(100.0 - used))))
+        .gauge_style(Style::default().fg(limit_color(100.0 - used)))
+        .ratio(used / 100.0)
+        .label(format!("{used:.0}% used"));
+    frame.render_widget(gauge, area);
+}
+
+fn render_metrics(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
+    let Some(metrics) = data.metrics else {
+        frame.render_widget(
+            Paragraph::new("Metrics warm up after the first session scan.")
+                .block(panel("usage snapshot", Some(theme::YELLOW))),
+            area,
+        );
+        return;
+    };
+    let cache = metrics.totals.cache_hit_ratio * 100.0;
+    let samples = sparkline_samples(metrics);
+    let inner = Layout::vertical([Constraint::Length(5), Constraint::Min(2)]).split(area);
+    let text = vec![
+        Line::from(vec![
+            Span::styled("cost ", theme::muted()),
+            Span::styled(
+                format_cost(metrics.totals.cost_usd),
+                Style::default().fg(theme::YELLOW),
+            ),
+            Span::styled(" · cache ", theme::muted()),
+            Span::styled(
+                format!("{cache:.1}%"),
+                Style::default().fg(limit_color(cache)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("saved ", theme::muted()),
+            Span::styled(
+                format_cost(metrics.cost_breakdown.cached_input_savings_usd),
+                Style::default().fg(theme::GREEN),
+            ),
+            Span::styled(" · uptime ", theme::muted()),
+            Span::raw(human_duration(Duration::from_secs(metrics.uptime_seconds))),
+        ]),
+    ];
+    frame.render_widget(
+        Paragraph::new(text).block(panel("usage snapshot", Some(theme::YELLOW))),
+        inner[0],
+    );
+    frame.render_widget(
+        Sparkline::default()
+            .block(panel("model spend sparkline", Some(theme::CYAN)))
+            .style(Style::default().fg(theme::CYAN))
+            .data(&samples),
+        inner[1],
+    );
+}
+
+fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: &RenderData<'_>) {
+    let max_items = match layout {
+        UiLayoutMode::Full => area.height.saturating_sub(2) as usize,
+        UiLayoutMode::Compact => area.height.saturating_sub(2).min(4) as usize,
+        UiLayoutMode::Minimal => area.height.saturating_sub(2).min(2) as usize,
+    };
+    let items: Vec<ListItem<'_>> = data
+        .sessions
+        .iter()
+        .take(max_items)
+        .map(|session| {
+            let model = format_model_display(
+                session.model.as_deref().unwrap_or("unknown"),
+                session.reasoning_effort,
+                data.fast_active,
+            );
+            let tokens = format_tokens(
+                session
+                    .session_total_tokens
+                    .unwrap_or(session.input_tokens_total + session.output_tokens_total),
+            );
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    truncate(&session.project_name, 22),
+                    Style::default().fg(theme::TEXT),
+                ),
+                Span::styled(" · ", theme::muted()),
+                Span::styled(model, Style::default().fg(theme::PINK)),
+                Span::styled(" · ", theme::muted()),
+                Span::styled(tokens, Style::default().fg(theme::CYAN)),
+            ]))
+        })
+        .collect();
+    let list = if items.is_empty() {
+        List::new(vec![ListItem::new("No recent sessions yet")])
+    } else {
+        List::new(items)
+    };
+    frame.render_widget(
+        list.block(panel("recent sessions", Some(theme::CYAN))),
+        area,
+    );
+}
+
+fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool) {
+    let (left, right) = footer_parts(area.width as usize, plan_picker);
+    let mut spans = vec![Span::styled(left, theme::muted())];
+    if !right.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(right, Style::default().fg(theme::PINK)));
+    }
+    let line = Line::from(spans);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_plan_picker(frame: &mut Frame<'_>, area: Rect, view: PlanPickerView) {
+    let presets = plan_presets();
+    let width = area.width.min(84);
+    let height = area.height.min((presets.len() as u16 + 4).max(8));
+    let panel_area = centered_rect(width, height, area);
+    let items: Vec<ListItem<'_>> = presets
+        .iter()
+        .enumerate()
+        .map(|(index, preset)| {
+            let marker = if index == view.selected_index {
+                "▶"
+            } else {
+                " "
+            };
+            let current = if index == view.current_index {
+                " current"
+            } else {
+                ""
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(marker, Style::default().fg(theme::PINK)),
+                Span::raw(" "),
+                Span::styled(plan_label(*preset), Style::default().fg(theme::TEXT)),
+                Span::styled(current, theme::muted()),
+            ]))
+        })
+        .collect();
+    frame.render_widget(
+        List::new(items).block(panel("Plan selector", Some(theme::PINK))),
+        panel_area,
+    );
+    let footer = Rect {
+        x: panel_area.x,
+        y: panel_area.y + panel_area.height.saturating_sub(1),
+        width: panel_area.width,
+        height: 1,
+    };
+    render_footer(frame, footer, true);
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
+fn panel(title: &str, accent: Option<Color>) -> Block<'_> {
+    let style = Style::default().fg(accent.unwrap_or(theme::BORDER));
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(style)
+        .title(Span::styled(format!(" {title} "), style))
 }
 
 pub fn frame_signature(data: &RenderData<'_>) -> String {
     let mut signature = String::with_capacity(768);
     let _ = write!(
         signature,
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
         data.mode_label,
         data.discord_status,
         data.client_id_configured,
@@ -212,19 +573,7 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
         data.plan_picker
             .map(|value| value.selected_index)
             .unwrap_or(usize::MAX),
-        data.plan_picker
-            .map(|value| value.current_index)
-            .unwrap_or(usize::MAX)
     );
-    let _ = write!(
-        signature,
-        "plan:{}|fast:{}|ls:{}|lu:{}|",
-        data.plan_status_label,
-        data.fast_mode_label,
-        data.limits_source_label,
-        data.limits_updated_label
-    );
-
     if let Some(active) = data.active {
         let _ = write!(
             signature,
@@ -239,937 +588,43 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
             active.session_total_tokens.unwrap_or(0),
             active.session_delta_tokens.unwrap_or(0),
         );
-        if data.show_activity
-            && let Some(activity) = &active.activity
-        {
-            let _ = write!(
-                signature,
-                "{}|{}|{}|",
-                activity.action_text(),
-                activity.target.as_deref().unwrap_or(""),
-                activity.pending_calls
-            );
-        }
     } else {
         signature.push_str("active:none|");
     }
-
     if let Some(metrics) = data.metrics {
         let _ = write!(
             signature,
-            "metrics:{:.6}|{}|{}|{}|",
+            "metrics:{:.6}|{}|{}|{}|{:.4}|",
             metrics.totals.cost_usd,
             metrics.totals.input_tokens,
             metrics.totals.cached_input_tokens,
-            metrics.totals.output_tokens
+            metrics.totals.output_tokens,
+            metrics.totals.cache_hit_ratio,
         );
     }
-
-    for session in data.sessions.iter().take(5) {
-        let _ = write!(
-            signature,
-            "{}:{}:{}:{}|",
-            session.session_id,
-            session.session_delta_tokens.unwrap_or(0),
-            session.last_turn_tokens.unwrap_or(0),
-            session.session_total_tokens.unwrap_or(0)
-        );
-        if data.show_activity
-            && let Some(activity) = &session.activity
-        {
-            let _ = write!(
-                signature,
-                "{}:{}:{}|",
-                activity.action_text(),
-                activity.target.as_deref().unwrap_or(""),
-                activity.pending_calls
-            );
-        }
+    if let Some(limits) = data.effective_limits {
+        write_window_signature(&mut signature, "primary", limits.primary.as_ref());
+        write_window_signature(&mut signature, "secondary", limits.secondary.as_ref());
     }
-
     signature
 }
 
-fn render_runtime_section(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    layout: UiLayoutMode,
-    data: &RenderData<'_>,
-) -> Result<()> {
-    if !write_line(out, row, max_body_row, width, &hr("Runtime", width))? {
-        return Ok(());
-    }
-
-    let mut lines = vec![
-        kv_line("Mode", data.mode_label),
-        kv_line("Now", &now_local()),
-        kv_line("Uptime", &human_duration(data.running_for)),
-        kv_line("Discord", data.discord_status),
-    ];
-
-    if !matches!(layout, UiLayoutMode::Minimal) {
-        let client_status = if data.client_id_configured {
-            "configured"
-        } else {
-            "missing"
-        };
-        lines.push(kv_line("Client ID", client_status));
-        lines.push(kv_line(
-            "Polling",
-            &format!(
-                "{}s | Stale Threshold: {}s",
-                data.poll_interval_secs, data.stale_secs
-            ),
-        ));
-    }
-
-    if matches!(layout, UiLayoutMode::Full) {
-        lines.push(kv_line(
-            "Quota Policy",
-            "Prioritize account-wide quota (/codex)",
-        ));
-    }
-
-    for line in lines {
-        if !write_line(out, row, max_body_row, width, &line)? {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-fn render_active_section(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    layout: UiLayoutMode,
-    data: &RenderData<'_>,
-) -> Result<()> {
-    if !write_line(out, row, max_body_row, width, &hr("Active Session", width))? {
-        return Ok(());
-    }
-
-    let Some(active) = data.active else {
-        let _ = write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            "No active Codex sessions detected.",
+fn write_window_signature(signature: &mut String, name: &str, window: Option<&UsageWindow>) {
+    if let Some(window) = window {
+        let _ = write!(
+            signature,
+            "{}:{:.2}:{:.2}:{}|",
+            name, window.used_percent, window.remaining_percent, window.window_minutes
         );
-        return Ok(());
-    };
-
-    if !write_line(
-        out,
-        row,
-        max_body_row,
-        width,
-        &kv_line(
-            "Project",
-            &truncate(&active.project_name, width.saturating_sub(13)),
-        ),
-    )? {
-        return Ok(());
-    }
-
-    let activity_text = if data.show_activity {
-        active
-            .activity
-            .as_ref()
-            .map(|item| item.to_text(data.show_activity_target))
-            .unwrap_or_else(|| "Idle".to_string())
     } else {
-        "hidden".to_string()
-    };
-    if !write_line(
-        out,
-        row,
-        max_body_row,
-        width,
-        &kv_line("Activity", &activity_text),
-    )? {
-        return Ok(());
+        let _ = write!(signature, "{name}:none|");
     }
-
-    let model_line = format!(
-        "{} | {}",
-        format_model_display(
-            active.model.as_deref().unwrap_or("unknown"),
-            active.reasoning_effort,
-            data.fast_active,
-        ),
-        data.plan_display_label
-    );
-    if !write_line(
-        out,
-        row,
-        max_body_row,
-        width,
-        &kv_line("Model", &truncate(&model_line, width.saturating_sub(13))),
-    )? {
-        return Ok(());
-    }
-    if !write_line(
-        out,
-        row,
-        max_body_row,
-        width,
-        &kv_line("Fast Mode", data.fast_mode_label),
-    )? {
-        return Ok(());
-    }
-
-    let context_text = active
-        .context_window
-        .as_ref()
-        .map(|context| {
-            format!(
-                "{}/{} used ({:.0}% left)",
-                format_tokens(context.used_tokens),
-                format_tokens(context.window_tokens),
-                context.remaining_percent
-            )
-        })
-        .unwrap_or_else(|| "n/a".to_string());
-    if !write_line(
-        out,
-        row,
-        max_body_row,
-        width,
-        &kv_line("Context", &context_text),
-    )? {
-        return Ok(());
-    }
-    if matches!(layout, UiLayoutMode::Minimal) {
-        let account_line = format!("{} | Fast {}", data.plan_status_label, data.fast_mode_label);
-        if !write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &kv_line("Account", &account_line),
-        )? {
-            return Ok(());
-        }
-    } else {
-        if !write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &kv_line("Account Type", data.plan_status_label),
-        )? {
-            return Ok(());
-        }
-        if !write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &kv_line("Quota Source", data.limits_source_label),
-        )? {
-            return Ok(());
-        }
-        if !write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &kv_line("Quota Sync", data.limits_updated_label),
-        )? {
-            return Ok(());
-        }
-    }
-    if let Some(warning) = data.spark_plan_warning
-        && !write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            &kv_line("Model Gate", warning),
-        )?
-    {
-        return Ok(());
-    }
-
-    if !matches!(layout, UiLayoutMode::Minimal) {
-        let token_line = format_token_triplet(
-            active.session_delta_tokens,
-            active.last_turn_tokens,
-            active.session_total_tokens,
-        );
-        if !write_line(out, row, max_body_row, width, &token_line)? {
-            return Ok(());
-        }
-    }
-
-    let cost_text = if active.total_cost_usd > 0.0 {
-        format_cost(active.total_cost_usd)
-    } else {
-        "n/a".to_string()
-    };
-    if !write_line(out, row, max_body_row, width, &kv_line("Cost", &cost_text))? {
-        return Ok(());
-    }
-
-    let limits = data.effective_limits.unwrap_or(&active.limits);
-    if max_body_row.saturating_sub(*row) == 1 {
-        let summary = render_compact_limits_row(limits, width);
-        let _ = write_line_unchecked(out, row, max_body_row, &summary);
-        return Ok(());
-    }
-
-    if let Some(primary) = &limits.primary {
-        let line = render_limit_row("5h", primary, width);
-        if !write_line_unchecked(out, row, max_body_row, &line)? {
-            return Ok(());
-        }
-    } else if !write_line(out, row, max_body_row, width, "5h remaining: n/a")? {
-        return Ok(());
-    }
-
-    if let Some(secondary) = &limits.secondary {
-        let line = render_limit_row("7d", secondary, width);
-        if !write_line_unchecked(out, row, max_body_row, &line)? {
-            return Ok(());
-        }
-    } else if !write_line(out, row, max_body_row, width, "7d remaining: n/a")? {
-        return Ok(());
-    }
-
-    if !write_line(
-        out,
-        row,
-        max_body_row,
-        width,
-        &kv_line("Branch", active.git_branch.as_deref().unwrap_or("n/a")),
-    )? {
-        return Ok(());
-    }
-
-    if matches!(layout, UiLayoutMode::Full) {
-        let path_text = truncate(&active.cwd.display().to_string(), width.saturating_sub(13));
-        let _ = write_line(out, row, max_body_row, width, &kv_line("Path", &path_text));
-    }
-
-    Ok(())
-}
-
-fn render_metrics_section(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    layout: UiLayoutMode,
-    data: &RenderData<'_>,
-) -> Result<()> {
-    if !write_line(out, row, max_body_row, width, &hr("Metrics", width))? {
-        return Ok(());
-    }
-
-    let Some(metrics) = data.metrics else {
-        let _ = write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            "Metrics: awaiting token events...",
-        );
-        return Ok(());
-    };
-
-    if metrics.totals.total_tokens == 0 && metrics.totals.cost_usd <= 0.0 {
-        let _ = write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            "Metrics: no token usage observed yet.",
-        );
-        return Ok(());
-    }
-
-    let summary = format!(
-        "Total {} | Tokens {}",
-        format_cost(metrics.totals.cost_usd),
-        format_tokens(metrics.totals.total_tokens)
-    );
-    if !write_line(out, row, max_body_row, width, &summary)? {
-        return Ok(());
-    }
-
-    let io_line = format!(
-        "Input {} | Cached {} | Output {}",
-        format_tokens(metrics.totals.input_tokens),
-        format_tokens(metrics.totals.cached_input_tokens),
-        format_tokens(metrics.totals.output_tokens)
-    );
-    if !write_line(out, row, max_body_row, width, &io_line)? {
-        return Ok(());
-    }
-
-    if matches!(layout, UiLayoutMode::Minimal) {
-        return Ok(());
-    }
-
-    let breakdown = format!(
-        "Cost split I {} | C {} | O {}",
-        format_cost(metrics.cost_breakdown.input_cost_usd),
-        format_cost(metrics.cost_breakdown.cached_input_cost_usd),
-        format_cost(metrics.cost_breakdown.output_cost_usd)
-    );
-    if !write_line(out, row, max_body_row, width, &breakdown)? {
-        return Ok(());
-    }
-
-    if matches!(layout, UiLayoutMode::Full)
-        && let Some(top_model) = metrics.by_model.first()
-    {
-        let top_line = format!(
-            "Top model {} | {} | sessions {}",
-            truncate(&format_model_name(&top_model.model_id), 24),
-            format_cost(top_model.cost_usd),
-            top_model.session_count
-        );
-        let _ = write_line(out, row, max_body_row, width, &top_line)?;
-    }
-
-    Ok(())
-}
-
-fn render_recent_section(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    layout: UiLayoutMode,
-    data: &RenderData<'_>,
-) -> Result<()> {
-    if !write_line(out, row, max_body_row, width, &hr("Recent Sessions", width))? {
-        return Ok(());
-    }
-
-    if data.sessions.is_empty() {
-        let _ = write_line(
-            out,
-            row,
-            max_body_row,
-            width,
-            "No active sessions within stale threshold.",
-        );
-        return Ok(());
-    }
-
-    let available_lines = max_body_row.saturating_sub(*row);
-    if available_lines == 0 {
-        return Ok(());
-    }
-    let per_session_lines = if matches!(layout, UiLayoutMode::Minimal) || available_lines < 2 {
-        1u16
-    } else {
-        2u16
-    };
-
-    for (idx, session) in data.sessions.iter().enumerate() {
-        if idx >= 8 {
-            break;
-        }
-        if max_body_row.saturating_sub(*row) < per_session_lines {
-            break;
-        }
-
-        let marker = if idx == 0 { ">" } else { "-" };
-        let branch = session.git_branch.as_deref().unwrap_or("n/a");
-        let model = format_model_name(session.model.as_deref().unwrap_or("unknown"));
-
-        let header = format!(
-            "{marker} {} | {} | {}",
-            truncate(&session.project_name, 28),
-            truncate(branch, 16),
-            truncate(&model, 18)
-        );
-        if !write_line(out, row, max_body_row, width, &header)? {
-            break;
-        }
-
-        if per_session_lines == 2 {
-            let mut detail = format_token_triplet(
-                session.session_delta_tokens,
-                session.last_turn_tokens,
-                session.session_total_tokens,
-            );
-            if data.show_activity {
-                let activity = session
-                    .activity
-                    .as_ref()
-                    .map(|item| item.to_text(data.show_activity_target))
-                    .unwrap_or_else(|| "Idle".to_string());
-                detail = format!("{} | {detail}", activity);
-            }
-            if !write_line(out, row, max_body_row, width, &format!("  {}", detail))? {
-                break;
-            }
-        } else {
-            let activity = session
-                .activity
-                .as_ref()
-                .map(|item| item.to_text(data.show_activity_target))
-                .unwrap_or_else(|| "Idle".to_string());
-            let compact = format!(
-                "{} | {} | Last {} | Total {}",
-                truncate(&session.project_name, 22),
-                truncate(&activity, 26),
-                session
-                    .last_turn_tokens
-                    .map(crate::util::format_tokens)
-                    .unwrap_or_else(|| "n/a".to_string()),
-                session
-                    .session_total_tokens
-                    .map(crate::util::format_tokens)
-                    .unwrap_or_else(|| "n/a".to_string())
-            );
-            if !write_line(out, row, max_body_row, width, &format!("  {}", compact))? {
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn draw_banner(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    options: BannerRenderOptions<'_>,
-) -> Result<()> {
-    if *row >= max_body_row {
-        return Ok(());
-    }
-
-    let available_rows = max_body_row.saturating_sub(*row);
-    let effective_logo_path = resolve_effective_logo_path(options.logo_path);
-    let mut allow_image = matches!(options.logo_mode, TerminalLogoMode::Image)
-        && !matches!(options.layout, UiLayoutMode::Minimal)
-        && effective_logo_path.is_some();
-
-    loop {
-        match select_banner_variant(width, available_rows, options.layout, allow_image) {
-            BannerVariant::Image => {
-                if let Some(used_rows) = try_draw_logo_image(
-                    out,
-                    *row,
-                    max_body_row,
-                    width,
-                    options.logo_mode,
-                    effective_logo_path.as_deref(),
-                )? {
-                    *row = row.saturating_add(used_rows);
-                    let _ = write_line(
-                        out,
-                        row,
-                        max_body_row,
-                        width,
-                        &center_line("CODEX DISCORD PRESENCE", width),
-                    )?;
-                    let _ = write_line(
-                        out,
-                        row,
-                        max_body_row,
-                        width,
-                        &center_line("Live activity + account usage", width),
-                    )?;
-                    return Ok(());
-                }
-                allow_image = false;
-            }
-            BannerVariant::AsciiDual => {
-                draw_dual_ascii_banner(out, row, max_body_row, width, options.phase)?;
-                return Ok(());
-            }
-            BannerVariant::AsciiCodex => {
-                draw_codex_ascii_banner(out, row, max_body_row, width, options.phase)?;
-                return Ok(());
-            }
-            BannerVariant::CompactText => {
-                for text in COMPACT_BANNER {
-                    if !write_line(out, row, max_body_row, width, &center_line(text, width))? {
-                        break;
-                    }
-                }
-                return Ok(());
-            }
-            BannerVariant::MinimalText => {
-                let _ = write_line(
-                    out,
-                    row,
-                    max_body_row,
-                    width,
-                    &center_line(MINIMAL_BANNER, width),
-                )?;
-                return Ok(());
-            }
-        }
-    }
-}
-
-fn draw_dual_ascii_banner(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    phase: u8,
-) -> Result<()> {
-    let left_width = banner_ascii_width(&OPENAI_ASCII);
-    let right_width = banner_ascii_width(&CODEX_ASCII);
-    let spacing = 4usize;
-    let banner_width = left_width + spacing + right_width;
-    let left_pad = " ".repeat(width.saturating_sub(banner_width) / 2);
-    let spacer = " ".repeat(spacing);
-
-    for idx in 0..OPENAI_ASCII.len().max(CODEX_ASCII.len()) {
-        let left = OPENAI_ASCII.get(idx).copied().unwrap_or("");
-        let right = CODEX_ASCII.get(idx).copied().unwrap_or("");
-        let right = style_codex_banner_line(right, idx, phase);
-        let line = format!(
-            "{left_pad}{left:<left_width$}{spacer}{right}",
-            left_width = left_width
-        );
-        if !write_line_unchecked(out, row, max_body_row, &line)? {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-fn draw_codex_ascii_banner(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    phase: u8,
-) -> Result<()> {
-    let codex_width = banner_ascii_width(&CODEX_ASCII);
-    let left_pad = " ".repeat(width.saturating_sub(codex_width) / 2);
-    for (idx, text) in CODEX_ASCII.into_iter().enumerate() {
-        let line = format!("{left_pad}{}", style_codex_banner_line(text, idx, phase));
-        if !write_line_unchecked(out, row, max_body_row, &line)? {
-            break;
-        }
-    }
-    Ok(())
-}
-
-fn style_codex_banner_line(text: &str, line_index: usize, phase: u8) -> String {
-    if text.trim().is_empty() {
-        return text.to_string();
-    }
-
-    // Monochrome OpenAI-like palette: white logo strokes over black background.
-    let pulse_line = usize::from(phase) % 6;
-    let styled = if line_index < 6 {
-        if line_index == pulse_line {
-            text.with(Color::White).bold()
-        } else {
-            text.with(Color::Grey)
-        }
-    } else if line_index == 6 {
-        text.with(Color::White)
-    } else {
-        text.with(Color::Grey)
-    };
-    styled.to_string()
-}
-
-fn select_banner_variant(
-    width: usize,
-    available_rows: u16,
-    _layout: UiLayoutMode,
-    allow_image: bool,
-) -> BannerVariant {
-    let left_width = banner_ascii_width(&OPENAI_ASCII);
-    let right_width = banner_ascii_width(&CODEX_ASCII);
-    let dual_width = left_width + 4 + right_width;
-    let dual_min_width = dual_width + 4;
-    let codex_min_width = right_width + 2;
-    let dual_rows = OPENAI_ASCII.len().max(CODEX_ASCII.len()) as u16;
-    let codex_rows = CODEX_ASCII.len() as u16;
-    let compact_rows = COMPACT_BANNER.len() as u16;
-    let image_rows = logo_image_rows(logo_image_width_cells(width)) + BANNER_TEXT_ROWS;
-
-    if allow_image && available_rows >= image_rows {
-        return BannerVariant::Image;
-    }
-    if width >= dual_min_width && available_rows >= dual_rows {
-        return BannerVariant::AsciiDual;
-    }
-    if width >= codex_min_width && available_rows >= codex_rows {
-        return BannerVariant::AsciiCodex;
-    }
-    if available_rows >= compact_rows {
-        return BannerVariant::CompactText;
-    }
-
-    BannerVariant::MinimalText
-}
-
-fn banner_ascii_width(lines: &[&str]) -> usize {
-    lines.iter().map(|line| line.len()).max().unwrap_or(0)
-}
-
-fn try_draw_logo_image(
-    out: &mut impl Write,
-    start_row: u16,
-    max_body_row: u16,
-    width: usize,
-    logo_mode: &TerminalLogoMode,
-    logo_path: Option<&Path>,
-) -> Result<Option<u16>> {
-    if matches!(logo_mode, TerminalLogoMode::Ascii) {
-        return Ok(None);
-    }
-
-    let Some(path) = logo_path else {
-        return Ok(None);
-    };
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let image_width_cells = logo_image_width_cells(width);
-    let approx_rows = logo_image_rows(image_width_cells);
-    if start_row
-        .saturating_add(approx_rows)
-        .saturating_add(BANNER_TEXT_ROWS)
-        > max_body_row
-    {
-        return Ok(None);
-    }
-
-    // Let viuer choose best available renderer (Sixel/Kitty/iTerm/Block).
-    let x_offset = width.saturating_sub(image_width_cells as usize) / 2;
-    let conf = ViuerConfig {
-        transparent: true,
-        absolute_offset: false,
-        x: x_offset as u16,
-        y: start_row as i16,
-        restore_cursor: false,
-        width: Some(image_width_cells),
-        ..Default::default()
-    };
-
-    out.flush()?;
-    if viuer::print_from_file(path, &conf).is_ok() {
-        return Ok(Some(approx_rows));
-    }
-
-    Ok(None)
-}
-
-fn logo_image_width_cells(width: usize) -> u32 {
-    if width >= 132 {
-        44u32
-    } else if width >= 112 {
-        38u32
-    } else {
-        30u32
-    }
-}
-
-fn logo_image_rows(image_width_cells: u32) -> u16 {
-    if image_width_cells >= 44 {
-        12u16
-    } else if image_width_cells >= 38 {
-        10u16
-    } else {
-        8u16
-    }
-}
-
-fn render_footer(
-    out: &mut impl Write,
-    width: usize,
-    height: u16,
-    plan_picker_open: bool,
-) -> Result<()> {
-    if height == 0 || width == 0 {
-        return Ok(());
-    }
-
-    let row = height - 1;
-    let (left, right) = footer_parts(width, plan_picker_open);
-    execute!(out, MoveTo(0, row), Clear(ClearType::CurrentLine))?;
-    write!(out, "{left}")?;
-
-    if !right.is_empty() {
-        let right_col = width.saturating_sub(right.len()) as u16;
-        execute!(out, MoveTo(right_col, row))?;
-        write!(out, "{}", right.with(Color::Grey))?;
-    }
-    Ok(())
-}
-
-fn footer_parts(width: usize, plan_picker_open: bool) -> (String, String) {
-    if width == 0 {
-        return (String::new(), String::new());
-    }
-
-    let left_text = if plan_picker_open {
-        "Plan selector: arrows or 1-7 move | Enter apply | P or Esc close"
-    } else {
-        "Press P to change plan | q or Ctrl+C to quit."
-    };
-    let left = truncate(left_text, width);
-    if width <= left.len() + 1 {
-        return (left, String::new());
-    }
-
-    let available_right = width - left.len() - 1;
-    let right = truncate(&author_credit(width), available_right);
-    (left, right)
-}
-
-fn write_section_gap(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    layout: UiLayoutMode,
-) -> Result<()> {
-    if matches!(layout, UiLayoutMode::Full) {
-        let _ = write_line(out, row, max_body_row, width, "")?;
-    }
-    Ok(())
-}
-
-fn write_line(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    width: usize,
-    text: &str,
-) -> Result<bool> {
-    if *row >= max_body_row {
-        return Ok(false);
-    }
-
-    execute!(out, MoveTo(0, *row), Clear(ClearType::CurrentLine))?;
-    write!(out, "{}", truncate(text, width))?;
-    *row += 1;
-    Ok(true)
-}
-
-fn write_line_unchecked(
-    out: &mut impl Write,
-    row: &mut u16,
-    max_body_row: u16,
-    text: &str,
-) -> Result<bool> {
-    if *row >= max_body_row {
-        return Ok(false);
-    }
-
-    execute!(out, MoveTo(0, *row), Clear(ClearType::CurrentLine))?;
-    write!(out, "{text}")?;
-    *row += 1;
-    Ok(true)
-}
-
-fn kv_line(label: &str, value: &str) -> String {
-    format!("{label:<11}: {value}")
-}
-
-fn render_limit_row(label: &str, window: &UsageWindow, width: usize) -> String {
-    let color = limit_color(window.remaining_percent);
-    let pct_plain = format!("{:>3.0}%", window.remaining_percent);
-    let pct = pct_plain.with(color).bold();
-    let bar_width = limit_bar_width(width);
-    let bar = progress_bar(window.remaining_percent, bar_width).with(color);
-    let reset = format_time_until(window.resets_at);
-
-    if width < 48 {
-        return format!("{label} {pct}");
-    }
-    if width < 74 {
-        return format!("{label} remaining [{pct}] {bar}");
-    }
-    format!("{label} remaining [{pct}] {bar} reset {reset}")
-}
-
-fn render_compact_limits_row(limits: &RateLimits, width: usize) -> String {
-    let bar_width = if width >= 90 { 8 } else { 6 };
-    let primary = compact_limit_text(limits.primary.as_ref(), bar_width);
-    let secondary = compact_limit_text(limits.secondary.as_ref(), bar_width);
-    format!("Usage: 5h {primary} | 7d {secondary}")
-}
-
-fn limit_percent_text(window: Option<&UsageWindow>) -> String {
-    window
-        .map(|item| format!("{:.0}%", item.remaining_percent.clamp(0.0, 100.0)))
-        .unwrap_or_else(|| "n/a".to_string())
-}
-
-fn compact_limit_text(window: Option<&UsageWindow>, bar_width: usize) -> String {
-    let Some(window) = window else {
-        return "n/a".to_string();
-    };
-    let color = limit_color(window.remaining_percent);
-    let pct_plain = limit_percent_text(Some(window));
-    let pct = pct_plain.with(color).bold();
-    let bar = progress_bar(window.remaining_percent, bar_width).with(color);
-    format!("{pct} {bar}")
-}
-
-fn limit_bar_width(width: usize) -> usize {
-    if width >= 140 {
-        30
-    } else if width >= 112 {
-        24
-    } else if width >= 92 {
-        18
-    } else if width >= 72 {
-        14
-    } else {
-        10
-    }
-}
-
-fn limit_color(percent: f64) -> Color {
-    if percent >= 60.0 {
-        Color::Green
-    } else if percent >= 30.0 {
-        Color::Yellow
-    } else {
-        Color::Red
-    }
-}
-
-fn hr(title: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-
-    let core = format!(" {title} ");
-    if core.len() >= width {
-        return truncate(title, width);
-    }
-
-    let side = (width - core.len()) / 2;
-    let right = width - core.len() - side;
-    format!("{}{}{}", "-".repeat(side), core, "-".repeat(right))
 }
 
 fn select_layout_mode(width: u16, height: u16) -> UiLayoutMode {
-    if width >= 112 && height >= 32 {
+    if width >= 118 && height >= 32 {
         UiLayoutMode::Full
-    } else if width >= 80 && height >= 18 {
+    } else if width >= 72 && height >= 18 {
         UiLayoutMode::Compact
     } else {
         UiLayoutMode::Minimal
@@ -1177,228 +632,143 @@ fn select_layout_mode(width: u16, height: u16) -> UiLayoutMode {
 }
 
 fn reserved_recent_rows(layout: UiLayoutMode, max_body_row: u16) -> u16 {
-    if max_body_row <= 12 {
+    if max_body_row < 14 {
         return 0;
     }
-
-    let preferred = match layout {
-        UiLayoutMode::Full if max_body_row >= 34 => FULL_RECENT_RESERVED_ROWS,
-        UiLayoutMode::Full if max_body_row >= 28 => 3,
-        UiLayoutMode::Full => 2,
-        UiLayoutMode::Compact if max_body_row >= 22 => COMPACT_RECENT_RESERVED_ROWS,
-        UiLayoutMode::Compact => 2,
+    match layout {
+        UiLayoutMode::Full => FULL_RECENT_RESERVED_ROWS.min(max_body_row / 8).max(2),
+        UiLayoutMode::Compact => COMPACT_RECENT_RESERVED_ROWS.min(max_body_row / 8).max(2),
         UiLayoutMode::Minimal => MINIMAL_RECENT_RESERVED_ROWS,
+    }
+}
+
+fn select_banner_variant(
+    width: u16,
+    available_rows: u16,
+    layout: UiLayoutMode,
+    image_enabled: bool,
+) -> BannerVariant {
+    if image_enabled && width >= 80 && available_rows >= 4 {
+        return BannerVariant::Image;
+    }
+    match layout {
+        UiLayoutMode::Full if width >= 96 && available_rows >= 7 => BannerVariant::AsciiDual,
+        UiLayoutMode::Compact if width >= 72 && available_rows >= 5 => BannerVariant::AsciiDual,
+        UiLayoutMode::Full | UiLayoutMode::Compact if available_rows >= 3 => {
+            BannerVariant::CompactText
+        }
+        UiLayoutMode::Minimal if available_rows >= 2 => BannerVariant::MinimalText,
+        _ => BannerVariant::MinimalText,
+    }
+}
+
+fn limit_color(remaining_percent: f64) -> Color {
+    if remaining_percent >= 60.0 {
+        theme::GREEN
+    } else if remaining_percent >= 25.0 {
+        theme::YELLOW
+    } else {
+        theme::RED
+    }
+}
+
+fn status_style(status: &str) -> Style {
+    let normalized = status.to_ascii_lowercase();
+    if normalized.contains("connected") {
+        Style::default().fg(theme::GREEN)
+    } else if normalized.contains("missing") {
+        Style::default().fg(theme::YELLOW)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
+fn fast_style(active: bool) -> Style {
+    if active {
+        Style::default().fg(theme::PINK).bold()
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
+fn spinner(phase: u8) -> &'static str {
+    const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+    FRAMES[phase as usize % FRAMES.len()]
+}
+
+fn sparkline_samples(metrics: &MetricsSnapshot) -> Vec<u64> {
+    let mut values: Vec<u64> = metrics
+        .by_model
+        .iter()
+        .map(|model| (model.cost_usd * 10_000.0).round().max(1.0) as u64)
+        .collect();
+    if values.is_empty() {
+        values.push(1);
+    }
+    values
+}
+
+fn footer_parts(width: usize, plan_picker: bool) -> (String, String) {
+    let left = if plan_picker {
+        "Plan selector: ↑/↓ choose · Enter apply · Esc close"
+    } else {
+        "Press P to change plan · Ctrl+C quit"
     };
-    preferred.min(max_body_row)
-}
-
-fn resolve_effective_logo_path(raw_path: Option<&str>) -> Option<PathBuf> {
-    let value = raw_path?;
-    let resolved = resolve_logo_path(value);
-    resolved.exists().then_some(resolved)
-}
-
-fn resolve_logo_path(raw_path: &str) -> PathBuf {
-    let path = raw_path.trim();
-    if path == "~"
-        && let Some(home) = dirs::home_dir()
-    {
-        return home;
+    let right = author_credit(width);
+    if width <= 32 {
+        (truncate(left, width), String::new())
+    } else {
+        let left_budget = width.saturating_sub(right.len() + 1);
+        (truncate(left, left_budget), right)
     }
-
-    if let Some(stripped) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
-        && let Some(home) = dirs::home_dir()
-    {
-        return home.join(stripped);
-    }
-
-    Path::new(path).to_path_buf()
-}
-
-fn center_line(text: &str, width: usize) -> String {
-    let clipped = truncate(text, width);
-    let left_pad = width.saturating_sub(clipped.len()) / 2;
-    format!("{}{}", " ".repeat(left_pad), clipped)
 }
 
 fn author_credit(width: usize) -> String {
-    if width >= 92 {
-        "XT0N1.T3CH | Discord @XT0N1.T3CH | ID 211189703641268224".to_string()
-    } else if width >= 54 {
+    if width >= 100 {
+        "XT0N1.T3CH | @XT0N1.T3CH | ID 211189703641268224".to_string()
+    } else if width >= 48 {
         "XT0N1.T3CH | @XT0N1.T3CH".to_string()
     } else {
         "XT0N1.T3CH".to_string()
     }
 }
 
-fn render_plan_picker_screen(
-    out: &mut impl Write,
-    width: u16,
-    height: u16,
-    plan_picker: PlanPickerView,
-) -> Result<()> {
-    let presets = plan_presets();
-    if presets.is_empty() || width < 24 || height < 10 {
-        return Ok(());
+#[cfg(test)]
+fn hr(title: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
     }
-
-    let width = width as usize;
-    let body_bottom = height.saturating_sub(FOOTER_ROWS);
-    render_plan_picker_backdrop(out, width, body_bottom)?;
-
-    let current_label = presets
-        .get(plan_picker.current_index)
-        .map(|preset| preset.label)
-        .unwrap_or("Auto Detect");
-    let selected_label = presets
-        .get(plan_picker.selected_index)
-        .map(|preset| preset.label)
-        .unwrap_or("Auto Detect");
-
-    let mut lines: Vec<String> = Vec::with_capacity(presets.len() + 10);
-    lines.push("Account Plan Selector".to_string());
-    lines.push("Choose the OpenAI plan shown in Discord and the TUI.".to_string());
-    lines.push("".to_string());
-    lines.push(format!("Current setting : {current_label}"));
-    lines.push(format!("Selected option : {selected_label}"));
-    lines.push("".to_string());
-    for (idx, preset) in presets.iter().copied().enumerate() {
-        let active_suffix = if idx == plan_picker.current_index {
-            " [active]"
-        } else {
-            ""
-        };
-        lines.push(format!(
-            "[{}] {:<10} {}{}",
-            idx + 1,
-            preset.label,
-            plan_preset_detail(preset),
-            active_suffix
-        ));
+    let label = format!(" {title} ");
+    if label.len() >= width {
+        return truncate(&label, width);
     }
-    lines.push("".to_string());
-    lines.push("Enter applies immediately and saves to config.".to_string());
-    lines.push("Press P or Esc to close without changing the plan.".to_string());
-
-    let inner_width = lines
-        .iter()
-        .map(|line| line.len())
-        .max()
-        .unwrap_or(24)
-        .min(width.saturating_sub(6))
-        .max(24);
-    let box_width = inner_width + 4;
-    let box_height = (lines.len() + 2) as u16;
-    let start_col = width.saturating_sub(box_width) / 2;
-    let show_codex_header = width >= banner_ascii_width(&CODEX_ASCII) + 2
-        && body_bottom >= box_height + CODEX_ASCII.len() as u16 + 3;
-    let start_row = if show_codex_header {
-        let group_height = CODEX_ASCII.len() as u16 + 1 + box_height;
-        let group_top = body_bottom.saturating_sub(group_height) / 2;
-        let mut header_row = group_top;
-        draw_codex_ascii_banner(out, &mut header_row, body_bottom, width, 0)?;
-        header_row.saturating_add(1)
-    } else {
-        body_bottom.saturating_sub(box_height) / 2
-    };
-
-    let top = format!("+{}+", "-".repeat(inner_width + 2));
-    let bottom = top.clone();
-    execute!(out, MoveTo(start_col as u16, start_row))?;
-    write!(out, "{}", top.as_str().with(Color::Grey))?;
-
-    for (idx, line) in lines.iter().enumerate() {
-        let row = start_row + idx as u16 + 1;
-        let is_option = idx >= 6 && idx < 6 + presets.len();
-        let mut content = line.clone();
-        if is_option {
-            let option_index = idx - 6;
-            let prefix = if option_index == plan_picker.selected_index {
-                ">"
-            } else {
-                " "
-            };
-            content = format!("{prefix} {line}");
-        }
-        let padded = format!(
-            " {:<width$} ",
-            truncate(&content, inner_width),
-            width = inner_width
-        );
-        execute!(out, MoveTo(start_col as u16, row))?;
-        write!(out, "{}", "|".with(Color::Grey))?;
-        if idx == 0 {
-            write!(out, "{}", padded.as_str().with(Color::White).bold())?;
-        } else if idx == 1 || idx == 3 {
-            write!(out, "{}", padded.as_str().with(Color::Grey))?;
-        } else if idx == 4 {
-            write!(out, "{}", padded.as_str().with(Color::White).bold())?;
-        } else if idx == 5 {
-            write!(out, "{}", padded.as_str().with(Color::DarkGrey))?;
-        } else if is_option && idx - 6 == plan_picker.selected_index {
-            write!(out, "{}", padded.as_str().black().on_white().bold())?;
-        } else if is_option && idx - 6 == plan_picker.current_index {
-            write!(out, "{}", padded.as_str().with(Color::Green))?;
-        } else if is_option {
-            write!(out, "{}", padded.as_str().with(Color::Grey))?;
-        } else if idx + 2 >= lines.len() {
-            write!(out, "{}", padded.as_str().with(Color::DarkGrey))?;
-        } else {
-            write!(out, "{padded}")?;
-        }
-        write!(out, "{}", "|".with(Color::Grey))?;
-    }
-
-    let bottom_row = start_row + box_height - 1;
-    execute!(out, MoveTo(start_col as u16, bottom_row))?;
-    write!(out, "{}", bottom.as_str().with(Color::Grey))?;
-    Ok(())
+    let right = width - label.len();
+    format!("{label}{}", "-".repeat(right))
 }
 
-fn plan_preset_detail(preset: PlanPreset) -> &'static str {
-    match (preset.mode, preset.tier) {
-        (OpenAiPlanMode::Auto, None) => "Use detected account telemetry",
-        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Free)) => "$0 personal plan",
-        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Go)) => "$8 personal plan",
-        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Plus)) => "$20 personal plan",
-        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Pro)) => "$200 power-user plan",
-        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Business)) => "Team workspace plan",
-        (OpenAiPlanMode::Manual, Some(OpenAiPlanTier::Enterprise)) => "Enterprise workspace plan",
-        _ => "Manual override",
-    }
+fn plan_label(preset: PlanPreset) -> &'static str {
+    preset.label
 }
 
-fn render_plan_picker_backdrop(
-    out: &mut impl Write,
-    width: usize,
-    max_body_row: u16,
-) -> Result<()> {
-    if width < 16 || max_body_row == 0 {
-        return Ok(());
+mod theme {
+    use ratatui::prelude::*;
+
+    pub const TEXT: Color = Color::Rgb(237, 242, 247);
+    pub const MUTED: Color = Color::Rgb(148, 163, 184);
+    pub const BORDER: Color = Color::Rgb(71, 85, 105);
+    pub const CYAN: Color = Color::Rgb(125, 211, 252);
+    pub const PINK: Color = Color::Rgb(244, 114, 182);
+    pub const GREEN: Color = Color::Rgb(134, 239, 172);
+    pub const YELLOW: Color = Color::Rgb(253, 224, 71);
+    pub const RED: Color = Color::Rgb(248, 113, 113);
+
+    pub fn title() -> Style {
+        Style::default().fg(CYAN).bold()
     }
 
-    const GRID_COL_SPAN: usize = 10;
-    const GRID_ROW_SPAN: u16 = 4;
-
-    for row in 0..max_body_row {
-        let horizontal = row % GRID_ROW_SPAN == 0;
-        let mut line = String::with_capacity(width);
-        for col in 0..width {
-            let vertical = col % GRID_COL_SPAN == 0;
-            let ch = match (horizontal, vertical) {
-                (true, true) => '+',
-                (true, false) => '.',
-                (false, true) => ':',
-                (false, false) => ' ',
-            };
-            line.push(ch);
-        }
-
-        execute!(out, MoveTo(0, row))?;
-        write!(out, "{}", line.as_str().with(Color::DarkGrey))?;
+    pub fn muted() -> Style {
+        Style::default().fg(MUTED)
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1413,9 +783,9 @@ mod tests {
 
     #[test]
     fn limit_color_thresholds() {
-        assert_eq!(limit_color(80.0), Color::Green);
-        assert_eq!(limit_color(45.0), Color::Yellow);
-        assert_eq!(limit_color(12.0), Color::Red);
+        assert_eq!(limit_color(80.0), theme::GREEN);
+        assert_eq!(limit_color(45.0), theme::YELLOW);
+        assert_eq!(limit_color(12.0), theme::RED);
     }
 
     #[test]
@@ -1451,9 +821,9 @@ mod tests {
 
     #[test]
     fn reserved_recent_rows_by_layout() {
-        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 34), 5);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 34), 4);
         assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 28), 3);
-        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 24), 2);
+        assert_eq!(reserved_recent_rows(UiLayoutMode::Full, 24), 3);
         assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 24), 3);
         assert_eq!(reserved_recent_rows(UiLayoutMode::Compact, 20), 2);
         assert_eq!(reserved_recent_rows(UiLayoutMode::Minimal, 20), 1);
@@ -1489,7 +859,7 @@ mod tests {
     fn banner_variant_falls_back_when_space_is_constrained() {
         assert_eq!(
             select_banner_variant(80, 7, UiLayoutMode::Compact, false),
-            BannerVariant::CompactText
+            BannerVariant::AsciiDual
         );
         assert_eq!(
             select_banner_variant(60, 1, UiLayoutMode::Minimal, false),
@@ -1501,5 +871,11 @@ mod tests {
     fn footer_parts_change_when_plan_picker_is_open() {
         let (left, _right) = footer_parts(80, true);
         assert!(left.contains("Plan selector"));
+    }
+
+    #[test]
+    fn spinner_animates_by_phase() {
+        assert_ne!(spinner(0), spinner(1));
+        assert_eq!(spinner(0), spinner(8));
     }
 }
