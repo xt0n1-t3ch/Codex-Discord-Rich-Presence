@@ -18,7 +18,7 @@ use crate::config::{
 };
 use crate::discord::DiscordPresence;
 use crate::metrics::MetricsTracker;
-use crate::opencode::collect_opencode_sessions_for_directory;
+use crate::opencode::collect_opencode_sessions;
 use crate::process_guard::{self, RunningState};
 use crate::session::{
     CodexSessionSnapshot, EffectiveLimitSelection, GitBranchCache, RateLimits, SessionParseCache,
@@ -103,8 +103,7 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         &mut parse_cache,
         &config.pricing,
     )?;
-    sessions.extend(collect_opencode_sessions_for_directory(
-        &env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    sessions.extend(collect_opencode_sessions(
         runtime.stale_threshold,
         runtime.active_sticky_window,
         &config.pricing,
@@ -718,8 +717,7 @@ fn collect_runtime_snapshot(
         &config.pricing,
     )?;
     let mut sessions = sessions;
-    sessions.extend(collect_opencode_sessions_for_directory(
-        &env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    sessions.extend(collect_opencode_sessions(
         runtime.stale_threshold,
         runtime.active_sticky_window,
         &config.pricing,
@@ -755,7 +753,7 @@ fn runtime_surface_hint() -> PresenceSurface {
     if env::vars().any(|(key, value)| looks_like_opencode(&key) || looks_like_opencode(&value)) {
         return PresenceSurface::Desktop;
     }
-    if process_list_contains_opencode() {
+    if process_list_contains_desktop_codex_surface() {
         PresenceSurface::Desktop
     } else {
         PresenceSurface::Default
@@ -769,14 +767,17 @@ fn surface_label(surface: PresenceSurface) -> &'static str {
     }
 }
 
-fn process_list_contains_opencode() -> bool {
+fn process_list_contains_desktop_codex_surface() -> bool {
     process_list_text()
         .map(|text| surface_from_process_list(&text) == PresenceSurface::Desktop)
         .unwrap_or(false)
 }
 
 fn surface_from_process_list(text: &str) -> PresenceSurface {
-    if text.lines().any(looks_like_opencode) {
+    if text
+        .lines()
+        .any(|line| looks_like_opencode(line) || looks_like_codex_app(line))
+    {
         PresenceSurface::Desktop
     } else {
         PresenceSurface::Default
@@ -785,6 +786,15 @@ fn surface_from_process_list(text: &str) -> PresenceSurface {
 
 fn looks_like_opencode(value: &str) -> bool {
     value.to_ascii_lowercase().contains("opencode")
+}
+
+fn looks_like_codex_app(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.contains("openai.codex_")
+        || lower.contains("openai.codex/")
+        || lower.contains("openai.codex\\")
+        || lower.contains("\\codex\\web\\codex")
+        || lower.contains("/codex.app/contents/macos/codex")
 }
 
 #[cfg(windows)]
@@ -1013,6 +1023,19 @@ mod tests {
     #[test]
     fn opencode_process_list_selects_codex_app_surface() {
         let processes = "WindowsTerminal.exe\nopencode.exe --project app\ncmd.exe";
+        assert_eq!(
+            surface_from_process_list(processes),
+            PresenceSurface::Desktop
+        );
+    }
+
+    #[test]
+    fn official_codex_app_process_list_selects_codex_app_surface() {
+        let processes = r#"
+"Codex.exe" "C:\Program Files\WindowsApps\OpenAI.Codex_26.623.13972.0_x64__2p2nqsd0c76g0\app\Codex.exe"
+"codex.exe" "C:\Program Files\WindowsApps\OpenAI.Codex_26.623.13972.0_x64__2p2nqsd0c76g0\app\resources\codex.exe" app-server --analytics-default-enabled
+"#;
+
         assert_eq!(
             surface_from_process_list(processes),
             PresenceSurface::Desktop

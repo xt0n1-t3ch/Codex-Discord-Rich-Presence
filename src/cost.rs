@@ -9,7 +9,10 @@ pub struct ModelPricing {
     pub output_per_million: f64,
 }
 
-const CODEX_CONTEXT_WINDOW: u64 = 400_000;
+pub const CODEX_OAUTH_CONTEXT_WINDOW: u64 = 400_000;
+pub const GPT_5_API_CONTEXT_WINDOW: u64 = 1_050_000;
+pub const GPT_5_LONG_CONTEXT_INPUT_THRESHOLD: u64 = 272_000;
+pub const GPT_5_MAX_OUTPUT_TOKENS: u64 = 128_000;
 
 const GPT_5_5: ModelPricing = ModelPricing {
     input_per_million: 5.0,
@@ -74,6 +77,8 @@ pub struct TokenCostBreakdown {
     pub input_cost_usd: f64,
     pub cached_input_cost_usd: f64,
     pub output_cost_usd: f64,
+    #[serde(default)]
+    pub cached_input_savings_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,11 +106,16 @@ pub fn compute_total_cost(
         * resolved.pricing.cached_input_per_million;
     let output_cost_usd =
         (output_tokens_total as f64 / 1_000_000.0) * resolved.pricing.output_per_million;
+    let cached_input_standard_cost_usd =
+        (cached_input_tokens_total as f64 / 1_000_000.0) * resolved.pricing.input_per_million;
+    let cached_input_savings_usd =
+        (cached_input_standard_cost_usd - cached_input_cost_usd).max(0.0);
 
     let breakdown = TokenCostBreakdown {
         input_cost_usd,
         cached_input_cost_usd,
         output_cost_usd,
+        cached_input_savings_usd,
     };
     let total_cost_usd = input_cost_usd + cached_input_cost_usd + output_cost_usd;
 
@@ -214,11 +224,56 @@ pub fn normalize_model_key(model: &str) -> String {
 }
 
 pub fn default_model_context_window(model_id: &str) -> Option<u64> {
+    model_context_metadata(model_id).map(|metadata| metadata.oauth_context_window)
+}
+
+pub fn api_model_context_window(model_id: &str) -> Option<u64> {
+    model_context_metadata(model_id).map(|metadata| metadata.api_context_window)
+}
+
+pub fn long_context_input_threshold(model_id: &str) -> Option<u64> {
+    model_context_metadata(model_id).map(|metadata| metadata.long_context_input_threshold)
+}
+
+pub fn max_output_tokens(model_id: &str) -> Option<u64> {
+    model_context_metadata(model_id).map(|metadata| metadata.max_output_tokens)
+}
+
+pub fn speed_multiplier(model_id: &str, fast_active: bool) -> f64 {
+    if !fast_active {
+        return 1.0;
+    }
+
+    let key = normalize_model_key(model_id);
+    if key.starts_with("gpt-5.5") {
+        2.5
+    } else if key.starts_with("gpt-5.4") {
+        2.0
+    } else {
+        1.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelContextMetadata {
+    pub oauth_context_window: u64,
+    pub api_context_window: u64,
+    pub long_context_input_threshold: u64,
+    pub max_output_tokens: u64,
+}
+
+pub fn model_context_metadata(model_id: &str) -> Option<ModelContextMetadata> {
     let key = normalize_model_key(model_id);
     if key.starts_with("gpt-5") || key.starts_with("codex") {
-        return Some(CODEX_CONTEXT_WINDOW);
+        Some(ModelContextMetadata {
+            oauth_context_window: CODEX_OAUTH_CONTEXT_WINDOW,
+            api_context_window: GPT_5_API_CONTEXT_WINDOW,
+            long_context_input_threshold: GPT_5_LONG_CONTEXT_INPUT_THRESHOLD,
+            max_output_tokens: GPT_5_MAX_OUTPUT_TOKENS,
+        })
+    } else {
+        None
     }
-    None
 }
 
 fn fallback_pricing() -> ModelPricing {
@@ -395,7 +450,29 @@ mod tests {
         assert!((computed.breakdown.input_cost_usd - expected_input).abs() < 0.0001);
         assert!((computed.breakdown.cached_input_cost_usd - expected_cached).abs() < 0.0001);
         assert!((computed.breakdown.output_cost_usd - expected_output).abs() < 0.0001);
+        assert!((computed.breakdown.cached_input_savings_usd - 0.7875).abs() < 0.0001);
         assert!((computed.total_cost_usd - expected_total).abs() < 0.0001);
+    }
+
+    #[test]
+    fn fast_multiplier_matches_generation_speed_contract() {
+        assert_eq!(speed_multiplier("gpt-5.5", true), 2.5);
+        assert_eq!(speed_multiplier("gpt-5.5-pro", true), 2.5);
+        assert_eq!(speed_multiplier("gpt-5.4", true), 2.0);
+        assert_eq!(speed_multiplier("gpt-5.4-2026-03-05", true), 2.0);
+        assert_eq!(speed_multiplier("gpt-5.3-codex", true), 1.0);
+        assert_eq!(speed_multiplier("gpt-5.5", false), 1.0);
+    }
+
+    #[test]
+    fn gpt5_context_metadata_separates_oauth_and_api_limits() {
+        let metadata = model_context_metadata("gpt-5.5").expect("gpt-5 metadata");
+        assert_eq!(metadata.oauth_context_window, 400_000);
+        assert_eq!(metadata.api_context_window, 1_050_000);
+        assert_eq!(metadata.long_context_input_threshold, 272_000);
+        assert_eq!(metadata.max_output_tokens, 128_000);
+        assert_eq!(default_model_context_window("gpt-5.5"), Some(400_000));
+        assert_eq!(api_model_context_window("gpt-5.5"), Some(1_050_000));
     }
 
     #[test]

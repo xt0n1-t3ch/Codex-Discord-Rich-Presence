@@ -31,6 +31,7 @@ pub struct TokenTotals {
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
+    pub cache_hit_ratio: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -38,6 +39,7 @@ pub struct CostBreakdown {
     pub input_cost_usd: f64,
     pub cached_input_cost_usd: f64,
     pub output_cost_usd: f64,
+    pub cached_input_savings_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,7 @@ pub struct ModelMetrics {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_hit_ratio: f64,
     pub session_count: u32,
 }
 
@@ -60,6 +63,7 @@ struct SessionRecord {
     input_cost_usd: f64,
     cached_input_cost_usd: f64,
     output_cost_usd: f64,
+    cached_input_savings_usd: f64,
 }
 
 pub struct MetricsTracker {
@@ -95,6 +99,7 @@ impl MetricsTracker {
                 input_cost_usd: session.cost_breakdown.input_cost_usd,
                 cached_input_cost_usd: session.cost_breakdown.cached_input_cost_usd,
                 output_cost_usd: session.cost_breakdown.output_cost_usd,
+                cached_input_savings_usd: session.cost_breakdown.cached_input_savings_usd,
             };
             self.sessions.insert(session.session_id.clone(), record);
         }
@@ -134,6 +139,7 @@ impl MetricsTracker {
             cost_breakdown.input_cost_usd += record.input_cost_usd;
             cost_breakdown.cached_input_cost_usd += record.cached_input_cost_usd;
             cost_breakdown.output_cost_usd += record.output_cost_usd;
+            cost_breakdown.cached_input_savings_usd += record.cached_input_savings_usd;
 
             let entry = by_model_map
                 .entry(record.model_id.clone())
@@ -143,6 +149,7 @@ impl MetricsTracker {
                     input_tokens: 0,
                     cached_input_tokens: 0,
                     output_tokens: 0,
+                    cache_hit_ratio: 0.0,
                     session_count: 0,
                 });
             entry.cost_usd += record.cost_usd;
@@ -153,8 +160,12 @@ impl MetricsTracker {
         }
 
         totals.total_tokens = totals.input_tokens + totals.output_tokens;
+        totals.cache_hit_ratio = cache_hit_ratio(totals.input_tokens, totals.cached_input_tokens);
 
         let mut by_model: Vec<ModelMetrics> = by_model_map.into_values().collect();
+        for model in &mut by_model {
+            model.cache_hit_ratio = cache_hit_ratio(model.input_tokens, model.cached_input_tokens);
+        }
         by_model.sort_by(|a, b| {
             b.cost_usd
                 .partial_cmp(&a.cost_usd)
@@ -170,6 +181,14 @@ impl MetricsTracker {
             by_model,
             active_sessions,
         }
+    }
+}
+
+fn cache_hit_ratio(input_tokens: u64, cached_input_tokens: u64) -> f64 {
+    if input_tokens == 0 {
+        0.0
+    } else {
+        cached_input_tokens as f64 / input_tokens as f64
     }
 }
 
@@ -225,6 +244,10 @@ fn generate_markdown(snapshot: &MetricsSnapshot) -> String {
         format_tokens(snapshot.totals.cached_input_tokens)
     ));
     markdown.push_str(&format!(
+        "| Cache Hit Ratio | {:.1}% |\n",
+        snapshot.totals.cache_hit_ratio * 100.0
+    ));
+    markdown.push_str(&format!(
         "| Output Tokens | {} |\n",
         format_tokens(snapshot.totals.output_tokens)
     ));
@@ -244,6 +267,10 @@ fn generate_markdown(snapshot: &MetricsSnapshot) -> String {
     markdown.push_str(&format!(
         "| Output | {} |\n",
         format_cost(snapshot.cost_breakdown.output_cost_usd)
+    ));
+    markdown.push_str(&format!(
+        "| Cached Input Savings | {} |\n",
+        format_cost(snapshot.cost_breakdown.cached_input_savings_usd)
     ));
     markdown.push('\n');
 
@@ -312,6 +339,7 @@ mod tests {
                 input_cost_usd: cost / 2.0,
                 cached_input_cost_usd: cost / 4.0,
                 output_cost_usd: cost / 4.0,
+                cached_input_savings_usd: cost / 8.0,
             },
             pricing_source: PricingSource::Exact,
             context_window: None,
@@ -360,6 +388,25 @@ mod tests {
         assert_eq!(snapshot.totals.input_tokens, 3_000);
         assert_eq!(snapshot.totals.cached_input_tokens, 500);
         assert_eq!(snapshot.totals.output_tokens, 1_200);
+        assert!((snapshot.totals.cache_hit_ratio - (500.0 / 3_000.0)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn tracks_cache_hit_ratio_and_savings() {
+        let mut tracker = MetricsTracker::new();
+        let sessions = vec![
+            make_session("s1", "gpt-5.5", 1_000, 400, 200, 0.10),
+            make_session("s2", "gpt-5.5", 3_000, 600, 800, 0.30),
+        ];
+
+        tracker.update(&sessions);
+
+        let snapshot = tracker.snapshot().expect("snapshot");
+        assert_eq!(snapshot.totals.input_tokens, 4_000);
+        assert_eq!(snapshot.totals.cached_input_tokens, 1_000);
+        assert!((snapshot.totals.cache_hit_ratio - 0.25).abs() < 0.0001);
+        assert!((snapshot.cost_breakdown.cached_input_savings_usd - 0.05).abs() < 0.0001);
+        assert!((snapshot.by_model[0].cache_hit_ratio - 0.25).abs() < 0.0001);
     }
 
     #[test]
@@ -374,11 +421,13 @@ mod tests {
                 cached_input_tokens: 60_000,
                 output_tokens: 40_000,
                 total_tokens: 140_000,
+                cache_hit_ratio: 0.6,
             },
             cost_breakdown: CostBreakdown {
                 input_cost_usd: 0.7,
                 cached_input_cost_usd: 0.13,
                 output_cost_usd: 0.4,
+                cached_input_savings_usd: 0.57,
             },
             by_model: vec![ModelMetrics {
                 model_id: "gpt-5.2-codex".to_string(),
@@ -386,6 +435,7 @@ mod tests {
                 input_tokens: 100_000,
                 cached_input_tokens: 60_000,
                 output_tokens: 40_000,
+                cache_hit_ratio: 0.6,
                 session_count: 1,
             }],
             active_sessions: 1,
@@ -396,5 +446,7 @@ mod tests {
         assert!(markdown.contains("## Totals"));
         assert!(markdown.contains("## Cost Breakdown"));
         assert!(markdown.contains("## By Model"));
+        assert!(markdown.contains("Cache Hit Ratio"));
+        assert!(markdown.contains("Cached Input Savings"));
     }
 }
