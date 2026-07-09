@@ -110,8 +110,8 @@ foreach ($requiredCommand in @(
     Assert-Matches ([regex]::Escape($requiredCommand)) $preflight "Preflight is missing '$requiredCommand'."
 }
 
-Assert-Matches '(?m)^    needs: preflight$' $build "Matrix builds must depend on preflight."
-Assert-Matches '(?m)^    needs: \[preflight, build\]$' $publish "Publish must depend on preflight and every matrix build."
+Assert-Matches '(?m)^    needs: preflight\r?$' $build "Matrix builds must depend on preflight."
+Assert-Matches '(?m)^    needs: \[preflight, build\]\r?$' $publish "Publish must depend on preflight and every matrix build."
 Assert-Matches '(?ms)^    permissions:\r?\n      checks: read\r?\n      contents: write\s*$' $publish "Only publish may receive checks: read and contents: write."
 Assert-Matches 'scripts/release-assets.ps1' $publish "Publish must use the checked artifact assembler."
 Assert-Matches 'scripts/check-release-target.ps1' $publish "Publish must validate repository immutability, tag ancestry, and protected checks before creating a draft."
@@ -152,7 +152,10 @@ if ($targetGateIndex -lt 0 -or $draftCreationIndex -lt 0 -or $targetGateIndex -g
     throw "Repository target validation must run before draft creation."
 }
 
-$cargoCommands = [regex]::Matches("$ci`n$release", '(?m)^.*\bcargo\s+[^\r\n]*$')
+$cargoCommands = [regex]::Matches("$ci`n$release", '(?m)^.*\bcargo\s+[^\r\n]*\r?$')
+if ($cargoCommands.Count -eq 0) {
+    throw "Workflow contract did not discover any Cargo commands."
+}
 foreach ($cargoCommand in $cargoCommands) {
     Assert-Matches '\bcargo --locked\s+' $cargoCommand.Value "Cargo command is not lockfile-enforced: $($cargoCommand.Value.Trim())"
 }
