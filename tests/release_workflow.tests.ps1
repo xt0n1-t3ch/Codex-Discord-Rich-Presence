@@ -77,9 +77,9 @@ if (-not (Test-Path -LiteralPath $toolchainPath -PathType Leaf)) {
     throw "rust-toolchain.toml is required."
 }
 $toolchain = Get-Content -Raw -LiteralPath $toolchainPath
-Assert-Matches '(?m)^channel = "1\.96\.1"$' $toolchain "Rust must be pinned to 1.96.1."
-Assert-Matches '(?m)^components = \["clippy", "rustfmt"\]$' $toolchain "Rust toolchain must install clippy and rustfmt."
-Assert-Matches '(?m)^profile = "minimal"$' $toolchain "Rust toolchain must use the minimal profile."
+Assert-Matches '(?m)^channel = "1\.96\.1"\r?$' $toolchain "Rust must be pinned to 1.96.1."
+Assert-Matches '(?m)^components = \["clippy", "rustfmt"\]\r?$' $toolchain "Rust toolchain must install clippy and rustfmt."
+Assert-Matches '(?m)^profile = "minimal"\r?$' $toolchain "Rust toolchain must use the minimal profile."
 
 Assert-ImmutableActionPins -Workflow $ci -WorkflowName "CI"
 Assert-ImmutableActionPins -Workflow $release -WorkflowName "Release"
