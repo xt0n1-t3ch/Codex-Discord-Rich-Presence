@@ -8,6 +8,7 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $ciPath = Join-Path $repositoryRoot ".github/workflows/ci.yml"
 $releasePath = Join-Path $repositoryRoot ".github/workflows/release.yml"
 $toolchainPath = Join-Path $repositoryRoot "rust-toolchain.toml"
+$targetScriptPath = Join-Path $repositoryRoot "scripts/check-release-target.ps1"
 
 function Assert-Matches {
     param(
@@ -70,6 +71,7 @@ function Assert-ImmutableActionPins {
 
 $ci = Get-Content -Raw -LiteralPath $ciPath
 $release = Get-Content -Raw -LiteralPath $releasePath
+$targetScript = Get-Content -Raw -LiteralPath $targetScriptPath
 
 if (-not (Test-Path -LiteralPath $toolchainPath -PathType Leaf)) {
     throw "rust-toolchain.toml is required."
@@ -95,6 +97,7 @@ $publish = Get-JobBlock -Workflow $release -JobName "publish"
 foreach ($requiredCommand in @(
     'scripts/check-release-contract.ps1'
     'tests/release_contract.tests.ps1'
+    'tests/release_approval.tests.ps1'
     'tests/release_target.tests.ps1'
     'tests/release_assets.tests.ps1'
     'tests/release_workflow.tests.ps1'
@@ -111,16 +114,19 @@ Assert-Matches '(?m)^    needs: \[preflight, build\]$' $publish "Publish must de
 Assert-Matches '(?ms)^    permissions:\r?\n      checks: read\r?\n      contents: write\s*$' $publish "Only publish may receive checks: read and contents: write."
 Assert-Matches 'scripts/release-assets.ps1' $publish "Publish must use the checked artifact assembler."
 Assert-Matches 'scripts/check-release-target.ps1' $publish "Publish must validate repository immutability, tag ancestry, and protected checks before creating a draft."
+Assert-Matches 'RELEASE_APPROVED_SHA: \$\{\{ vars\.RELEASE_APPROVED_SHA \}\}' $publish "Publish must consume the operator-approved exact SHA."
 foreach ($targetArgument in @(
     '-Repository \$env:GITHUB_REPOSITORY'
     '-Tag \$env:TAG_NAME'
     '-Version \$env:VERSION'
     '-Sha \$env:RELEASE_SHA'
+    '-ApprovedSha \$env:RELEASE_APPROVED_SHA'
     '-IsPrerelease \$env:IS_PRERELEASE'
     '-MainRef origin/main'
 )) {
     Assert-Matches $targetArgument $publish "Release target wiring is missing '$targetArgument'."
 }
+Assert-Matches 'filter=latest' $targetScript "Protected checks must ignore stale successful attempts."
 Assert-Matches 'fail_on_unmatched_files: true' $publish "Release creation must reject an empty file glob."
 Assert-Matches 'overwrite_files: false' $publish "Release creation must not replace existing assets."
 Assert-Matches 'SHA256SUMS\.txt' $publish "Publish must prove the checksum manifest is present."

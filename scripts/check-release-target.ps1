@@ -13,6 +13,9 @@ param(
     [string] $Sha,
 
     [Parameter(Mandatory)]
+    [string] $ApprovedSha,
+
+    [Parameter(Mandatory)]
     [ValidateSet("true", "false")]
     [string] $IsPrerelease,
 
@@ -51,7 +54,7 @@ function Invoke-GitCommand {
 function Get-GithubApiResponse {
     param(
         [Parameter(Mandatory)]
-        [ValidateSet("immutable", "checks", "latest")]
+        [ValidateSet("checks", "latest")]
         [string] $Kind,
 
         [Parameter(Mandatory)]
@@ -62,7 +65,6 @@ function Get-GithubApiResponse {
 
     if (-not [string]::IsNullOrWhiteSpace($ApiFixtureDirectory)) {
         $fixtureName = switch ($Kind) {
-            "immutable" { "immutable-releases.json" }
             "checks" { "check-runs.json" }
             "latest" { "latest-release.json" }
         }
@@ -99,6 +101,9 @@ try {
     if ($Sha -cnotmatch '^[0-9a-f]{40}$') {
         throw "Release SHA '$Sha' must be a lowercase 40-character commit SHA."
     }
+    if ($ApprovedSha -cne $Sha) {
+        throw "Release SHA '$Sha' does not match the approved release SHA '$ApprovedSha'."
+    }
     if ($Tag -cne "v$Version") {
         throw "Tag '$Tag' does not match validated version '$Version'."
     }
@@ -125,6 +130,10 @@ try {
         ) | Out-Null
     }
 
+    $tagType = Invoke-GitCommand -Root $root -Arguments @("cat-file", "-t", $Tag)
+    if ($tagType -cne "tag") {
+        throw "Release tag '$Tag' must be an annotated tag."
+    }
     $tagCommit = Invoke-GitCommand -Root $root -Arguments @("rev-parse", "$Tag^{commit}")
     if ($tagCommit -cne $Sha) {
         throw "Release SHA '$Sha' does not match tag '$Tag' commit '$tagCommit'."
@@ -139,32 +148,25 @@ try {
         throw "Unable to verify '$Sha' against $MainRef (git exit $ancestorExitCode)."
     }
 
-    $immutableState = Get-GithubApiResponse `
-        -Kind immutable `
-        -Endpoint "repos/$Repository/immutable-releases"
-    if ($immutableState.PSObject.Properties.Name -notcontains "enabled" -or $immutableState.enabled -ne $true) {
-        if ($immutableState.PSObject.Properties.Name -notcontains "enabled") {
-            throw "Immutable release response must contain enabled: true."
-        }
-        throw "GitHub immutable releases are not enabled for '$Repository'."
-    }
-
     $checkResponse = Get-GithubApiResponse `
         -Kind checks `
-        -Endpoint "repos/$Repository/commits/$Sha/check-runs?per_page=100&filter=all"
+        -Endpoint "repos/$Repository/commits/$Sha/check-runs?per_page=100&filter=latest"
     if ($checkResponse.PSObject.Properties.Name -notcontains "check_runs") {
         throw "GitHub check-runs response is missing check_runs."
     }
     $checkRuns = @($checkResponse.check_runs)
     foreach ($requiredCheck in $requiredChecks) {
-        $successfulRuns = @($checkRuns | Where-Object {
+        $matchingRuns = @($checkRuns | Where-Object {
                 $_.name -ceq $requiredCheck -and
                 $_.head_sha -ceq $Sha -and
-                $_.status -ceq "completed" -and
-                $_.conclusion -ceq "success" -and
                 $_.app.slug -ceq "github-actions"
             })
-        if ($successfulRuns.Count -eq 0) {
+        $latestRun = $matchingRuns |
+            Sort-Object -Property @{ Expression = {
+                    if ($_.PSObject.Properties.Name -contains "id") { [long] $_.id } else { 0L }
+                }; Descending = $true } |
+            Select-Object -First 1
+        if ($null -eq $latestRun -or $latestRun.status -cne "completed" -or $latestRun.conclusion -cne "success") {
             throw "Protected check '$requiredCheck' is missing or unsuccessful for '$Sha'."
         }
     }
@@ -203,7 +205,7 @@ try {
         tag = $Tag
         sha = $Sha
         main_ref = $MainRef
-        immutable_releases = $true
+        release_approval = $true
         required_checks = $requiredChecks.Count
         latest_guard = $latestGuard
     } | ConvertTo-Json -Compress

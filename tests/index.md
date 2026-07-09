@@ -10,7 +10,8 @@
 | Full suite | `cargo --locked test --workspace --all-features` | Requires MSVC `link.exe` |
 | Release compile | `cargo --locked build --workspace --release --all-features` | Requires MSVC `link.exe` |
 | Release metadata | `pwsh -NoProfile -File tests/release_contract.tests.ps1` | Covers SemVer, Cargo parity, changelog, prerelease, build metadata, and generated notes |
-| Release target | `pwsh -NoProfile -File tests/release_target.tests.ps1` | Covers immutable settings, tag ancestry, protected checks, and latest-release ordering |
+| Release approval | `pwsh -NoProfile -File tests/release_approval.tests.ps1` | Covers the local immutable-release check and exact-SHA approval contract without storing an admin token in Actions |
+| Release target | `pwsh -NoProfile -File tests/release_target.tests.ps1` | Covers annotated tag ancestry, exact-SHA approval, latest protected checks, and latest-release ordering |
 | Release assets | `pwsh -NoProfile -File tests/release_assets.tests.ps1` | Covers portable filenames, required payloads, and SHA-256 manifest generation |
 | Release workflow | `pwsh -NoProfile -File tests/release_workflow.tests.ps1` | Covers Action pins, least privilege, job dependencies, toolchain, and lockfile enforcement |
 | Windows artifact | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1` | Produces `releases/windows/codex-discord-rich-presence.exe` |
@@ -29,6 +30,6 @@
 | Session parsing | `src/session.rs` and `src/session/*` JSONL, activity, context, ranking |
 | OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
 | Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
-| Release integrity | `tests/release_*.tests.ps1` drives metadata, repository state, workflow, portable artifact, digest, and immutable publication contracts |
+| Release integrity | `tests/release_*.tests.ps1` drives metadata, local approval, repository state, workflow, portable artifact, digest, and immutable publication contracts |
 
 Rule: bugs that cross module seams get an integration regression; module-local bugs can stay beside the Rust module.

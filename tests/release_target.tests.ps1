@@ -60,7 +60,7 @@ function New-GitFixture {
     Invoke-Git -WorkingDirectory $path -Arguments @("add", "state.txt") | Out-Null
     Invoke-Git -WorkingDirectory $path -Arguments @("commit", "-m", "test: seed release target") | Out-Null
     $sha = Invoke-Git -WorkingDirectory $path -Arguments @("rev-parse", "HEAD")
-    Invoke-Git -WorkingDirectory $path -Arguments @("tag", "v1.7.2") | Out-Null
+    Invoke-Git -WorkingDirectory $path -Arguments @("tag", "-a", "v1.7.2", "-m", "v1.7.2") | Out-Null
     return [pscustomobject]@{ Path = $path; Sha = $sha }
 }
 
@@ -77,21 +77,30 @@ function New-ApiFixture {
     param(
         [Parameter(Mandatory)] [string] $Name,
         [Parameter(Mandatory)] [string] $Sha,
-        [bool] $ImmutableEnabled = $true,
         [string] $FailedCheck,
-        [string] $LatestTag
+        [string] $LatestTag,
+        [switch] $IncludeStaleSuccess
     )
 
     $path = Join-Path $temporaryRoot $Name
     New-Item -ItemType Directory -Path $path -Force | Out-Null
-    Write-JsonFile -Path (Join-Path $path "immutable-releases.json") -Value @{ enabled = $ImmutableEnabled }
-
     $checkRuns = foreach ($check in $requiredChecks) {
         $passed = $check -ne $FailedCheck
         [ordered]@{
+            id = 200
             name = $check
             status = "completed"
             conclusion = if ($passed) { "success" } else { "failure" }
+            head_sha = $Sha
+            app = @{ slug = "github-actions" }
+        }
+    }
+    if ($IncludeStaleSuccess -and -not [string]::IsNullOrWhiteSpace($FailedCheck)) {
+        $checkRuns += [ordered]@{
+            id = 100
+            name = $FailedCheck
+            status = "completed"
+            conclusion = "success"
             head_sha = $Sha
             app = @{ slug = "github-actions" }
         }
@@ -114,6 +123,7 @@ function Invoke-TargetCheck {
         [Parameter(Mandatory)] [string] $Tag,
         [Parameter(Mandatory)] [string] $Version,
         [Parameter(Mandatory)] [string] $Sha,
+        [string] $ApprovedSha = $Sha,
         [ValidateSet("true", "false")]
         [string] $IsPrerelease = "false"
     )
@@ -123,6 +133,7 @@ function Invoke-TargetCheck {
         -Tag $Tag `
         -Version $Version `
         -Sha $Sha `
+        -ApprovedSha $ApprovedSha `
         -IsPrerelease $IsPrerelease `
         -RepositoryRoot $GitRoot `
         -MainRef main `
@@ -142,30 +153,22 @@ try {
     Assert-Equal 0 $valid.ExitCode "A protected main commit with immutable releases must pass. Output: $($valid.Output)"
     $validResult = $valid.Output | ConvertFrom-Json
     Assert-Equal 3 $validResult.required_checks "The gate must validate all three protected platform contexts."
-    Assert-Equal $true $validResult.immutable_releases "The gate did not confirm immutable releases."
+    Assert-Equal $true $validResult.release_approval "The gate did not confirm exact-SHA operator approval."
 
-    $disabledApi = New-ApiFixture -Name "api-disabled" -Sha $gitFixture.Sha -ImmutableEnabled $false
-    $disabled = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $disabledApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha
-    Assert-Equal 1 $disabled.ExitCode "Disabled immutable releases must fail closed."
-    Assert-Matches "immutable releases are not enabled" $disabled.Output "Disabled-immutability failure is unclear."
-
-    $missingFieldApi = New-ApiFixture -Name "api-missing-field" -Sha $gitFixture.Sha
-    Write-JsonFile -Path (Join-Path $missingFieldApi "immutable-releases.json") -Value @{ state = "unknown" }
-    $missingField = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $missingFieldApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha
-    Assert-Equal 1 $missingField.ExitCode "An immutable response without enabled:true must fail closed."
-    Assert-Matches "enabled: true" $missingField.Output "Missing-enabled failure is unclear."
-
-    $missingResponseApi = New-ApiFixture -Name "api-missing-response" -Sha $gitFixture.Sha
-    Remove-Item -LiteralPath (Join-Path $missingResponseApi "immutable-releases.json")
-    $missingResponse = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $missingResponseApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha
-    Assert-Equal 1 $missingResponse.ExitCode "A missing immutable response must fail closed."
-    Assert-Matches "immutable-releases.json" $missingResponse.Output "Missing-response failure is unclear."
+    $unapproved = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $validApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha -ApprovedSha ("0" * 40)
+    Assert-Equal 1 $unapproved.ExitCode "A release SHA without exact operator approval must fail closed."
+    Assert-Matches "approved release SHA" $unapproved.Output "Approval mismatch failure is unclear."
 
     $failedCheckName = "Lint, Test, Build (windows-latest)"
     $failedCheckApi = New-ApiFixture -Name "api-failed-check" -Sha $gitFixture.Sha -FailedCheck $failedCheckName
     $failedCheck = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $failedCheckApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha
     Assert-Equal 1 $failedCheck.ExitCode "A failed protected context must block release creation."
     Assert-Matches ([regex]::Escape($failedCheckName)) $failedCheck.Output "Failed-check error does not name the protected context."
+
+    $staleSuccessApi = New-ApiFixture -Name "api-stale-success" -Sha $gitFixture.Sha -FailedCheck $failedCheckName -IncludeStaleSuccess
+    $staleSuccess = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $staleSuccessApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha
+    Assert-Equal 1 $staleSuccess.ExitCode "A stale successful attempt must not hide a newer failed check."
+    Assert-Matches ([regex]::Escape($failedCheckName)) $staleSuccess.Output "Latest failed check error is unclear."
 
     $mismatchedSha = "0" * 40
     $mismatch = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $validApi -Tag "v1.7.2" -Version "1.7.2" -Sha $mismatchedSha
@@ -177,7 +180,7 @@ try {
     Invoke-Git -WorkingDirectory $gitFixture.Path -Arguments @("add", "state.txt") | Out-Null
     Invoke-Git -WorkingDirectory $gitFixture.Path -Arguments @("commit", "-m", "test: create non-main release commit") | Out-Null
     $sideSha = Invoke-Git -WorkingDirectory $gitFixture.Path -Arguments @("rev-parse", "HEAD")
-    Invoke-Git -WorkingDirectory $gitFixture.Path -Arguments @("tag", "v1.7.3") | Out-Null
+    Invoke-Git -WorkingDirectory $gitFixture.Path -Arguments @("tag", "-a", "v1.7.3", "-m", "v1.7.3") | Out-Null
     $sideApi = New-ApiFixture -Name "api-side" -Sha $sideSha
     $side = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $sideApi -Tag "v1.7.3" -Version "1.7.3" -Sha $sideSha
     Assert-Equal 1 $side.ExitCode "A tag outside main must fail."
@@ -188,7 +191,7 @@ try {
     Assert-Equal 1 $newerLatest.ExitCode "An older stable release must not replace a newer latest release."
     Assert-Matches "not newer than latest stable" $newerLatest.Output "Latest-release guard failure is unclear."
 
-    Write-Output "release target contract: 8 scenarios passed"
+    Write-Output "release target contract: 9 scenarios passed"
 }
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
