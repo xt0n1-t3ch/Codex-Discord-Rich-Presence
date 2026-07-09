@@ -83,6 +83,7 @@ Assert-Matches '(?m)^profile = "minimal"$' $toolchain "Rust toolchain must use t
 
 Assert-ImmutableActionPins -Workflow $ci -WorkflowName "CI"
 Assert-ImmutableActionPins -Workflow $release -WorkflowName "Release"
+Assert-Matches 'tests/release_approval.tests.ps1' $ci "CI must run the immutable-release approval contract on every platform."
 
 Assert-Matches '(?ms)^permissions:\r?\n  contents: read\s*$' $release "Release workflow must default to contents: read."
 Assert-NotMatches '(?m)^\s*workflow_dispatch:' $release "Release workflow must remain tag-only."

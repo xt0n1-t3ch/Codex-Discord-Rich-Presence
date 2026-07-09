@@ -50,6 +50,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/release_contract.tests.ps1
+          ./tests/release_approval.tests.ps1
           ./tests/release_target.tests.ps1
           ./tests/release_assets.tests.ps1
           ./tests/release_workflow.tests.ps1

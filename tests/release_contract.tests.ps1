@@ -71,7 +71,7 @@ function Invoke-MetadataCheck {
         [string] $PreviousTag
     )
 
-    $arguments = @("-NoProfile", "-File", $metadataScript, "-Tag", $Tag, "-RepositoryRoot", $Fixture)
+    $arguments = @("-NoProfile", "-File", $metadataScript, "-Tag", $Tag, "-RefType", "tag", "-RepositoryRoot", $Fixture)
     if (-not [string]::IsNullOrWhiteSpace($GithubOutputPath)) {
         $arguments += @("-GithubOutputPath", $GithubOutputPath)
     }
