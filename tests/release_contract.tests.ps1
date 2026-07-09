@@ -1,0 +1,141 @@
+[CmdletBinding()]
+param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$metadataScript = Join-Path $repositoryRoot "scripts/check-release-contract.ps1"
+$temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-release-contract-" + [guid]::NewGuid())
+
+function Assert-Equal {
+    param(
+        [Parameter(Mandatory)] $Expected,
+        [Parameter(Mandatory)] $Actual,
+        [Parameter(Mandatory)] [string] $Message
+    )
+
+    if ($Expected -ne $Actual) {
+        throw "$Message Expected '$Expected', received '$Actual'."
+    }
+}
+
+function Assert-Matches {
+    param(
+        [Parameter(Mandatory)] [string] $Pattern,
+        [Parameter(Mandatory)] [string] $Actual,
+        [Parameter(Mandatory)] [string] $Message
+    )
+
+    if ($Actual -notmatch $Pattern) {
+        throw "$Message Output: $Actual"
+    }
+}
+
+function New-ReleaseFixture {
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [string] $Changelog
+    )
+
+    $fixture = Join-Path $temporaryRoot $Name
+    New-Item -ItemType Directory -Path (Join-Path $fixture "src") -Force | Out-Null
+    @"
+[package]
+name = "release-fixture"
+version = "$Version"
+edition = "2024"
+"@ | Set-Content -LiteralPath (Join-Path $fixture "Cargo.toml") -Encoding utf8NoBOM
+    "fn main() {}" | Set-Content -LiteralPath (Join-Path $fixture "src/main.rs") -Encoding utf8NoBOM
+    $Changelog | Set-Content -LiteralPath (Join-Path $fixture "CHANGELOG.md") -Encoding utf8NoBOM
+    return $fixture
+}
+
+function Invoke-MetadataCheck {
+    param(
+        [Parameter(Mandatory)] [string] $Tag,
+        [Parameter(Mandatory)] [string] $Fixture,
+        [string] $GithubOutputPath
+    )
+
+    $arguments = @("-NoProfile", "-File", $metadataScript, "-Tag", $Tag, "-RepositoryRoot", $Fixture)
+    if (-not [string]::IsNullOrWhiteSpace($GithubOutputPath)) {
+        $arguments += @("-GithubOutputPath", $GithubOutputPath)
+    }
+    $output = & pwsh @arguments 2>&1 | Out-String
+    return [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output = $output.Trim()
+    }
+}
+
+try {
+    New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
+
+    $stableFixture = New-ReleaseFixture -Name "stable" -Version "1.7.2" -Changelog @"
+# Changelog
+
+## [1.7.2] - 2026-07-09
+
+### Fixed
+
+- Gate release publication behind complete validation.
+"@
+    $githubOutputPath = Join-Path $stableFixture "github-output.txt"
+    $stable = Invoke-MetadataCheck -Tag "v1.7.2" -Fixture $stableFixture -GithubOutputPath $githubOutputPath
+    Assert-Equal 0 $stable.ExitCode "A matching stable release must pass. Output: $($stable.Output)"
+    $stableMetadata = $stable.Output | ConvertFrom-Json
+    Assert-Equal "1.7.2" $stableMetadata.version "Stable version metadata is incorrect."
+    Assert-Equal $false $stableMetadata.is_prerelease "Stable tag was classified as prerelease."
+    Assert-Equal $true $stableMetadata.make_latest "Stable tag must become latest."
+    $githubOutput = Get-Content -Raw -LiteralPath $githubOutputPath
+    foreach ($expectedOutput in @(
+        "tag_name=v1.7.2"
+        "version=1.7.2"
+        "release_name=Codex Discord Rich Presence v1.7.2"
+        "is_prerelease=false"
+        "make_latest=true"
+    )) {
+        Assert-Matches ([regex]::Escape($expectedOutput)) $githubOutput "GitHub output is missing '$expectedOutput'."
+    }
+
+    $malformed = Invoke-MetadataCheck -Tag "release-1.7.2" -Fixture $stableFixture
+    Assert-Equal 1 $malformed.ExitCode "A malformed tag must fail."
+    Assert-Matches "valid SemVer release tag" $malformed.Output "Malformed-tag failure is unclear."
+
+    $mismatch = Invoke-MetadataCheck -Tag "v1.7.3" -Fixture $stableFixture
+    Assert-Equal 1 $mismatch.ExitCode "A tag/Cargo mismatch must fail."
+    Assert-Matches "does not match Cargo package version" $mismatch.Output "Version-mismatch failure is unclear."
+
+    $missingChangelogFixture = New-ReleaseFixture -Name "missing-changelog" -Version "1.7.2" -Changelog @"
+# Changelog
+
+## [1.7.1] - 2026-07-06
+
+- Previous release.
+"@
+    $missingChangelog = Invoke-MetadataCheck -Tag "v1.7.2" -Fixture $missingChangelogFixture
+    Assert-Equal 1 $missingChangelog.ExitCode "A missing changelog section must fail."
+    Assert-Matches "non-empty CHANGELOG.md section" $missingChangelog.Output "Missing-changelog failure is unclear."
+
+    $prereleaseFixture = New-ReleaseFixture -Name "prerelease" -Version "1.8.0-rc.1" -Changelog @"
+# Changelog
+
+## [1.8.0-rc.1] - 2026-07-09
+
+- Release candidate.
+"@
+    $prerelease = Invoke-MetadataCheck -Tag "v1.8.0-rc.1" -Fixture $prereleaseFixture
+    Assert-Equal 0 $prerelease.ExitCode "A matching prerelease must pass. Output: $($prerelease.Output)"
+    $prereleaseMetadata = $prerelease.Output | ConvertFrom-Json
+    Assert-Equal $true $prereleaseMetadata.is_prerelease "Prerelease tag was classified as stable."
+    Assert-Equal $false $prereleaseMetadata.make_latest "Prerelease tag must not become latest."
+
+    Write-Output "release metadata contract: 5 scenarios passed"
+}
+finally {
+    if (Test-Path -LiteralPath $temporaryRoot) {
+        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
+    }
+}
