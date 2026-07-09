@@ -85,6 +85,8 @@ Assert-ImmutableActionPins -Workflow $release -WorkflowName "Release"
 Assert-Matches '(?ms)^permissions:\r?\n  contents: read\s*$' $release "Release workflow must default to contents: read."
 Assert-NotMatches '(?m)^\s*workflow_dispatch:' $release "Release workflow must remain tag-only."
 Assert-Matches '(?ms)^on:\r?\n  push:\r?\n    tags:\r?\n      - "v\*\.\*\.\*"' $release "Release workflow must trigger only from SemVer-shaped tags."
+Assert-Matches 'group: release-\$\{\{ github\.repository \}\}' $release "Release concurrency must cover the whole repository."
+Assert-Matches 'cancel-in-progress: false' $release "Release concurrency must never cancel an active publication."
 
 $preflight = Get-JobBlock -Workflow $release -JobName "preflight"
 $build = Get-JobBlock -Workflow $release -JobName "build"
@@ -93,20 +95,32 @@ $publish = Get-JobBlock -Workflow $release -JobName "publish"
 foreach ($requiredCommand in @(
     'scripts/check-release-contract.ps1'
     'tests/release_contract.tests.ps1'
+    'tests/release_target.tests.ps1'
     'tests/release_assets.tests.ps1'
     'tests/release_workflow.tests.ps1'
-    'cargo fmt --check'
-    'cargo clippy --workspace --all-targets --all-features -- -D warnings'
-    'cargo test --workspace --all-features --verbose'
-    'cargo build --workspace --release --all-features'
+    'cargo --locked fmt --check'
+    'cargo --locked clippy --workspace --all-targets --all-features -- -D warnings'
+    'cargo --locked test --workspace --all-features --verbose'
+    'cargo --locked build --workspace --release --all-features'
 )) {
     Assert-Matches ([regex]::Escape($requiredCommand)) $preflight "Preflight is missing '$requiredCommand'."
 }
 
 Assert-Matches '(?m)^    needs: preflight$' $build "Matrix builds must depend on preflight."
 Assert-Matches '(?m)^    needs: \[preflight, build\]$' $publish "Publish must depend on preflight and every matrix build."
-Assert-Matches '(?ms)^    permissions:\r?\n      contents: write\s*$' $publish "Only publish may receive contents: write."
+Assert-Matches '(?ms)^    permissions:\r?\n      checks: read\r?\n      contents: write\s*$' $publish "Only publish may receive checks: read and contents: write."
 Assert-Matches 'scripts/release-assets.ps1' $publish "Publish must use the checked artifact assembler."
+Assert-Matches 'scripts/check-release-target.ps1' $publish "Publish must validate repository immutability, tag ancestry, and protected checks before creating a draft."
+foreach ($targetArgument in @(
+    '-Repository \$env:GITHUB_REPOSITORY'
+    '-Tag \$env:TAG_NAME'
+    '-Version \$env:VERSION'
+    '-Sha \$env:RELEASE_SHA'
+    '-IsPrerelease \$env:IS_PRERELEASE'
+    '-MainRef origin/main'
+)) {
+    Assert-Matches $targetArgument $publish "Release target wiring is missing '$targetArgument'."
+}
 Assert-Matches 'fail_on_unmatched_files: true' $publish "Release creation must reject an empty file glob."
 Assert-Matches 'overwrite_files: false' $publish "Release creation must not replace existing assets."
 Assert-Matches 'SHA256SUMS\.txt' $publish "Publish must prove the checksum manifest is present."
@@ -118,6 +132,23 @@ Assert-Matches 'Finalize release once' $publish "The workflow must have one expl
 Assert-Matches '\{draft: false, prerelease: \$prerelease, make_latest: \$make_latest\}' $publish "Finalization must publish the verified draft exactly once."
 Assert-Matches "\.immutable.*=.*true" $publish "Finalization must confirm GitHub made the release immutable."
 Assert-NotMatches 'always\s*\(' $publish "Publish must not bypass a failed dependency."
+Assert-NotMatches 'awk -v version=' $publish "Changelog extraction must not interpolate SemVer into a regular expression."
+Assert-NotMatches 'Codex Discord Rich Presence -' $release "Release assets must not use filenames GitHub normalizes."
+Assert-Matches 'codex-discord-rich-presence-windows-x64\.exe' $release "Windows packaging must keep the portable release filename."
+Assert-Matches 'codex-app-logo\.png' $release "The packaged logo must keep the portable release filename."
+Assert-Matches 'Upload validated release metadata' $preflight "Validated release notes must cross the workflow as an artifact."
+Assert-Matches 'downloaded-artifacts/release-metadata/RELEASE_NOTES\.md' $publish "Publish must consume the notes validated during preflight."
+
+$targetGateIndex = $publish.IndexOf("scripts/check-release-target.ps1", [System.StringComparison]::Ordinal)
+$draftCreationIndex = $publish.IndexOf("Create draft and upload release assets", [System.StringComparison]::Ordinal)
+if ($targetGateIndex -lt 0 -or $draftCreationIndex -lt 0 -or $targetGateIndex -gt $draftCreationIndex) {
+    throw "Repository target validation must run before draft creation."
+}
+
+$cargoCommands = [regex]::Matches("$ci`n$release", '(?m)^.*\bcargo\s+[^\r\n]*$')
+foreach ($cargoCommand in $cargoCommands) {
+    Assert-Matches '\bcargo --locked\s+' $cargoCommand.Value "Cargo command is not lockfile-enforced: $($cargoCommand.Value.Trim())"
+}
 
 foreach ($workflow in @($ci, $release)) {
     Assert-Matches 'toolchain: 1\.96\.1' $workflow "Every Rust workflow must install toolchain 1.96.1."

@@ -69,25 +69,28 @@ try {
 
     $artifactRoot = Join-Path $temporaryRoot "downloaded"
     $outputDirectory = Join-Path $temporaryRoot "release-assets"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/codex-discord-rich-presence.exe" -Content "windows-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "linux-x64/releases/linux/codex-discord-rich-presence" -Content "linux-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "macos-x64/releases/macos/codex-discord-rich-presence-x64" -Content "macos-x64-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "macos-arm64/releases/macos/codex-discord-rich-presence-arm64" -Content "macos-arm64-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/codex-app.png" -Content "logo"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/codex-discord-rich-presence-windows-x64.exe" -Content "windows-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "linux-x64/releases/linux/codex-discord-rich-presence-linux-x64" -Content "linux-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "macos-x64/releases/macos/codex-discord-rich-presence-macos-x64" -Content "macos-x64-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "macos-arm64/releases/macos/codex-discord-rich-presence-macos-arm64" -Content "macos-arm64-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/codex-app-logo.png" -Content "logo"
 
     $complete = Invoke-AssetBuild -ArtifactRoot $artifactRoot -OutputDirectory $outputDirectory
     Assert-Equal 0 $complete.ExitCode "A complete artifact set must pass."
 
     $expectedNames = @(
-        "Codex Discord Rich Presence - Windows x64.exe"
-        "Codex Discord Rich Presence - Linux x64"
-        "Codex Discord Rich Presence - macOS x64"
-        "Codex Discord Rich Presence - macOS arm64"
-        "Codex Discord Rich Presence - Codex App Logo.png"
+        "codex-discord-rich-presence-windows-x64.exe"
+        "codex-discord-rich-presence-linux-x64"
+        "codex-discord-rich-presence-macos-x64"
+        "codex-discord-rich-presence-macos-arm64"
+        "codex-app-logo.png"
         "SHA256SUMS.txt"
     )
     $actualNames = @(Get-ChildItem -LiteralPath $outputDirectory -File | Sort-Object Name | ForEach-Object Name)
     Assert-Equal (($expectedNames | Sort-Object) -join "|") ($actualNames -join "|") "Published asset names are incomplete."
+    foreach ($name in $expectedNames | Where-Object { $_ -ne "SHA256SUMS.txt" }) {
+        Assert-True ($name -cmatch '^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+)?$') "Release asset '$name' is not portable."
+    }
 
     $manifestLines = @(Get-Content -LiteralPath (Join-Path $outputDirectory "SHA256SUMS.txt"))
     Assert-Equal 5 $manifestLines.Count "Checksum manifest must cover each published payload."

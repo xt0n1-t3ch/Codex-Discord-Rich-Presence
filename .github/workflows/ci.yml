@@ -50,17 +50,18 @@ jobs:
         shell: pwsh
         run: |
           ./tests/release_contract.tests.ps1
+          ./tests/release_target.tests.ps1
           ./tests/release_assets.tests.ps1
           ./tests/release_workflow.tests.ps1
 
       - name: Cargo fmt
-        run: cargo fmt --check
+        run: cargo --locked fmt --check
 
       - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Cargo test
-        run: cargo test --workspace --all-features --verbose
+        run: cargo --locked test --workspace --all-features --verbose
 
       - name: Cargo build release
-        run: cargo build --workspace --release --all-features
+        run: cargo --locked build --workspace --release --all-features

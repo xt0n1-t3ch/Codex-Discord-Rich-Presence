@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -51,26 +51,35 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_REF_TYPE: ${{ github.ref_type }}
-        run: ./scripts/check-release-contract.ps1 -Tag $env:RELEASE_TAG -RefType $env:RELEASE_REF_TYPE
+        run: ./scripts/check-release-contract.ps1 -Tag $env:RELEASE_TAG -RefType $env:RELEASE_REF_TYPE -ReleaseNotesPath RELEASE_NOTES.md -RepositorySlug $env:GITHUB_REPOSITORY
 
       - name: Release contract tests
         shell: pwsh
         run: |
           ./tests/release_contract.tests.ps1
+          ./tests/release_target.tests.ps1
           ./tests/release_assets.tests.ps1
           ./tests/release_workflow.tests.ps1
 
       - name: Cargo fmt
-        run: cargo fmt --check
+        run: cargo --locked fmt --check
 
       - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Cargo test
-        run: cargo test --workspace --all-features --verbose
+        run: cargo --locked test --workspace --all-features --verbose
 
       - name: Cargo build release
-        run: cargo build --workspace --release --all-features
+        run: cargo --locked build --workspace --release --all-features
+
+      - name: Upload validated release metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata
+          path: RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 1
 
   build:
     name: Build ${{ matrix.target }}
@@ -119,22 +128,19 @@ jobs:
           shared-key: codex-discord-presence-release-${{ matrix.target }}
 
       - name: Build target
-        run: cargo build --workspace --release --all-features --target ${{ matrix.target }}
+        run: cargo --locked build --workspace --release --all-features --target ${{ matrix.target }}
 
       - name: Package Unix artifact
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          binary_name=codex-discord-rich-presence
+          binary_name="codex-discord-rich-presence-${{ matrix.os_name }}-${{ matrix.arch }}"
           output_directory="releases/${{ matrix.os_name }}"
-          if [ "${{ matrix.os_name }}" = "macos" ]; then
-            binary_name="${binary_name}-${{ matrix.arch }}"
-          fi
           mkdir -p "${output_directory}"
           cp "${CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence" "${output_directory}/${binary_name}"
           chmod +x "${output_directory}/${binary_name}"
-          cp assets/branding/codex-app.png "${output_directory}/codex-app.png"
+          cp assets/branding/codex-app.png "${output_directory}/codex-app-logo.png"
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
@@ -142,8 +148,8 @@ jobs:
         run: |
           $outputDirectory = "releases/${{ matrix.os_name }}"
           New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
-          Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence.exe" "$outputDirectory/codex-discord-rich-presence.exe"
-          Copy-Item "assets/branding/codex-app.png" "$outputDirectory/codex-app.png"
+          Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence.exe" "$outputDirectory/codex-discord-rich-presence-windows-x64.exe"
+          Copy-Item "assets/branding/codex-app.png" "$outputDirectory/codex-app-logo.png"
 
       - name: Upload target artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -159,6 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      checks: read
       contents: write
     env:
       TAG_NAME: ${{ needs.preflight.outputs.tag_name }}
@@ -193,6 +200,13 @@ jobs:
           cd release-assets
           sha256sum --check SHA256SUMS.txt
 
+      - name: Validate immutable release target
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: ./scripts/check-release-target.ps1 -Repository $env:GITHUB_REPOSITORY -Tag $env:TAG_NAME -Version $env:VERSION -Sha $env:RELEASE_SHA -IsPrerelease $env:IS_PRERELEASE -MainRef origin/main
+
       - name: Refuse release mutation
         shell: bash
         env:
@@ -212,54 +226,13 @@ jobs:
             exit 1
           fi
 
-      - name: Generate release notes
-        shell: bash
-        run: |
-          set -euo pipefail
-          changelog_section="$(awk -v version="${VERSION}" '
-            $0 ~ "^## \\[" version "\\]" { capture=1; next }
-            capture && $0 ~ "^## \\[" { exit }
-            capture { print }
-          ' CHANGELOG.md)"
-          test -n "${changelog_section//[[:space:]]/}"
-
-          previous_tag="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
-          if [ -n "${previous_tag}" ]; then
-            full_changelog_url="https://github.com/${GITHUB_REPOSITORY}/compare/${previous_tag}...${TAG_NAME}"
-          else
-            full_changelog_url="https://github.com/${GITHUB_REPOSITORY}/commits/${TAG_NAME}"
-          fi
-          if [ "${IS_PRERELEASE}" = "true" ]; then
-            release_summary="Prerelease for Codex CLI, Codex VS Code Extension, Codex App, and OpenCode-hosted Codex sessions."
-          else
-            release_summary="Stable release for Codex CLI, Codex VS Code Extension, Codex App, and OpenCode-hosted Codex sessions."
-          fi
-
-          {
-            echo "# Codex Discord Rich Presence ${VERSION}"
-            echo
-            echo "${release_summary}"
-            echo
-            echo "## What Changed"
-            echo
-            echo "${changelog_section}"
-            echo
-            echo "## Integrity"
-            echo
-            echo "Verify every downloaded payload against SHA256SUMS.txt."
-            echo
-            echo "## Full Changelog"
-            echo
-            echo "${full_changelog_url}"
-          } > RELEASE_NOTES.md
-
       - name: Create draft and upload release assets
         id: draft-release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
-          body_path: RELEASE_NOTES.md
+          body_path: downloaded-artifacts/release-metadata/RELEASE_NOTES.md
           draft: true
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: false

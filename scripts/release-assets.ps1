@@ -40,17 +40,17 @@ try {
     }
 
     $sources = [ordered]@{
-        "Codex Discord Rich Presence - Windows x64.exe" = Find-RequiredArtifact -Files $files -PathSuffix "windows/codex-discord-rich-presence.exe"
-        "Codex Discord Rich Presence - Linux x64" = Find-RequiredArtifact -Files $files -PathSuffix "linux/codex-discord-rich-presence"
-        "Codex Discord Rich Presence - macOS x64" = Find-RequiredArtifact -Files $files -PathSuffix "macos/codex-discord-rich-presence-x64"
-        "Codex Discord Rich Presence - macOS arm64" = Find-RequiredArtifact -Files $files -PathSuffix "macos/codex-discord-rich-presence-arm64"
+        "codex-discord-rich-presence-windows-x64.exe" = Find-RequiredArtifact -Files $files -PathSuffix "windows/codex-discord-rich-presence-windows-x64.exe"
+        "codex-discord-rich-presence-linux-x64" = Find-RequiredArtifact -Files $files -PathSuffix "linux/codex-discord-rich-presence-linux-x64"
+        "codex-discord-rich-presence-macos-x64" = Find-RequiredArtifact -Files $files -PathSuffix "macos/codex-discord-rich-presence-macos-x64"
+        "codex-discord-rich-presence-macos-arm64" = Find-RequiredArtifact -Files $files -PathSuffix "macos/codex-discord-rich-presence-macos-arm64"
     }
 
-    $logos = @($files | Where-Object { $_.Name -eq "codex-app.png" })
+    $logos = @($files | Where-Object { $_.Name -eq "codex-app-logo.png" })
     if ($logos.Count -eq 0) {
-        throw "Expected at least one codex-app.png artifact, found none."
+        throw "Expected at least one codex-app-logo.png artifact, found none."
     }
-    $sources["Codex Discord Rich Presence - Codex App Logo.png"] = $logos[0]
+    $sources["codex-app-logo.png"] = $logos[0]
 
     $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
     if (Test-Path -LiteralPath $resolvedOutputDirectory) {

@@ -7,7 +7,13 @@ param(
 
     [string] $GithubOutputPath = $env:GITHUB_OUTPUT,
 
-    [string] $RefType = $env:GITHUB_REF_TYPE
+    [string] $RefType = $env:GITHUB_REF_TYPE,
+
+    [string] $ReleaseNotesPath,
+
+    [string] $RepositorySlug = $env:GITHUB_REPOSITORY,
+
+    [string] $PreviousTag
 )
 
 Set-StrictMode -Version Latest
@@ -24,7 +30,7 @@ function Get-CargoPackageVersion {
         throw "Cargo.toml is missing at '$manifestPath'."
     }
 
-    $metadataJson = & cargo metadata --no-deps --format-version 1 --manifest-path $manifestPath 2>&1 | Out-String
+    $metadataJson = & cargo --locked metadata --no-deps --format-version 1 --manifest-path $manifestPath 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         throw "cargo metadata failed: $($metadataJson.Trim())"
     }
@@ -42,7 +48,7 @@ function Get-CargoPackageVersion {
     return [string] $package.version
 }
 
-function Assert-ChangelogSection {
+function Get-ChangelogSection {
     param(
         [Parameter(Mandatory)]
         [string] $Root,
@@ -62,6 +68,85 @@ function Assert-ChangelogSection {
     if (-not $section.Success -or [string]::IsNullOrWhiteSpace($section.Groups["body"].Value)) {
         throw "A non-empty CHANGELOG.md section for [$Version] is required."
     }
+
+    return $section.Groups["body"].Value.Trim()
+}
+
+function Write-ReleaseNotes {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+
+        [Parameter(Mandatory)]
+        [string] $Root,
+
+        [Parameter(Mandatory)]
+        [string] $Repository,
+
+        [Parameter(Mandatory)]
+        [string] $TagName,
+
+        [Parameter(Mandatory)]
+        [string] $Version,
+
+        [Parameter(Mandatory)]
+        [string] $ChangelogSection,
+
+        [Parameter(Mandatory)]
+        [bool] $Prerelease,
+
+        [string] $PriorTag
+    )
+
+    if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        throw "Repository slug '$Repository' is invalid."
+    }
+
+    $encodedTag = [uri]::EscapeDataString($TagName)
+    if ([string]::IsNullOrWhiteSpace($PriorTag)) {
+        $fullChangelogUrl = "https://github.com/$Repository/commits/$encodedTag"
+    }
+    else {
+        $encodedPreviousTag = [uri]::EscapeDataString($PriorTag)
+        $fullChangelogUrl = "https://github.com/$Repository/compare/$encodedPreviousTag...$encodedTag"
+    }
+
+    $releaseSummary = if ($Prerelease) { "Prerelease" } else { "Stable release" }
+    $notes = @(
+        "# Codex Discord Rich Presence $Version"
+        ""
+        "$releaseSummary for Codex CLI, Codex VS Code Extension, Codex App, and OpenCode-hosted Codex sessions."
+        ""
+        "## What Changed"
+        ""
+        $ChangelogSection
+        ""
+        "## Release Assets"
+        ""
+        "- codex-discord-rich-presence-windows-x64.exe"
+        "- codex-discord-rich-presence-linux-x64"
+        "- codex-discord-rich-presence-macos-x64"
+        "- codex-discord-rich-presence-macos-arm64"
+        "- codex-app-logo.png"
+        "- SHA256SUMS.txt"
+        ""
+        "## Integrity"
+        ""
+        "Verify every downloaded payload against SHA256SUMS.txt."
+        ""
+        "## Full Changelog"
+        ""
+        $fullChangelogUrl
+        ""
+    ) -join "`n"
+
+    $resolvedPath = if ([System.IO.Path]::IsPathRooted($Path)) {
+        [System.IO.Path]::GetFullPath($Path)
+    }
+    else {
+        [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
+    }
+    [System.IO.File]::WriteAllText($resolvedPath, $notes, [System.Text.UTF8Encoding]::new($false))
 }
 
 try {
@@ -85,7 +170,7 @@ try {
         throw "Tag version '$version' does not match Cargo package version '$cargoVersion'."
     }
 
-    Assert-ChangelogSection -Root $root -Version $version
+    $changelogSection = Get-ChangelogSection -Root $root -Version $version
 
     $isPrerelease = $tagMatch.Groups["prerelease"].Success
     $metadata = [ordered]@{
@@ -94,6 +179,25 @@ try {
         release_name = "Codex Discord Rich Presence v$version"
         is_prerelease = $isPrerelease
         make_latest = -not $isPrerelease
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
+        $priorTag = if ($PSBoundParameters.ContainsKey("PreviousTag")) {
+            $PreviousTag
+        }
+        else {
+            $candidate = & git -C $root describe --tags --abbrev=0 "$Tag^" 2>$null | Out-String
+            if ($LASTEXITCODE -eq 0) { $candidate.Trim() } else { $null }
+        }
+        Write-ReleaseNotes `
+            -Path $ReleaseNotesPath `
+            -Root $root `
+            -Repository $RepositorySlug `
+            -TagName $Tag `
+            -Version $version `
+            -ChangelogSection $changelogSection `
+            -Prerelease $isPrerelease `
+            -PriorTag $priorTag
     }
 
     if (-not [string]::IsNullOrWhiteSpace($GithubOutputPath)) {
