@@ -140,6 +140,7 @@ Assert-Matches 'SHA256SUMS\.txt' $publish "Publish must prove the checksum manif
 Assert-Matches 'draft: true' $publish "Assets must be attached while the release is a draft."
 Assert-Matches 'steps\.draft-release\.outputs\.id' $publish "Draft verification and finalization must use the created release id."
 Assert-Matches 'Verify draft release assets' $publish "Draft assets must be verified before publication."
+Assert-Matches 'test "\$\{#actual_assets\[@\]\}" -eq 7' $publish "Draft verification must require all six payloads plus the checksum manifest."
 Assert-Matches '\.digest' $publish "Draft verification must compare GitHub asset digests with local SHA-256 values."
 Assert-Matches 'Finalize release once' $publish "The workflow must have one explicit finalization step."
 Assert-Matches '\{draft: false, prerelease: \$prerelease, make_latest: \$make_latest\}' $publish "Finalization must publish the verified draft exactly once."
