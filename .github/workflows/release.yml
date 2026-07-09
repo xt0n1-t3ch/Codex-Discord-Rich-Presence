@@ -6,12 +6,87 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: .build/target
+    outputs:
+      tag_name: ${{ steps.metadata.outputs.tag_name }}
+      version: ${{ steps.metadata.outputs.version }}
+      release_name: ${{ steps.metadata.outputs.release_name }}
+      is_prerelease: ${{ steps.metadata.outputs.is_prerelease }}
+      make_latest: ${{ steps.metadata.outputs.make_latest }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.96.1
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: codex-discord-presence-release-preflight
+
+      - name: Validate release metadata
+        id: metadata
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+        run: ./scripts/check-release-contract.ps1 -Tag $env:RELEASE_TAG -RefType $env:RELEASE_REF_TYPE -ReleaseNotesPath RELEASE_NOTES.md -RepositorySlug $env:GITHUB_REPOSITORY
+
+      - name: Release contract tests
+        shell: pwsh
+        run: |
+          ./tests/release_contract.tests.ps1
+          ./tests/release_approval.tests.ps1
+          ./tests/release_target.tests.ps1
+          ./tests/release_assets.tests.ps1
+          ./tests/release_workflow.tests.ps1
+
+      - name: Cargo fmt
+        run: cargo --locked fmt --check
+
+      - name: Cargo clippy
+        run: cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Cargo test
+        run: cargo --locked test --workspace --all-features --verbose
+
+      - name: Cargo build release
+        run: cargo --locked build --workspace --release --all-features
+
+      - name: Upload validated release metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata
+          path: RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build ${{ matrix.target }}
+    needs: preflight
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
       CARGO_TARGET_DIR: .build/target
@@ -37,163 +112,173 @@ jobs:
             arch: x64
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Checkout tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
+
+      - name: Setup Rust target
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.96.1
           targets: ${{ matrix.target }}
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: codex-discord-presence-release-${{ matrix.target }}
 
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build target
+        run: cargo --locked build --workspace --release --all-features --target ${{ matrix.target }}
 
-      - name: Package (Unix)
+      - name: Package Unix artifact
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          BIN_SRC=codex-discord-presence
-          BIN_OUT=codex-discord-rich-presence
-          OS_NAME="${{ matrix.os_name }}"
-          ARCH="${{ matrix.arch }}"
-          OUT_DIR="releases/${OS_NAME}"
-          if [ "${OS_NAME}" = "macos" ]; then
-            BIN_OUT="${BIN_OUT}-${ARCH}"
-          fi
-          mkdir -p "${OUT_DIR}"
-          cp "${CARGO_TARGET_DIR}/${{ matrix.target }}/release/${BIN_SRC}" "${OUT_DIR}/${BIN_OUT}"
-          chmod +x "${OUT_DIR}/${BIN_OUT}"
-          cp "assets/branding/codex-app.png" "${OUT_DIR}/codex-app.png"
+          binary_name="codex-discord-rich-presence-${{ matrix.os_name }}-${{ matrix.arch }}"
+          output_directory="releases/${{ matrix.os_name }}"
+          mkdir -p "${output_directory}"
+          cp "${CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence" "${output_directory}/${binary_name}"
+          chmod +x "${output_directory}/${binary_name}"
+          cp assets/branding/codex-app.png "${output_directory}/codex-app-logo.png"
 
-      - name: Package (Windows)
+      - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $BIN = "codex-discord-presence.exe"
-          $OS_NAME = "${{ matrix.os_name }}"
-          $OUT_DIR = "releases/$OS_NAME"
-          New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null
-          Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/$BIN" "$OUT_DIR/codex-discord-rich-presence.exe" -Force
-          Copy-Item "assets/branding/codex-app.png" "$OUT_DIR/codex-app.png" -Force
+          $outputDirectory = "releases/${{ matrix.os_name }}"
+          New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+          Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence.exe" "$outputDirectory/codex-discord-rich-presence-windows-x64.exe"
+          Copy-Item "assets/branding/codex-app.png" "$outputDirectory/codex-app-logo.png"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+      - name: Upload target artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.target }}
-          path: releases/**
+          name: release-${{ matrix.target }}
+          path: releases/${{ matrix.os_name }}/
+          if-no-files-found: error
+          retention-days: 1
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [preflight, build]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 15
+    permissions:
+      checks: read
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.preflight.outputs.tag_name }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_NAME: ${{ needs.preflight.outputs.release_name }}
+      IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
+      MAKE_LATEST: ${{ needs.preflight.outputs.make_latest }}
+      RELEASE_APPROVED_SHA: ${{ vars.RELEASE_APPROVED_SHA }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
+      - name: Download target artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: releases
+          path: downloaded-artifacts
 
-      - name: Derive release metadata
+      - name: Assemble release assets
+        shell: pwsh
+        run: ./scripts/release-assets.ps1 -ArtifactRoot downloaded-artifacts -OutputDirectory release-assets
+
+      - name: Verify checksum manifest
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          VERSION_LABEL="${VERSION}"
-          if [[ "${VERSION}" =~ ^([0-9]+\.[0-9]+)\.0$ ]]; then
-            VERSION_LABEL="${BASH_REMATCH[1]}"
-          fi
-          echo "TAG_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "VERSION_LABEL=${VERSION_LABEL}" >> "$GITHUB_ENV"
-          echo "RELEASE_NAME=Codex Discord Rich Presence v${VERSION_LABEL}" >> "$GITHUB_ENV"
-          echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
-          echo "TRACK=stable" >> "$GITHUB_ENV"
-          echo "MAKE_LATEST=true" >> "$GITHUB_ENV"
+          test -s release-assets/SHA256SUMS.txt
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 6
+          cd release-assets
+          sha256sum --check SHA256SUMS.txt
 
-      - name: Flatten artifacts
+      - name: Validate approved release target
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: ./scripts/check-release-target.ps1 -Repository $env:GITHUB_REPOSITORY -Tag $env:TAG_NAME -Version $env:VERSION -Sha $env:RELEASE_SHA -ApprovedSha $env:RELEASE_APPROVED_SHA -IsPrerelease $env:IS_PRERELEASE -MainRef origin/main
+
+      - name: Refuse release mutation
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p release-assets
-
-          WINDOWS_BIN="$(find releases -type f -path '*/windows/codex-discord-rich-presence.exe' | head -n1)"
-          LINUX_BIN="$(find releases -type f -path '*/linux/codex-discord-rich-presence' | head -n1)"
-          MACOS_X64_BIN="$(find releases -type f -path '*/macos/codex-discord-rich-presence-x64' | head -n1)"
-          MACOS_ARM64_BIN="$(find releases -type f -path '*/macos/codex-discord-rich-presence-arm64' | head -n1)"
-          APP_LOGO="$(find releases -type f -name 'codex-app.png' | head -n1)"
-
-          test -n "${WINDOWS_BIN}"
-          test -n "${LINUX_BIN}"
-          test -n "${MACOS_X64_BIN}"
-          test -n "${MACOS_ARM64_BIN}"
-          test -n "${APP_LOGO}"
-
-          cp "${WINDOWS_BIN}" "release-assets/Codex Discord Rich Presence - Windows x64.exe"
-          cp "${LINUX_BIN}" "release-assets/Codex Discord Rich Presence - Linux x64"
-          cp "${MACOS_X64_BIN}" "release-assets/Codex Discord Rich Presence - macOS x64"
-          cp "${MACOS_ARM64_BIN}" "release-assets/Codex Discord Rich Presence - macOS arm64"
-          cp "${APP_LOGO}" "release-assets/Codex Discord Rich Presence - Codex App Logo.png"
-          ls -lah release-assets
-
-      - name: Generate detailed release notes
-        shell: bash
-        run: |
-          set -euo pipefail
-          CHANGELOG_SECTION="$(awk -v version="${VERSION}" '
-            $0 ~ "^## \\[" version "\\]" { capture=1; next }
-            capture && $0 ~ "^## \\[" { exit }
-            capture { print }
-          ' CHANGELOG.md)"
-
-          if [[ -z "${CHANGELOG_SECTION//[[:space:]]/}" ]]; then
-            CHANGELOG_SECTION=$'### Summary\n\n- See commit history and repository changelog for release details.'
+          set +e
+          response="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG_NAME}" 2>&1)"
+          status=$?
+          set -e
+          if [ "${status}" -eq 0 ]; then
+            echo "Release ${TAG_NAME} already exists; refusing to mutate it." >&2
+            exit 1
+          fi
+          if [[ "${response}" != *"HTTP 404"* ]]; then
+            echo "${response}" >&2
+            exit 1
           fi
 
-          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
-          if [[ -n "${PREVIOUS_TAG}" ]]; then
-            FULL_CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${GITHUB_REF_NAME}"
-          else
-            FULL_CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}"
-          fi
-
-          {
-            echo "# Codex Discord Rich Presence ${VERSION_LABEL}"
-            echo
-            echo "Stable release for Codex CLI, Codex VS Code Extension, Codex App, and OpenCode-hosted Codex sessions."
-            echo
-            echo "## What Changed"
-            echo
-            echo "${CHANGELOG_SECTION}"
-            echo
-            echo "## Release Artifacts"
-            echo "- Codex Discord Rich Presence - Windows x64.exe"
-            echo "- Codex Discord Rich Presence - Linux x64"
-            echo "- Codex Discord Rich Presence - macOS x64"
-            echo "- Codex Discord Rich Presence - macOS arm64"
-            echo "- Codex Discord Rich Presence - Codex App Logo.png"
-            echo
-            echo "## Full Changelog"
-            echo "${FULL_CHANGELOG_URL}"
-          } > RELEASE_NOTES.md
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+      - name: Create draft and upload release assets
+        id: draft-release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
-          body_path: RELEASE_NOTES.md
+          body_path: downloaded-artifacts/release-metadata/RELEASE_NOTES.md
+          draft: true
           prerelease: ${{ env.IS_PRERELEASE }}
-          make_latest: ${{ env.MAKE_LATEST }}
+          make_latest: false
+          fail_on_unmatched_files: true
+          overwrite_files: false
           files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Verify draft release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft-release.outputs.id }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')" = "true"
+          mapfile -t actual_assets < <(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate --jq '.[].name' | sort)
+          mapfile -t expected_assets < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          test "${#actual_assets[@]}" -eq 6
+          diff <(printf '%s\n' "${expected_assets[@]}") <(printf '%s\n' "${actual_assets[@]}")
+
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | [.name, .digest] | @tsv' | sort > remote-assets.tsv
+          while IFS= read -r local_path; do
+            asset_name="$(basename "${local_path}")"
+            expected_digest="sha256:$(sha256sum "${local_path}" | cut -d' ' -f1)"
+            actual_digest="$(awk -F '\t' -v name="${asset_name}" '$1 == name { print $2 }' remote-assets.tsv)"
+            test "${actual_digest}" = "${expected_digest}"
+          done < <(find release-assets -maxdepth 1 -type f | sort)
+
+      - name: Finalize release once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft-release.outputs.id }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -n \
+            --argjson prerelease "${IS_PRERELEASE}" \
+            --arg make_latest "${MAKE_LATEST}" \
+            '{draft: false, prerelease: $prerelease, make_latest: $make_latest}')"
+          published_release="$(gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --input - <<<"${payload}")"
+          test "$(jq -r '.draft' <<<"${published_release}")" = "false"
+          test "$(jq -r '.prerelease' <<<"${published_release}")" = "${IS_PRERELEASE}"
+          test "$(jq -r '.immutable' <<<"${published_release}")" = "true"
+          jq '{id, tag_name, draft, prerelease, immutable}' <<<"${published_release}"

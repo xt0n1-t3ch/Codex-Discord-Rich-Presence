@@ -4,6 +4,7 @@
 |:---|:---|
 | [api/codex-presence.md](api/codex-presence.md) | Runtime modules, Discord payload policy, sticky surface detection, GPT-5 context metadata, Fast multipliers |
 | [database/schema.md](database/schema.md) | Local config, session snapshots, cost/cache metrics, OAuth/API context windows |
+| [releasing.md](releasing.md) | Exact-SHA operator approval, annotated tags, immutable publication, and cleanup |
 | [ui/UI_SITEMAP.md](ui/UI_SITEMAP.md) | Ratatui layout modes, widgets, theme, animation, logo fallback, footer behavior |
 | [../assets/branding/README.md](../assets/branding/README.md) | README visual assets, badge crops, section icons, and brand-use notes |
 
