@@ -11,7 +11,7 @@
 One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, and **quota visibility** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.7.1" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.2.png" alt="Release v1.7.2" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,13 +37,14 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.1</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.2</h2>
 
-- **Codex App stays Codex App** — idle no longer falls back to the generic `Codex CLI / VS Code Extension` card after a tiny activity gap. If your last real surface was Codex App, Discord keeps the Codex App identity and shows `Idling...`.
-- **Windows WSL is quiet by default** — the runtime no longer invokes `wsl.exe` unless you explicitly opt in with `CODEX_PRESENCE_INCLUDE_WSL=1` or `CC_PRESENCE_INCLUDE_WSL=1`.
-- **Pro tiers are explicit** — the terminal plan picker now separates `Pro 5x ($100/month)` from `Pro 20x ($200/month)`, while old `pro` configs migrate to Pro 20x.
-- **Minimal Ratatui dashboard** — the foreground terminal now opens with a large centered Codex wordmark and a black/white UI treatment that matches Codex/OpenAI better than the old neon panel set.
-- **Brand-true README badges** — OpenAI, Discord, Rust, Windows, macOS, and Linux badges use real logos and brand colors instead of generated pastel pills.
+- **Factual GPT-5.6 family** — Sol, Terra, and Luna labels, aliases, efforts, API rates, Codex credits, Fast capability, and 372K raw / 353.4K usable context now come from one machine-readable catalog with source metadata.
+- **Reasoning is visible** — Discord and Ratatui render the selected effort, including `5.6 Sol Max` and `5.6 Sol Max · Fast`.
+- **Exact surfaces and desktop design** — CLI, VS Code Extension, and desktop metadata are classified separately. Press `D` to persistently switch desktop Rich Presence between `Codex App` and `ChatGPT App` identities.
+- **Honest cost completeness** — totals are `exact`, `partial`, or `unavailable`; partial subtotals use `>=`, unobserved GPT-5.6 cache writes and unpublished Fast economics stay explicit, and unknown models never inherit GPT-5.1 pricing.
+- **Current App inventory** — 5.5/5.4/5.4 Mini and Spark use the current Codex 0.144.0 raw/usable windows; 5.4 Mini and Spark no longer claim unsupported Fast, stale prices, or inherited Spark pricing.
+- **Release hardening** — Rust 1.96.1, locked builds, immutable exact-SHA publication, portable artifacts, SHA-256 manifests, pinned Actions, least privilege, CodeQL, and three-platform CI gate every release.
 
 **[Download the latest release](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)** &nbsp;·&nbsp; **[Full changelog](CHANGELOG.md)**
 
@@ -62,7 +63,7 @@ No hosted service. No account sync. No transcript upload. Just a Rust daemon tha
 
 <div align="center">
 
-<img src="assets/screenshots/codex-discord-rich-presence.png" alt="Discord card showing Codex App activity with GPT-5.5 model, cost, tokens, context usage, and quota windows" width="520">
+<img src="assets/screenshots/codex-discord-rich-presence.png" alt="Discord card showing Codex App activity with model, reasoning, cost, tokens, context usage, and quota windows" width="520">
 
 <sub><b>Discord Rich Presence</b> — Codex App branding · GPT model · plan · tokens · cost · context · quota windows.</sub>
 
@@ -108,11 +109,11 @@ cargo build --release
 
 | | |
 | :--- | :--- |
-| **Sticky Codex identity** | Codex App, CLI, VS Code, and OpenCode-hosted sessions publish through Codex-only Discord apps and keep the last real surface while idle. |
+| **Exact surface identity** | `Codex CLI`, `Codex VS Code Extension`, and desktop sessions are classified from session metadata first and launcher lineage second; unrelated open apps cannot contaminate the result. |
 | **Readable activity** | Thinking, reading, editing, running, waiting, and idle states stay short enough for Discord while preserving the useful target when configured. |
-| **Model + plan line** | GPT-5.4/GPT-5.5 labels, reasoning effort, Fast markers, and `Pro 5x` / `Pro 20x` display labels resolve from shared contracts. |
+| **Model + plan line** | GPT-5.6 App labels, reasoning effort, session-scoped Fast markers, and `Pro 5x` / `Pro 20x` display labels resolve from shared contracts. |
 | **Cost + cache truth** | Input, cached input, output, cache hit ratio, cached-input savings, and total cost are computed before Discord rendering, not recomputed inside the payload formatter. |
-| **Context and quota windows** | OAuth Codex context shows the practical 400K cap; API-only GPT-5.4/GPT-5.5 long-context metadata stays visible separately. |
+| **Context and quota windows** | GPT-5.6 resolves observed JSONL first, local Codex model cache second, and bundled 353.4K usable context last, while preserving the 372K raw inventory value. |
 
 ### Terminal dashboard
 
@@ -121,8 +122,9 @@ cargo build --release
 | **Codex-first header** | Large centered wordmark, local-first subtitle, spinner, mode, Discord state, and poll cadence. |
 | **Responsive layouts** | Full, compact, and minimal views keep terminal output readable across Windows Terminal, macOS Terminal, Linux terminals, and small panes. |
 | **Plan picker** | Press `P` to choose Auto Detect, Free, Go, Plus, Pro 5x, Pro 20x, Business, or Enterprise. |
+| **Desktop design toggle** | Press `D` to switch and persist `Codex App` or `ChatGPT App`; Discord reconnects to the matching application identity. |
 | **Usage snapshot** | Cost, cache hit ratio, savings, uptime, spend trend, limits, and recent sessions share the same runtime snapshot as Discord. |
-| **No forced image protocol** | The README and Discord use the real Codex App art; the terminal uses text-first rendering so it stays portable. |
+| **No forced image protocol** | The repo owns both Codex App and ChatGPT App source art; the terminal uses text-first rendering so it stays portable. |
 
 ### Local diagnostics
 
@@ -136,9 +138,9 @@ cargo build --release
 
 | Capability | This runtime | Generic presence scripts |
 | :--- | :---: | :---: |
-| Codex App identity remains sticky while idle | ✓ | — |
-| GPT-5.4/GPT-5.5 Fast multipliers | ✓ | — |
-| 400K OAuth cap plus API long-context metadata | ✓ | — |
+| Exact CLI / VS Code / desktop identity | ✓ | — |
+| GPT-5.6 effort and session-scoped Fast display | ✓ | — |
+| 372K raw / 353.4K usable context provenance | ✓ | — |
 | Cache hit ratio and cached-input savings | ✓ | — |
 | Ratatui live dashboard | ✓ | — |
 | Local-only session reading | ✓ | varies |
@@ -148,17 +150,16 @@ cargo build --release
 
 | Runtime lane | Value | Behavior |
 |:---|---:|:---|
-| Codex / ChatGPT OAuth visible context | 400K | Default display cap because most users run Codex through OAuth. |
-| OpenAI API long-context metadata | 1,050,000 | Tracked separately for GPT-5.4/GPT-5.5 API-only long-context capability. |
-| API input threshold | 272K | Long-context threshold before reserving the 128K output budget. |
-| API max output | 128K | Displayed as metadata, not as the OAuth runtime cap. |
-| GPT-5.5 Fast multiplier | 2.5x | Applied to Fast service-tier cost display. |
-| GPT-5.4 Fast multiplier | 2x | Applied to Fast service-tier cost display. |
+| GPT-5.6 raw context | 372,000 | Inventory value from the local Codex 0.144.0 model catalog. |
+| GPT-5.6 usable context | 353,400 | Observed App value at 95%; JSONL overrides local cache, which overrides the bundled catalog. |
+| GPT-5.6 cache-write telemetry | Not emitted by Codex JSONL | Known subtotal is marked `partial`; no zero-cost write is invented. |
+| GPT-5.6 Fast economics | Not published | Fast remains visible, but cost completeness is `partial` until a multiplier is verified. |
+| Unknown models | No fallback | Cost is unavailable unless a valid user override exists. |
 
 Example Discord state line:
 
 ```text
-⚡ GPT-5.5 | Pro 20x ($200/month) · $16.58 · 16.7M tok · Ctx 79% used · 5h 53% · 7d 11%
+5.6 Sol Max · Fast | Pro 20x ($200/month) · >=$7.37 · 38.9M tok · Ctx 1% used · 5h 41% · 7d 47%
 ```
 
 <h2 id="usage"><img src="assets/readme/icons/play.png" alt="" width="28" align="center"> &nbsp;Usage</h2>
@@ -166,6 +167,8 @@ Example Discord state line:
 **First launch** → start `codex-discord-presence` → keep using Codex. The daemon scans local session roots and publishes the current activity to Discord.
 
 **Change plan display** → press `P` in the terminal → choose Auto Detect or a manual tier. `Pro 5x ($100/month)` and `Pro 20x ($200/month)` are separate options.
+
+**Change desktop design** → press `D` in the terminal → the persisted schema-10 setting alternates between `Codex App` and `ChatGPT App`.
 
 **Hide sensitive fields** → edit `~/.codex/discord-presence-config.json` and toggle privacy fields such as project, branch, activity, tokens, cost, and limits.
 
@@ -185,8 +188,7 @@ Config lives at `~/.codex/discord-presence-config.json`.
 | `CODEX_PRESENCE_POLL_SECONDS` | Override daemon poll interval. |
 | `CODEX_PRESENCE_STALE_SECONDS` | Override session stale cutoff. |
 | `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` | Override active-session stickiness window. |
-| `CODEX_DISCORD_CLIENT_ID` | Override the Codex CLI / VS Code Discord app ID. |
-| `CODEX_DISCORD_DESKTOP_CLIENT_ID` | Override the Codex App Discord app ID. |
+| `CODEX_PRESENCE_SURFACE` | Explicit fallback identity: `cli`, `vscode`, or `desktop`; active JSONL metadata remains authoritative. |
 | `CODEX_PRESENCE_INCLUDE_WSL=1` | Opt in to scanning WSL Codex session roots on Windows. Off by default. |
 | `CC_PRESENCE_INCLUDE_WSL=1` | Compatibility alias for the same WSL opt-in. |
 
@@ -196,12 +198,13 @@ Config lives at `~/.codex/discord-presence-config.json`.
 |:---|:---|
 | `src/app.rs` | Daemon loop, process and surface hints, Discord update cadence. |
 | `src/config.rs` | Runtime configuration, session roots, identity defaults, migration, and WSL opt-in policy. |
-| `src/cost.rs` | Model pricing, context metadata, Fast multipliers, and cache savings. |
+| `src/model.rs` + `src/model_catalog.json` | Model identities, labels, efforts, speed capabilities, context provenance, rates, credits, and sources. |
+| `src/cost.rs` | Cost arithmetic, completeness, overrides, reconciliation, and cache savings. |
 | `src/discord.rs` | Discord IPC payloads, asset policy, and sticky surface branding. |
 | `src/metrics.rs` | Usage, cost, cache, and context metrics. |
 | `src/session.rs` + `src/session/*` | Codex JSONL collection, parsing, activity, and context-window state. |
 | `src/ui.rs` | Ratatui terminal dashboard and layout contracts. |
-| `assets/branding/` | Codex App visual assets, README art, and badge policy. |
+| `assets/branding/` | Codex App and ChatGPT App source art, README visuals, and badge policy. |
 | `docs/` | Runtime, UI, and local schema contracts. |
 | `tests/` | Integration map and regression coverage. |
 

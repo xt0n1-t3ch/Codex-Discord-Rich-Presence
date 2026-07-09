@@ -46,6 +46,14 @@ jobs:
         with:
           shared-key: codex-discord-presence-ci
 
+      - name: Install cargo-audit
+        if: runner.os == 'Linux'
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: RustSec audit
+        if: runner.os == 'Linux'
+        run: cargo audit --deny warnings
+
       - name: Release contract tests
         shell: pwsh
         run: |

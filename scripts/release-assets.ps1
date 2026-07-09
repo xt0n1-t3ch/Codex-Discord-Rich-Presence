@@ -52,6 +52,12 @@ try {
     }
     $sources["codex-app-logo.png"] = $logos[0]
 
+    $chatgptLogos = @($files | Where-Object { $_.Name -eq "chatgpt-app-logo.jpg" })
+    if ($chatgptLogos.Count -eq 0) {
+        throw "Expected at least one chatgpt-app-logo.jpg artifact, found none."
+    }
+    $sources["chatgpt-app-logo.jpg"] = $chatgptLogos[0]
+
     $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
     if (Test-Path -LiteralPath $resolvedOutputDirectory) {
         $existingFiles = @(Get-ChildItem -LiteralPath $resolvedOutputDirectory -Force)

@@ -7,11 +7,12 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkline, Wrap};
 
 use crate::config::{PlanPreset, TerminalLogoMode, plan_presets};
-use crate::metrics::MetricsSnapshot;
-use crate::session::{CodexSessionSnapshot, RateLimits, UsageWindow};
+use crate::cost::format_presentable_cost;
+use crate::metrics::{MetricsSnapshot, format_metrics_cost};
+use crate::model::format_model_display;
+use crate::session::{CodexSessionSnapshot, RateLimits, SpeedMode, UsageWindow};
 use crate::util::{
-    format_cost, format_model_display, format_time_until, format_token_triplet, format_tokens,
-    human_duration, truncate,
+    format_cost, format_time_until, format_token_triplet, format_tokens, human_duration, truncate,
 };
 
 const FOOTER_ROWS: u16 = 1;
@@ -80,6 +81,7 @@ pub struct RenderData<'a> {
     pub spark_plan_warning: Option<&'a str>,
     pub logo_mode: TerminalLogoMode,
     pub logo_path: Option<&'a str>,
+    pub desktop_design_label: &'a str,
     pub banner_phase: u8,
     pub active: Option<&'a CodexSessionSnapshot>,
     pub effective_limits: Option<&'a RateLimits>,
@@ -133,7 +135,7 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
 
     let layout = select_layout_mode(area.width, area.height);
     if let Some(plan_picker) = data.plan_picker {
-        render_plan_picker(frame, area, plan_picker);
+        render_plan_picker(frame, area, plan_picker, data.desktop_design_label);
         return;
     }
 
@@ -179,7 +181,7 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
         }
     }
 
-    render_footer(frame, root[1], false);
+    render_footer(frame, root[1], false, data.desktop_design_label);
 }
 
 fn body_layout(layout: UiLayoutMode, area: Rect) -> std::rc::Rc<[Rect]> {
@@ -233,6 +235,8 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
         Span::styled(data.discord_status, status_style(data.discord_status)),
         Span::styled(" · ", theme::muted()),
         Span::styled(format!("{} poll", data.poll_interval_secs), theme::muted()),
+        Span::styled(" · desktop ", theme::muted()),
+        Span::styled(data.desktop_design_label, Style::default().fg(theme::TEXT)),
     ]));
 
     let block = panel("", Some(theme::BORDER));
@@ -273,13 +277,13 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
                 format_model_display(
                     session.model.as_deref().unwrap_or("unknown"),
                     session.reasoning_effort,
-                    data.fast_active,
+                    session.speed.mode == SpeedMode::Fast,
                 ),
                 Style::default().fg(theme::PINK),
             ),
             Span::styled(" · ", theme::muted()),
             Span::styled(
-                format_cost(session.total_cost_usd),
+                presentable_cost(session),
                 Style::default().fg(theme::YELLOW),
             ),
         ]));
@@ -292,7 +296,7 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
             )),
         ]));
         if let Some(context) = &session.context_window {
-            lines.push(Line::from(vec![
+            let mut context_line = vec![
                 Span::styled("context ", theme::muted()),
                 Span::raw(format_tokens(context.used_tokens)),
                 Span::styled(" / ", theme::muted()),
@@ -301,7 +305,12 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
                     format!(" ({:.0}% free)", context.remaining_percent),
                     Style::default().fg(limit_color(context.remaining_percent)),
                 ),
-            ]));
+            ];
+            if context.raw_window_tokens > 0 && context.raw_window_tokens != context.window_tokens {
+                context_line.push(Span::styled(" · raw ", theme::muted()));
+                context_line.push(Span::raw(format_tokens(context.raw_window_tokens)));
+            }
+            lines.push(Line::from(context_line));
         }
         if data.show_activity
             && let Some(activity) = &session.activity
@@ -317,7 +326,10 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
             theme::muted(),
         )));
         lines.push(Line::from(Span::styled(
-            "Idle keeps the last detected surface, so Codex App stays Codex App.",
+            format!(
+                "Idle keeps the last detected surface; desktop design is {}.",
+                data.desktop_design_label
+            ),
             Style::default().fg(theme::TEXT),
         )));
     }
@@ -351,7 +363,7 @@ fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
     );
     let warning = data
         .spark_plan_warning
-        .unwrap_or("OAuth Codex context is capped at 400K; API metadata is tracked separately.");
+        .unwrap_or("Context: observed JSONL, then local model cache, then bundled catalog.");
     let line = vec![
         Line::from(vec![
             Span::styled("plan ", theme::muted()),
@@ -414,7 +426,7 @@ fn render_metrics(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
         Line::from(vec![
             Span::styled("cost ", theme::muted()),
             Span::styled(
-                format_cost(metrics.totals.cost_usd),
+                format_metrics_cost(&metrics.totals),
                 Style::default().fg(theme::YELLOW),
             ),
             Span::styled(" · cache ", theme::muted()),
@@ -431,6 +443,12 @@ fn render_metrics(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
             ),
             Span::styled(" · uptime ", theme::muted()),
             Span::raw(human_duration(Duration::from_secs(metrics.uptime_seconds))),
+        ]),
+        Line::from(vec![
+            Span::styled("pricing ", theme::muted()),
+            Span::raw(format!("{:?}", metrics.totals.pricing_status)),
+            Span::styled(" · incomplete ", theme::muted()),
+            Span::raw(metrics.totals.incomplete_sessions.to_string()),
         ]),
     ];
     frame.render_widget(
@@ -460,7 +478,7 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
             let model = format_model_display(
                 session.model.as_deref().unwrap_or("unknown"),
                 session.reasoning_effort,
-                data.fast_active,
+                session.speed.mode == SpeedMode::Fast,
             );
             let tokens = format_tokens(
                 session
@@ -490,8 +508,13 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
     );
 }
 
-fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool) {
-    let (left, right) = footer_parts(area.width as usize, plan_picker);
+fn presentable_cost(session: &CodexSessionSnapshot) -> String {
+    format_presentable_cost(session.known_cost_usd, session.pricing_status)
+        .unwrap_or_else(|| "cost unavailable".to_string())
+}
+
+fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool, desktop_design_label: &str) {
+    let (left, right) = footer_parts(area.width as usize, plan_picker, desktop_design_label);
     let mut spans = vec![Span::styled(left, theme::muted())];
     if !right.is_empty() {
         spans.push(Span::raw(" "));
@@ -501,7 +524,12 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_plan_picker(frame: &mut Frame<'_>, area: Rect, view: PlanPickerView) {
+fn render_plan_picker(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    view: PlanPickerView,
+    desktop_design_label: &str,
+) {
     let presets = plan_presets();
     let width = area.width.min(96);
     let height = area.height.min((presets.len() as u16 + 5).max(9));
@@ -538,7 +566,7 @@ fn render_plan_picker(frame: &mut Frame<'_>, area: Rect, view: PlanPickerView) {
         width: panel_area.width,
         height: 1,
     };
-    render_footer(frame, footer, true);
+    render_footer(frame, footer, true, desktop_design_label);
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -564,7 +592,7 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     let mut signature = String::with_capacity(768);
     let _ = write!(
         signature,
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
         data.mode_label,
         data.discord_status,
         data.client_id_configured,
@@ -574,6 +602,7 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
         data.plan_status_label,
         data.fast_mode_label,
         data.fast_active,
+        data.desktop_design_label,
         data.sessions.len(),
         data.banner_phase,
         data.plan_picker
@@ -583,13 +612,14 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     if let Some(active) = data.active {
         let _ = write!(
             signature,
-            "active:{}|{}|{}|{}|{}|{}|",
+            "active:{}|{}|{}|{}|{}|{}|{}|",
             active.session_id,
             active.model.as_deref().unwrap_or(""),
             active
                 .reasoning_effort
                 .map(|value| value.label())
                 .unwrap_or(""),
+            active.speed.mode.label(),
             active.git_branch.as_deref().unwrap_or(""),
             active.session_total_tokens.unwrap_or(0),
             active.session_delta_tokens.unwrap_or(0),
@@ -600,8 +630,10 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     if let Some(metrics) = data.metrics {
         let _ = write!(
             signature,
-            "metrics:{:.6}|{}|{}|{}|{:.4}|",
+            "metrics:{:.6}|{:?}|{}|{}|{}|{}|{:.4}|",
             metrics.totals.cost_usd,
+            metrics.totals.pricing_status,
+            metrics.totals.incomplete_sessions,
             metrics.totals.input_tokens,
             metrics.totals.cached_input_tokens,
             metrics.totals.output_tokens,
@@ -701,7 +733,12 @@ fn sparkline_samples(metrics: &MetricsSnapshot) -> Vec<u64> {
     let mut values: Vec<u64> = metrics
         .by_model
         .iter()
-        .map(|model| (model.cost_usd * 10_000.0).round().max(1.0) as u64)
+        .map(|model| {
+            model
+                .known_cost_usd
+                .map(|cost| (cost * 10_000.0).round().max(1.0) as u64)
+                .unwrap_or(1)
+        })
         .collect();
     if values.is_empty() {
         values.push(1);
@@ -709,18 +746,18 @@ fn sparkline_samples(metrics: &MetricsSnapshot) -> Vec<u64> {
     values
 }
 
-fn footer_parts(width: usize, plan_picker: bool) -> (String, String) {
+fn footer_parts(width: usize, plan_picker: bool, desktop_design_label: &str) -> (String, String) {
     let left = if plan_picker {
-        "Plan selector: ↑/↓ choose · Enter apply · Esc close"
+        "Plan selector: ↑/↓ choose · Enter apply · Esc close".to_string()
     } else {
-        "Press P to change plan · Ctrl+C quit"
+        format!("Press P to change plan · D design: {desktop_design_label} · Ctrl+C quit")
     };
     let right = author_credit(width);
     if width <= 32 {
-        (truncate(left, width), String::new())
+        (truncate(&left, width), String::new())
     } else {
         let left_budget = width.saturating_sub(right.len() + 1);
-        (truncate(left, left_budget), right)
+        (truncate(&left, left_budget), right)
     }
 }
 
@@ -796,6 +833,7 @@ mod tests {
             spark_plan_warning: None,
             logo_mode: TerminalLogoMode::Auto,
             logo_path: Some("assets/branding/codex-app.png"),
+            desktop_design_label: "Codex App",
             banner_phase: 0,
             active: None,
             effective_limits: None,
@@ -892,10 +930,11 @@ mod tests {
 
     #[test]
     fn footer_parts_never_overlap() {
-        let (left, right) = footer_parts(84, false);
+        let (left, right) = footer_parts(84, false, "Codex App");
         assert!(left.len() + 1 + right.len() <= 84);
+        assert!(left.contains("D design"));
 
-        let (left_small, right_small) = footer_parts(20, false);
+        let (left_small, right_small) = footer_parts(20, false, "Codex App");
         assert_eq!(right_small, "");
         assert_eq!(left_small, "Press P to change...");
     }
@@ -950,8 +989,14 @@ mod tests {
 
     #[test]
     fn footer_parts_change_when_plan_picker_is_open() {
-        let (left, _right) = footer_parts(80, true);
+        let (left, _right) = footer_parts(80, true, "Codex App");
         assert!(left.contains("Plan selector"));
+    }
+
+    #[test]
+    fn footer_names_the_selected_desktop_design() {
+        let (left, _right) = footer_parts(120, false, "ChatGPT App");
+        assert!(left.contains("D design: ChatGPT App"));
     }
 
     #[test]

@@ -6,55 +6,96 @@ This document owns the local runtime contract exported by the daemon modules.
 
 | Module | Contract |
 |:---|:---|
-| `src/app.rs` | Runs the foreground/daemon loop, detects process surface hints, collects sessions, updates Discord |
+| `src/model.rs` | Resolves the bundled model catalog, aliases, display labels, effort/speed capabilities, context provenance, and verified rates |
 | `src/session.rs` | Produces `CodexSessionSnapshot` from Codex JSONL and local OpenCode data |
-| `src/cost.rs` | Resolves model pricing, context metadata, Fast multipliers, and token-cost breakdowns |
+| `src/cost.rs` | Applies local overrides and computes exact, partial, or unavailable token costs |
 | `src/metrics.rs` | Aggregates session snapshots into a unified cost/cache/context report |
 | `src/discord.rs` | Converts runtime state into Discord IPC activities and Codex asset identities |
 | `src/ui.rs` | Renders the Ratatui terminal view from `RenderData` |
 
-## Context Metadata
+`src/model_catalog.json` is the single machine-readable owner for bundled model facts. It includes source URLs and a verification date. Consumers must use the exported model API instead of rebuilding model names, capabilities, or rates.
 
-| Function | Value for GPT-5/Codex family |
-|:---|---:|
-| `default_model_context_window()` | `400_000` OAuth-visible context |
-| `api_model_context_window()` | `1_050_000` API-only context metadata |
-| `long_context_input_threshold()` | `272_000` input threshold |
-| `max_output_tokens()` | `128_000` max output metadata |
+## GPT-5.6 Contract
 
-The daemon deliberately keeps Codex/ChatGPT OAuth display at 400K even when API-only models support longer windows.
+| ID | Codex App label | Effective context | Ultra | Fast |
+|:---|:---|---:|:---:|:---:|
+| `gpt-5.6`, `gpt-5.6-sol` | `5.6 Sol` | `353_400` | Yes | Yes |
+| `gpt-5.6-terra` | `5.6 Terra` | `353_400` | Yes | Yes |
+| `gpt-5.6-luna` | `5.6 Luna` | `353_400` | No | Yes |
 
-## Fast Multipliers
+The raw context is `372_000`; Codex App exposes 95% as usable context. Context resolution order is observed JSONL `model_context_window`, valid local `~/.codex/models_cache.json`, then the bundled catalog. Snapshots preserve `raw_window_tokens`, usable `window_tokens`, `effective_percent`, the selected `source`, and `raw_source` separately. The local cache reader is size- and count-bounded and falls back closed on malformed or implausible data.
 
-| Function | Contract |
+No public GPT-5.6 API context, max-output, long-context surcharge threshold, cache-write credit rate, or Fast usage multiplier was verified on 2026-07-09. Those fields remain absent rather than inheriting older GPT-5 constants.
+
+## Presentation
+
+`ReasoningEffort` is owned by `model` and accepts `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`. The `low` display label is `Light`. Unsupported model/effort combinations are omitted from display.
+
+Fast is session-scoped and stored independently from the canonical model id. JSONL `thread_settings_applied.thread_settings.service_tier=priority` sets `SessionSpeed::Fast` only when that model declares Fast support. Later turn-context records without a speed signal do not overwrite it. Presentation examples:
+
+- `5.6 Sol Max`
+- `5.6 Sol Max · Fast`
+- `5.6 Terra Light`
+
+`gpt-5.6` is an alias of Sol. No `gpt-5.6-pro` model is invented; Pro remains a plan/reasoning concept outside the model family.
+
+## Surface Identity
+
+Session metadata is authoritative. `Codex Desktop` and OpenCode map to desktop, `codex_vscode` maps to `Codex VS Code Extension`, and `codex-tui` maps to `Codex CLI`. When metadata is absent, the runtime requires an extension-host process, an OpenCode marker, or the explicit `CODEX_PRESENCE_SURFACE=cli|vscode|desktop` override; generic VS Code terminal variables and unrelated open apps never change the identity.
+
+Config schema 10 stores `display.desktop_presence_design`:
+
+| Value | Desktop label | Discord client id |
+|:---|:---|:---|
+| `codex_app` | `Codex App` | `1478395304624652345` |
+| `chat_gpt_app` | `ChatGPT App` | `1470480085453770854` |
+
+CLI and VS Code always use the shared `1470480085453770854` identity. Pressing `D` in Ratatui toggles and saves the desktop value; Discord reconnects when the selected client id changes.
+
+## Pricing
+
+API rates per one million tokens, verified 2026-07-09:
+
+| Model | Input | Cache write | Cache read | Output |
+|:---|---:|---:|---:|---:|
+| Sol | `$5.00` | `$6.25` | `$0.50` | `$30.00` |
+| Terra | `$2.50` | `$3.125` | `$0.25` | `$15.00` |
+| Luna | `$1.00` | `$1.25` | `$0.10` | `$6.00` |
+
+`compute_cost()` takes `TokenUsage`, clamps cache reads to total input, and returns `PricingStatus`:
+
+| Status | Meaning |
 |:---|:---|
-| `speed_multiplier("gpt-5.5", true)` | `2.5` |
-| `speed_multiplier("gpt-5.4", true)` | `2.0` |
-| `speed_multiplier(_, false)` | `1.0` |
+| `exact` | Every published price component has observed token telemetry |
+| `partial` | The known subtotal excludes a published component absent from telemetry, currently GPT-5.6 cache writes in Codex JSONL |
+| `unavailable` | No verified pricing or valid user override exists |
 
-## Unified Cost Snapshot
+Unknown models never inherit a fallback rate. Discord and the terminal render partial subtotals with a `>=` prefix and hide unavailable costs. OpenCode can produce an exact GPT-5.6 total because its database reports cache-write tokens separately.
 
-`TokenCostBreakdown` now carries:
+Because Codex JSONL exposes cumulative session totals rather than the size of every billed prompt, a GPT-5.5 or GPT-5.4 session whose cumulative input exceeds the published 272K long-context threshold is reported as a partial lower bound. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
 
-| Field | Meaning |
-|:---|:---|
-| `input_cost_usd` | Non-cached input cost |
-| `cached_input_cost_usd` | Cached input read cost |
-| `output_cost_usd` | Output token cost |
-| `cached_input_savings_usd` | Difference between full input price and cached-input price |
+## Prompt Cache Policy
 
-`MetricsSnapshot` exposes total cache hit ratio and cached-input savings, plus per-model cache hit ratios.
+The bundled policy records a 1,024-token eligibility minimum and a 30-minute minimum lifetime. It is metadata for analysis; the daemon does not infer unobserved cache writes.
 
-## Discord Surface Policy
+## Sources
 
-`PresenceSurface::Desktop` publishes `Codex App` and `codex-app`. The detector promotes a session to Desktop when `originator` or `source` looks like Codex Desktop/OpenCode. When the runtime transitions to idle, Discord keeps the last Desktop surface instead of falling back to CLI/VS Code branding.
+| Fact | Source | Verified |
+|:---|:---|:---|
+| Family IDs and alias | <https://developers.openai.com/api/docs/guides/latest-model> | 2026-07-09 |
+| API rates | <https://openai.com/index/previewing-gpt-5-6-sol/> | 2026-07-09 |
+| Current model rates and API windows | <https://developers.openai.com/api/docs/models> | 2026-07-09 |
+| Prompt caching | <https://developers.openai.com/api/docs/guides/prompt-caching> | 2026-07-09 |
+| Codex credit rates | <https://help.openai.com/en/articles/20001106-codex-rate-card-2> | 2026-07-09 |
+| App capabilities/context | Local Codex 0.144.0 `models_cache.json` | 2026-07-09 |
 
 ## Local Files
 
 | File | Purpose |
 |:---|:---|
-| `~/.codex/discord-presence-config.json` | Runtime config |
+| `~/.codex/models_cache.json` | Current Codex App model context metadata |
+| `~/.codex/discord-presence-config.json` | Runtime config and pricing overrides |
 | `~/.codex/discord-presence-metrics.json` | Latest metrics snapshot |
 | `~/.codex/discord-presence-metrics.md` | Human-readable metrics report |
-| `~/.codex/projects/**/*.jsonl` | Codex sessions |
+| `~/.codex/sessions/**/*.jsonl` | Codex sessions |
 | `~/.local/share/opencode/opencode*.db` | OpenCode-hosted Codex sessions |

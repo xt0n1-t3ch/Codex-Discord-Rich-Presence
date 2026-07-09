@@ -15,7 +15,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 9;
+const CONFIG_SCHEMA_VERSION: u32 = 10;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -48,7 +48,7 @@ pub struct PrivacyConfig {
     pub show_activity_target: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct PricingConfig {
     pub aliases: BTreeMap<String, String>,
@@ -243,13 +243,79 @@ pub enum TerminalLogoMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenceSurface {
-    Default,
+    Cli,
+    VsCode,
     Desktop,
+}
+
+impl PresenceSurface {
+    pub fn detect(originator: Option<&str>, source: Option<&str>) -> Option<Self> {
+        originator
+            .and_then(classify_surface_signal)
+            .or_else(|| source.and_then(classify_surface_signal))
+    }
+
+    pub const fn label(self, desktop_design: DesktopPresenceDesign) -> &'static str {
+        match self {
+            Self::Cli => "Codex CLI",
+            Self::VsCode => "Codex VS Code Extension",
+            Self::Desktop => desktop_design.label(),
+        }
+    }
+}
+
+fn classify_surface_signal(value: &str) -> Option<PresenceSurface> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.contains("codex desktop")
+        || normalized.contains("openai.codex")
+        || normalized.contains("opencode")
+        || normalized == "desktop"
+    {
+        return Some(PresenceSurface::Desktop);
+    }
+    if normalized.contains("vscode") || normalized.contains("visual studio code") {
+        return Some(PresenceSurface::VsCode);
+    }
+    if normalized.contains("codex-tui")
+        || normalized.contains("codex cli")
+        || matches!(normalized.as_str(), "cli" | "terminal")
+    {
+        return Some(PresenceSurface::Cli);
+    }
+    None
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopPresenceDesign {
+    #[default]
+    CodexApp,
+    ChatGptApp,
+}
+
+impl DesktopPresenceDesign {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::CodexApp => "Codex App",
+            Self::ChatGptApp => "ChatGPT App",
+        }
+    }
+
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::CodexApp => Self::ChatGptApp,
+            Self::ChatGptApp => Self::CodexApp,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DisplayConfig {
+    pub desktop_presence_design: DesktopPresenceDesign,
     pub large_image_key: String,
     pub large_text: String,
     pub desktop_large_image_key: String,
@@ -323,6 +389,7 @@ impl Default for ModelPricingOverride {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
+            desktop_presence_design: DesktopPresenceDesign::CodexApp,
             large_image_key: "codex-logo".to_string(),
             large_text: "Codex".to_string(),
             desktop_large_image_key: "codex-app".to_string(),
@@ -332,24 +399,6 @@ impl Default for DisplayConfig {
             activity_small_image_keys: ActivitySmallImageKeys::default(),
             terminal_logo_mode: TerminalLogoMode::Auto,
             terminal_logo_path: None,
-        }
-    }
-}
-
-impl Default for PricingConfig {
-    fn default() -> Self {
-        let mut aliases = BTreeMap::new();
-        aliases.insert(
-            "gpt-5.3-codex-spark".to_string(),
-            "gpt-5.3-codex".to_string(),
-        );
-        aliases.insert(
-            "gpt-5.3-codex-spark-latest".to_string(),
-            "gpt-5.3-codex".to_string(),
-        );
-        Self {
-            aliases,
-            overrides: BTreeMap::new(),
         }
     }
 }
@@ -387,11 +436,11 @@ impl PresenceConfig {
     }
 
     pub fn effective_client_id(&self) -> Option<String> {
-        self.effective_client_id_for_surface(PresenceSurface::Default)
+        self.effective_client_id_for_surface(PresenceSurface::Cli)
     }
 
     pub fn effective_client_id_for_surface(&self, surface: PresenceSurface) -> Option<String> {
-        Some(codex_client_id_for_surface(surface).to_string())
+        Some(codex_client_id_for_surface(surface, self.display.desktop_presence_design).to_string())
     }
 
     pub fn normalize_for_runtime(&mut self) -> bool {
@@ -476,10 +525,18 @@ impl PresenceConfig {
     }
 }
 
-fn codex_client_id_for_surface(surface: PresenceSurface) -> &'static str {
-    match surface {
-        PresenceSurface::Default => DEFAULT_DISCORD_CLIENT_ID,
-        PresenceSurface::Desktop => DEFAULT_DISCORD_DESKTOP_CLIENT_ID,
+fn codex_client_id_for_surface(
+    surface: PresenceSurface,
+    desktop_design: DesktopPresenceDesign,
+) -> &'static str {
+    match (surface, desktop_design) {
+        (PresenceSurface::Desktop, DesktopPresenceDesign::CodexApp) => {
+            DEFAULT_DISCORD_DESKTOP_CLIENT_ID
+        }
+        (PresenceSurface::Cli | PresenceSurface::VsCode, _)
+        | (PresenceSurface::Desktop, DesktopPresenceDesign::ChatGptApp) => {
+            DEFAULT_DISCORD_CLIENT_ID
+        }
     }
 }
 
@@ -653,7 +710,7 @@ fn normalize_pricing_config(pricing: &mut PricingConfig) -> bool {
     let mut normalized_aliases: BTreeMap<String, String> = BTreeMap::new();
     for (raw_key, raw_target) in pricing.aliases.iter() {
         let key = raw_key.trim().to_ascii_lowercase();
-        let mut target = raw_target.trim().to_ascii_lowercase();
+        let target = raw_target.trim().to_ascii_lowercase();
         if matches!(key.as_str(), "gpt-5.3-codex" | "gpt-5.3-codex-latest")
             && target == "gpt-5.2-codex"
         {
@@ -663,10 +720,10 @@ fn normalize_pricing_config(pricing: &mut PricingConfig) -> bool {
         if matches!(
             key.as_str(),
             "gpt-5.3-codex-spark" | "gpt-5.3-codex-spark-latest"
-        ) && target == "gpt-5.2-codex"
+        ) && matches!(target.as_str(), "gpt-5.2-codex" | "gpt-5.3-codex")
         {
-            target = "gpt-5.3-codex".to_string();
             changed = true;
+            continue;
         }
         if key.is_empty() || target.is_empty() || key == target {
             if !raw_key.trim().is_empty() || !raw_target.trim().is_empty() {
@@ -940,7 +997,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 9);
+        assert_eq!(cfg.schema_version, 10);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
             Some(DEFAULT_DISCORD_CLIENT_ID)
@@ -963,35 +1020,77 @@ mod tests {
         let cfg = PresenceConfig::default();
         assert_eq!(cfg.display.terminal_logo_mode, TerminalLogoMode::Auto);
         assert_eq!(cfg.display.terminal_logo_path, None);
+        assert_eq!(
+            cfg.display.desktop_presence_design,
+            DesktopPresenceDesign::CodexApp
+        );
         assert_eq!(cfg.display.desktop_large_image_key, "codex-app");
         assert_eq!(cfg.display.desktop_large_text, "Codex App");
     }
 
     #[test]
+    fn desktop_presence_design_toggles_between_codex_and_chatgpt() {
+        let mut design = DesktopPresenceDesign::CodexApp;
+        assert_eq!(design.label(), "Codex App");
+        design = design.toggled();
+        assert_eq!(design, DesktopPresenceDesign::ChatGptApp);
+        assert_eq!(design.label(), "ChatGPT App");
+        assert_eq!(design.toggled(), DesktopPresenceDesign::CodexApp);
+    }
+
+    #[test]
+    fn desktop_presence_design_survives_json_and_schema_migration() {
+        let mut cfg = PresenceConfig {
+            schema_version: 9,
+            ..PresenceConfig::default()
+        };
+        cfg.display.desktop_presence_design = DesktopPresenceDesign::ChatGptApp;
+
+        let json = serde_json::to_string(&cfg).expect("serialize config");
+        let mut restored: PresenceConfig = serde_json::from_str(&json).expect("deserialize config");
+        assert!(restored.normalize_and_migrate());
+        assert_eq!(restored.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(
+            restored.display.desktop_presence_design,
+            DesktopPresenceDesign::ChatGptApp
+        );
+    }
+
+    #[test]
     fn desktop_surface_client_id_uses_codex_app_default() {
-        let cfg = PresenceConfig {
+        let mut cfg = PresenceConfig {
             discord_client_id: Some("default-id".to_string()),
             discord_client_id_desktop: Some("desktop-id".to_string()),
             ..PresenceConfig::default()
         };
         assert_eq!(
+            cfg.effective_client_id_for_surface(PresenceSurface::Cli)
+                .as_deref(),
+            Some(DEFAULT_DISCORD_CLIENT_ID)
+        );
+        assert_eq!(
+            cfg.effective_client_id_for_surface(PresenceSurface::VsCode)
+                .as_deref(),
+            Some(DEFAULT_DISCORD_CLIENT_ID)
+        );
+        assert_eq!(
             cfg.effective_client_id_for_surface(PresenceSurface::Desktop)
                 .as_deref(),
             Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID)
         );
+
+        cfg.display.desktop_presence_design = DesktopPresenceDesign::ChatGptApp;
+        assert_eq!(
+            cfg.effective_client_id_for_surface(PresenceSurface::Desktop)
+                .as_deref(),
+            Some(DEFAULT_DISCORD_CLIENT_ID)
+        );
     }
 
     #[test]
-    fn pricing_defaults_include_gpt_5_3_spark_aliases() {
+    fn pricing_defaults_leave_builtin_aliases_to_model_catalog() {
         let cfg = PresenceConfig::default();
-        assert_eq!(
-            cfg.pricing
-                .aliases
-                .get("gpt-5.3-codex-spark")
-                .map(String::as_str),
-            Some("gpt-5.3-codex")
-        );
-        assert!(!cfg.pricing.aliases.contains_key("gpt-5.3-codex"));
+        assert!(cfg.pricing.aliases.is_empty());
     }
 
     #[test]
@@ -1018,13 +1117,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
         assert!(changed);
         assert!(!cfg.pricing.aliases.contains_key("gpt-5.3-codex"));
-        assert_eq!(
-            cfg.pricing
-                .aliases
-                .get("gpt-5.3-codex-spark")
-                .map(String::as_str),
-            Some("gpt-5.3-codex")
-        );
+        assert!(!cfg.pricing.aliases.contains_key("gpt-5.3-codex-spark"));
         assert!(cfg.pricing.overrides.contains_key("gpt-5.2-codex"));
     }
 

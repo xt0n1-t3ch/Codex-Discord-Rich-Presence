@@ -1,66 +1,22 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ModelPricingOverride, PricingConfig};
+use crate::model::{
+    CatalogRates, ModelResolutionSource, SessionSpeed, SpeedMode, SpeedSource,
+    resolve_context_window, resolve_model,
+};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub use crate::model::normalize_model_key;
+
+const MAX_RATE_PER_MILLION: f64 = 1_000_000_000.0;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 pub struct ModelPricing {
     pub input_per_million: f64,
+    pub cache_write_per_million: Option<f64>,
     pub cached_input_per_million: f64,
     pub output_per_million: f64,
 }
-
-pub const CODEX_OAUTH_CONTEXT_WINDOW: u64 = 400_000;
-pub const GPT_5_API_CONTEXT_WINDOW: u64 = 1_050_000;
-pub const GPT_5_LONG_CONTEXT_INPUT_THRESHOLD: u64 = 272_000;
-pub const GPT_5_MAX_OUTPUT_TOKENS: u64 = 128_000;
-
-const GPT_5_5: ModelPricing = ModelPricing {
-    input_per_million: 5.0,
-    cached_input_per_million: 0.5,
-    output_per_million: 30.0,
-};
-
-const GPT_5_5_PRO: ModelPricing = ModelPricing {
-    input_per_million: 30.0,
-    cached_input_per_million: 3.0,
-    output_per_million: 180.0,
-};
-
-const GPT_5_4: ModelPricing = ModelPricing {
-    input_per_million: 2.5,
-    cached_input_per_million: 0.25,
-    output_per_million: 15.0,
-};
-
-const GPT_5_2_FAMILY: ModelPricing = ModelPricing {
-    input_per_million: 1.75,
-    cached_input_per_million: 0.175,
-    output_per_million: 14.0,
-};
-
-const GPT_5_1_FAMILY: ModelPricing = ModelPricing {
-    input_per_million: 1.25,
-    cached_input_per_million: 0.125,
-    output_per_million: 10.0,
-};
-
-const GPT_5_MINI_FAMILY: ModelPricing = ModelPricing {
-    input_per_million: 0.25,
-    cached_input_per_million: 0.025,
-    output_per_million: 2.0,
-};
-
-const GPT_5_NANO: ModelPricing = ModelPricing {
-    input_per_million: 0.05,
-    cached_input_per_million: 0.005,
-    output_per_million: 0.4,
-};
-
-const CODEX_MINI_LATEST: ModelPricing = ModelPricing {
-    input_per_million: 1.5,
-    cached_input_per_million: 0.375,
-    output_per_million: 6.0,
-};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -68,26 +24,112 @@ pub enum PricingSource {
     Exact,
     Alias,
     Override,
+    ProviderReported,
+    Unavailable,
+    // Legacy wire values retained for backwards-compatible deserialization.
+    Partial,
     #[default]
     Fallback,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PricingStatus {
+    Exact,
+    Partial,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CostAttribution {
+    #[default]
+    SingleModel,
+    MixedModels,
+    MixedSpeeds,
+    MixedModelsAndSpeeds,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub cache_write_tokens: Option<u64>,
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TokenCostBreakdown {
     pub input_cost_usd: f64,
+    #[serde(default)]
+    pub cache_write_cost_usd: f64,
     pub cached_input_cost_usd: f64,
     pub output_cost_usd: f64,
     #[serde(default)]
     pub cached_input_savings_usd: f64,
 }
 
+impl TokenCostBreakdown {
+    pub fn known_component_total(&self) -> Option<f64> {
+        let components = [
+            self.input_cost_usd,
+            self.cache_write_cost_usd,
+            self.cached_input_cost_usd,
+            self.output_cost_usd,
+        ];
+        if components
+            .iter()
+            .any(|component| !component.is_finite() || *component < 0.0)
+        {
+            return None;
+        }
+        let total = components.into_iter().sum::<f64>();
+        total.is_finite().then_some(total)
+    }
+
+    pub fn reconciles_with(&self, known_total_cost_usd: Option<f64>) -> bool {
+        let Some(known) = known_total_cost_usd.filter(|value| value.is_finite() && *value >= 0.0)
+        else {
+            return false;
+        };
+        let Some(components) = self.known_component_total() else {
+            return false;
+        };
+        let tolerance = known
+            .abs()
+            .max(components.abs())
+            .mul_add(0.000_001, 0.000_000_001);
+        (known - components).abs() <= tolerance
+    }
+
+    fn apply_multiplier(&mut self, multiplier: f64) {
+        self.input_cost_usd *= multiplier;
+        self.cache_write_cost_usd *= multiplier;
+        self.cached_input_cost_usd *= multiplier;
+        self.output_cost_usd *= multiplier;
+        self.cached_input_savings_usd *= multiplier;
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostComputation {
-    pub pricing: ModelPricing,
+    pub pricing: Option<ModelPricing>,
     pub source: PricingSource,
-    pub resolved_model: String,
+    pub status: PricingStatus,
+    pub resolved_model: Option<String>,
     pub breakdown: TokenCostBreakdown,
+    pub known_total_cost_usd: Option<f64>,
+    /// Backward-compatible known subtotal. Consult `status` before presenting it as exact.
     pub total_cost_usd: f64,
+}
+
+impl CostComputation {
+    pub fn mark_partial(&mut self) {
+        if self.status != PricingStatus::Unavailable {
+            self.status = PricingStatus::Partial;
+        }
+    }
 }
 
 pub fn compute_total_cost(
@@ -97,40 +139,115 @@ pub fn compute_total_cost(
     output_tokens_total: u64,
     pricing_config: &PricingConfig,
 ) -> CostComputation {
+    compute_cost(
+        model_id,
+        TokenUsage {
+            input_tokens: input_tokens_total,
+            cached_input_tokens: cached_input_tokens_total,
+            cache_write_tokens: None,
+            output_tokens: output_tokens_total,
+        },
+        SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::LegacyDefault),
+        pricing_config,
+    )
+}
+
+pub fn compute_cost(
+    model_id: &str,
+    usage: TokenUsage,
+    speed: SessionSpeed,
+    pricing_config: &PricingConfig,
+) -> CostComputation {
     let resolved = resolve_model_pricing(model_id, pricing_config);
-    let non_cached_input_tokens = input_tokens_total.saturating_sub(cached_input_tokens_total);
-
-    let input_cost_usd =
-        (non_cached_input_tokens as f64 / 1_000_000.0) * resolved.pricing.input_per_million;
-    let cached_input_cost_usd = (cached_input_tokens_total as f64 / 1_000_000.0)
-        * resolved.pricing.cached_input_per_million;
-    let output_cost_usd =
-        (output_tokens_total as f64 / 1_000_000.0) * resolved.pricing.output_per_million;
-    let cached_input_standard_cost_usd =
-        (cached_input_tokens_total as f64 / 1_000_000.0) * resolved.pricing.input_per_million;
-    let cached_input_savings_usd =
-        (cached_input_standard_cost_usd - cached_input_cost_usd).max(0.0);
-
-    let breakdown = TokenCostBreakdown {
-        input_cost_usd,
-        cached_input_cost_usd,
-        output_cost_usd,
-        cached_input_savings_usd,
+    let Some(pricing) = resolved.pricing else {
+        return unavailable_computation();
     };
-    let total_cost_usd = input_cost_usd + cached_input_cost_usd + output_cost_usd;
+
+    let cached_input_tokens = usage.cached_input_tokens.min(usage.input_tokens);
+    let non_cached_input_tokens = usage.input_tokens.saturating_sub(cached_input_tokens);
+    let mut breakdown = TokenCostBreakdown {
+        input_cost_usd: per_million(non_cached_input_tokens, pricing.input_per_million),
+        cache_write_cost_usd: match (usage.cache_write_tokens, pricing.cache_write_per_million) {
+            (Some(tokens), Some(rate)) => per_million(tokens, rate),
+            _ => 0.0,
+        },
+        cached_input_cost_usd: per_million(cached_input_tokens, pricing.cached_input_per_million),
+        output_cost_usd: per_million(usage.output_tokens, pricing.output_per_million),
+        cached_input_savings_usd: (per_million(cached_input_tokens, pricing.input_per_million)
+            - per_million(cached_input_tokens, pricing.cached_input_per_million))
+        .max(0.0),
+    };
+
+    let model = resolve_model(&resolved.resolved_model);
+    let supports_fast = model.is_some_and(|model| model.supports_fast());
+    let published_fast_multiplier = model.and_then(|model| model.fast_usage_multiplier());
+    let (economic_multiplier, speed_complete) = match speed.mode {
+        SpeedMode::Fast => match published_fast_multiplier {
+            Some(multiplier) => (multiplier, true),
+            None => (1.0, false),
+        },
+        SpeedMode::Standard if !speed.known && supports_fast => (1.0, false),
+        SpeedMode::Standard => (1.0, true),
+    };
+    breakdown.apply_multiplier(economic_multiplier);
+
+    let cache_complete =
+        pricing.cache_write_per_million.is_none() || usage.cache_write_tokens.is_some();
+    // Session telemetry is cumulative and cannot prove whether any one prompt crossed the
+    // model's long-context threshold. Preserve the published base-rate subtotal as a lower
+    // bound instead of presenting it as exact once cumulative input exceeds that boundary.
+    let long_context_complete = model
+        .and_then(|model| model.context())
+        .and_then(|context| context.long_context_input_threshold)
+        .is_none_or(|threshold| usage.input_tokens <= threshold);
+    let Some(known_total) = breakdown.known_component_total() else {
+        return unavailable_computation();
+    };
+    let status = if cache_complete && speed_complete && long_context_complete {
+        PricingStatus::Exact
+    } else {
+        PricingStatus::Partial
+    };
 
     CostComputation {
-        pricing: resolved.pricing,
+        pricing: Some(pricing),
         source: resolved.source,
-        resolved_model: resolved.resolved_model,
+        status,
+        resolved_model: Some(resolved.resolved_model),
         breakdown,
-        total_cost_usd,
+        known_total_cost_usd: Some(known_total),
+        total_cost_usd: known_total,
+    }
+}
+
+fn unavailable_computation() -> CostComputation {
+    CostComputation {
+        pricing: None,
+        source: PricingSource::Unavailable,
+        status: PricingStatus::Unavailable,
+        resolved_model: None,
+        breakdown: TokenCostBreakdown::default(),
+        known_total_cost_usd: None,
+        total_cost_usd: 0.0,
+    }
+}
+
+pub fn format_presentable_cost(
+    known_total_cost_usd: Option<f64>,
+    status: PricingStatus,
+) -> Option<String> {
+    let total = known_total_cost_usd.filter(|value| value.is_finite() && *value >= 0.0)?;
+    let formatted = crate::util::format_cost(total);
+    match status {
+        PricingStatus::Exact => Some(formatted),
+        PricingStatus::Partial => Some(format!(">={formatted}")),
+        PricingStatus::Unavailable => None,
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct PricingResolution {
-    pub pricing: ModelPricing,
+    pub pricing: Option<ModelPricing>,
     pub source: PricingSource,
     pub resolved_model: String,
 }
@@ -140,7 +257,7 @@ pub fn resolve_model_pricing(model_id: &str, pricing_config: &PricingConfig) -> 
 
     if let Some(override_pricing) = lookup_override(&key, &pricing_config.overrides) {
         return PricingResolution {
-            pricing: override_pricing,
+            pricing: Some(override_pricing),
             source: PricingSource::Override,
             resolved_model: key,
         };
@@ -149,46 +266,43 @@ pub fn resolve_model_pricing(model_id: &str, pricing_config: &PricingConfig) -> 
     if let Some(alias_target) = pricing_config
         .aliases
         .get(&key)
-        .map(|v| normalize_model_key(v))
+        .map(|value| normalize_model_key(value))
     {
         if let Some(override_pricing) = lookup_override(&alias_target, &pricing_config.overrides) {
             return PricingResolution {
-                pricing: override_pricing,
+                pricing: Some(override_pricing),
                 source: PricingSource::Override,
                 resolved_model: alias_target,
             };
         }
-        if let Some(pricing) = default_model_pricing(&alias_target) {
+        if let Some(model) = resolve_model(&alias_target)
+            && let Some(rates) = model.api_rates()
+        {
             return PricingResolution {
-                pricing,
+                pricing: Some(rates.into()),
                 source: PricingSource::Alias,
-                resolved_model: alias_target,
+                resolved_model: model.canonical_id().to_string(),
             };
         }
     }
 
-    if let Some(pricing) = default_model_pricing(&key) {
-        return PricingResolution {
-            pricing,
-            source: PricingSource::Exact,
-            resolved_model: key,
-        };
-    }
-
-    if let Some(alias_target) = default_alias_target(&key)
-        && let Some(pricing) = default_model_pricing(alias_target)
+    if let Some(model) = resolve_model(&key)
+        && let Some(rates) = model.api_rates()
     {
         return PricingResolution {
-            pricing,
-            source: PricingSource::Alias,
-            resolved_model: alias_target.to_string(),
+            pricing: Some(rates.into()),
+            source: match model.source() {
+                ModelResolutionSource::Exact => PricingSource::Exact,
+                ModelResolutionSource::Alias => PricingSource::Alias,
+            },
+            resolved_model: model.canonical_id().to_string(),
         };
     }
 
     PricingResolution {
-        pricing: fallback_pricing(),
-        source: PricingSource::Fallback,
-        resolved_model: "gpt-5-codex".to_string(),
+        pricing: None,
+        source: PricingSource::Unavailable,
+        resolved_model: key,
     }
 }
 
@@ -197,345 +311,164 @@ fn lookup_override(
     overrides: &std::collections::BTreeMap<String, ModelPricingOverride>,
 ) -> Option<ModelPricing> {
     let entry = overrides.get(model_key)?;
-    if !entry.input_per_million.is_finite() || entry.input_per_million < 0.0 {
+    if !valid_rate(entry.input_per_million) || !valid_rate(entry.output_per_million) {
         return None;
     }
-    if !entry.output_per_million.is_finite() || entry.output_per_million < 0.0 {
-        return None;
-    }
-
-    let cached_input_per_million = entry.cached_input_per_million.unwrap_or(0.0).max(0.0);
-
+    let cached_input_per_million = entry
+        .cached_input_per_million
+        .filter(|value| valid_rate(*value))
+        .unwrap_or(0.0);
     Some(ModelPricing {
         input_per_million: entry.input_per_million,
+        cache_write_per_million: None,
         cached_input_per_million,
         output_per_million: entry.output_per_million,
     })
 }
 
-pub fn normalize_model_key(model: &str) -> String {
-    let key = model.trim().to_ascii_lowercase();
-    if let Some(base) = key.strip_suffix("-fast")
-        && base.starts_with("gpt-")
-    {
-        return base.to_string();
+fn valid_rate(rate: f64) -> bool {
+    rate.is_finite() && (0.0..=MAX_RATE_PER_MILLION).contains(&rate)
+}
+
+fn per_million(tokens: u64, rate: f64) -> f64 {
+    (tokens as f64 / 1_000_000.0) * rate
+}
+
+impl From<CatalogRates> for ModelPricing {
+    fn from(value: CatalogRates) -> Self {
+        Self {
+            input_per_million: value.input_per_million,
+            cache_write_per_million: value.cache_write_per_million,
+            cached_input_per_million: value.cached_input_per_million,
+            output_per_million: value.output_per_million,
+        }
     }
-    key
 }
 
 pub fn default_model_context_window(model_id: &str) -> Option<u64> {
-    model_context_metadata(model_id).map(|metadata| metadata.oauth_context_window)
+    resolve_context_window(model_id, None).map(|context| context.effective_tokens)
 }
 
 pub fn api_model_context_window(model_id: &str) -> Option<u64> {
-    model_context_metadata(model_id).map(|metadata| metadata.api_context_window)
+    resolve_model(model_id)?.context()?.api_tokens
 }
 
 pub fn long_context_input_threshold(model_id: &str) -> Option<u64> {
-    model_context_metadata(model_id).map(|metadata| metadata.long_context_input_threshold)
+    resolve_model(model_id)?
+        .context()?
+        .long_context_input_threshold
 }
 
 pub fn max_output_tokens(model_id: &str) -> Option<u64> {
-    model_context_metadata(model_id).map(|metadata| metadata.max_output_tokens)
+    resolve_model(model_id)?.context()?.max_output_tokens
 }
 
 pub fn speed_multiplier(model_id: &str, fast_active: bool) -> f64 {
     if !fast_active {
         return 1.0;
     }
-
-    let key = normalize_model_key(model_id);
-    if key.starts_with("gpt-5.5") {
-        2.5
-    } else if key.starts_with("gpt-5.4") {
-        2.0
-    } else {
-        1.0
-    }
+    resolve_model(model_id)
+        .and_then(|model| model.fast_usage_multiplier())
+        .unwrap_or(1.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelContextMetadata {
     pub oauth_context_window: u64,
-    pub api_context_window: u64,
-    pub long_context_input_threshold: u64,
-    pub max_output_tokens: u64,
+    pub raw_context_window: u64,
+    pub effective_context_percent: u8,
+    pub api_context_window: Option<u64>,
+    pub long_context_input_threshold: Option<u64>,
+    pub max_output_tokens: Option<u64>,
 }
 
 pub fn model_context_metadata(model_id: &str) -> Option<ModelContextMetadata> {
-    let key = normalize_model_key(model_id);
-    if key.starts_with("gpt-5") || key.starts_with("codex") {
-        Some(ModelContextMetadata {
-            oauth_context_window: CODEX_OAUTH_CONTEXT_WINDOW,
-            api_context_window: GPT_5_API_CONTEXT_WINDOW,
-            long_context_input_threshold: GPT_5_LONG_CONTEXT_INPUT_THRESHOLD,
-            max_output_tokens: GPT_5_MAX_OUTPUT_TOKENS,
-        })
-    } else {
-        None
-    }
-}
-
-fn fallback_pricing() -> ModelPricing {
-    GPT_5_1_FAMILY
-}
-
-fn default_alias_target(model: &str) -> Option<&'static str> {
-    match model {
-        "gpt-5.3-codex-spark" | "gpt-5.3-codex-spark-latest" => Some("gpt-5.3-codex"),
-        _ => None,
-    }
-}
-
-fn default_model_pricing(model: &str) -> Option<ModelPricing> {
-    // - https://openai.com/api/pricing/
-    // - https://openai.com/index/introducing-gpt-5-5/
-    // - https://developers.openai.com/api/docs/models/gpt-5.5/
-    // - https://developers.openai.com/api/docs/models/gpt-5.4/
-    // - https://developers.openai.com/api/docs/models/gpt-5.3-codex/
-    // GPT-5.5 and GPT-5.4 apply a 2x input / 1.5x output surcharge for prompts
-    let pricing = match model {
-        "gpt-5.5" => GPT_5_5,
-        "gpt-5.5-pro" => GPT_5_5_PRO,
-        "gpt-5.4" | "gpt-5.4-2026-03-05" => GPT_5_4,
-        "gpt-5.4-mini" => GPT_5_MINI_FAMILY,
-        "gpt-5.3-codex" | "gpt-5.3-codex-latest" => GPT_5_2_FAMILY,
-        "gpt-5.2" | "gpt-5.2-chat-latest" | "gpt-5.2-codex" => GPT_5_2_FAMILY,
-        "gpt-5.1"
-        | "gpt-5.1-chat-latest"
-        | "gpt-5.1-codex"
-        | "gpt-5.1-codex-max"
-        | "gpt-5"
-        | "gpt-5-chat-latest"
-        | "gpt-5-codex" => GPT_5_1_FAMILY,
-        "gpt-5-mini" | "gpt-5.1-codex-mini" => GPT_5_MINI_FAMILY,
-        "gpt-5-nano" => GPT_5_NANO,
-        "codex-mini-latest" => CODEX_MINI_LATEST,
-        _ => return None,
-    };
-
-    Some(pricing)
+    let model = resolve_model(model_id)?;
+    let context = model.context()?;
+    let effective_context = context
+        .raw_tokens
+        .saturating_mul(u64::from(context.effective_percent))
+        / 100;
+    Some(ModelContextMetadata {
+        oauth_context_window: effective_context,
+        raw_context_window: context.raw_tokens,
+        effective_context_percent: context.effective_percent,
+        api_context_window: context.api_tokens,
+        long_context_input_threshold: context.long_context_input_threshold,
+        max_output_tokens: context.max_output_tokens,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::PricingConfig;
 
     #[test]
-    fn resolves_exact_pricing_from_catalog() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.2-codex", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert!((resolved.pricing.input_per_million - 1.75).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 14.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn aliases_gpt_5_3_codex_to_gpt_5_2_codex() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.3-codex", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert_eq!(resolved.resolved_model, "gpt-5.3-codex");
-        assert!((resolved.pricing.input_per_million - 1.75).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 14.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn aliases_gpt_5_3_codex_spark_to_gpt_5_3_codex() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.3-codex-spark", &config);
-        assert_eq!(resolved.source, PricingSource::Alias);
-        assert_eq!(resolved.resolved_model, "gpt-5.3-codex");
-        assert!((resolved.pricing.input_per_million - 1.75).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 14.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn resolves_exact_pricing_for_gpt_5_4() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.4", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert_eq!(resolved.resolved_model, "gpt-5.4");
-        assert!((resolved.pricing.input_per_million - 2.5).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 15.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn resolves_exact_pricing_for_gpt_5_4_snapshot() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.4-2026-03-05", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert_eq!(resolved.resolved_model, "gpt-5.4-2026-03-05");
-        assert!((resolved.pricing.input_per_million - 2.5).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 15.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn resolves_exact_pricing_for_gpt_5_4_mini() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.4-mini", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert_eq!(resolved.resolved_model, "gpt-5.4-mini");
-        assert!((resolved.pricing.input_per_million - 0.25).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.025).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 2.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn resolves_exact_pricing_for_gpt_5_5() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.5", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert_eq!(resolved.resolved_model, "gpt-5.5");
-        assert!((resolved.pricing.input_per_million - 5.0).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.5).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 30.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn resolves_exact_pricing_for_gpt_5_5_pro() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("gpt-5.5-pro", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert_eq!(resolved.resolved_model, "gpt-5.5-pro");
-        assert!((resolved.pricing.input_per_million - 30.0).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 3.0).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 180.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn resolves_pricing_for_gpt_5_5_after_case_and_trim_normalization() {
-        let config = PricingConfig::default();
-        let resolved = resolve_model_pricing("  GPT-5.5  ", &config);
-        assert_eq!(resolved.source, PricingSource::Exact);
-        assert_eq!(resolved.resolved_model, "gpt-5.5");
-        assert!((resolved.pricing.input_per_million - 5.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn override_takes_precedence_over_defaults() {
-        let mut config = PricingConfig::default();
-        config.overrides.insert(
-            "gpt-5.3-codex".to_string(),
-            ModelPricingOverride {
-                input_per_million: 3.0,
-                cached_input_per_million: Some(0.3),
-                output_per_million: 30.0,
-            },
+    fn legacy_known_model_cost_remains_exact() {
+        let computed = compute_total_cost(
+            "gpt-5.2-codex",
+            1_500_000,
+            500_000,
+            250_000,
+            &PricingConfig::default(),
         );
-
-        let resolved = resolve_model_pricing("gpt-5.3-codex", &config);
-        assert_eq!(resolved.source, PricingSource::Override);
-        assert!((resolved.pricing.input_per_million - 3.0).abs() < 0.0001);
-        assert!((resolved.pricing.cached_input_per_million - 0.3).abs() < 0.0001);
-        assert!((resolved.pricing.output_per_million - 30.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn computes_cost_with_cached_input_split() {
-        let config = PricingConfig::default();
-        let computed = compute_total_cost("gpt-5.2-codex", 1_500_000, 500_000, 250_000, &config);
-
-        let expected_input = (1_000_000.0 / 1_000_000.0) * 1.75;
-        let expected_cached = (500_000.0 / 1_000_000.0) * 0.175;
-        let expected_output = (250_000.0 / 1_000_000.0) * 14.0;
-        let expected_total = expected_input + expected_cached + expected_output;
-
-        assert!((computed.breakdown.input_cost_usd - expected_input).abs() < 0.0001);
-        assert!((computed.breakdown.cached_input_cost_usd - expected_cached).abs() < 0.0001);
-        assert!((computed.breakdown.output_cost_usd - expected_output).abs() < 0.0001);
+        assert_eq!(computed.status, PricingStatus::Exact);
+        assert!((computed.total_cost_usd - 5.3375).abs() < 0.0001);
         assert!((computed.breakdown.cached_input_savings_usd - 0.7875).abs() < 0.0001);
-        assert!((computed.total_cost_usd - expected_total).abs() < 0.0001);
-    }
-
-    #[test]
-    fn fast_multiplier_matches_generation_speed_contract() {
-        assert_eq!(speed_multiplier("gpt-5.5", true), 2.5);
-        assert_eq!(speed_multiplier("gpt-5.5-pro", true), 2.5);
-        assert_eq!(speed_multiplier("gpt-5.4", true), 2.0);
-        assert_eq!(speed_multiplier("gpt-5.4-2026-03-05", true), 2.0);
-        assert_eq!(speed_multiplier("gpt-5.3-codex", true), 1.0);
-        assert_eq!(speed_multiplier("gpt-5.5", false), 1.0);
-    }
-
-    #[test]
-    fn gpt5_context_metadata_separates_oauth_and_api_limits() {
-        let metadata = model_context_metadata("gpt-5.5").expect("gpt-5 metadata");
-        assert_eq!(metadata.oauth_context_window, 400_000);
-        assert_eq!(metadata.api_context_window, 1_050_000);
-        assert_eq!(metadata.long_context_input_threshold, 272_000);
-        assert_eq!(metadata.max_output_tokens, 128_000);
-        assert_eq!(default_model_context_window("gpt-5.5"), Some(400_000));
-        assert_eq!(api_model_context_window("gpt-5.5"), Some(1_050_000));
-    }
-
-    #[test]
-    fn pricing_catalog_matches_required_models() {
-        let config = PricingConfig::default();
-
-        let p55 = resolve_model_pricing("gpt-5.5", &config);
-        assert!((p55.pricing.input_per_million - 5.0).abs() < 0.0001);
-        assert!((p55.pricing.cached_input_per_million - 0.5).abs() < 0.0001);
-        assert!((p55.pricing.output_per_million - 30.0).abs() < 0.0001);
-
-        let p55pro = resolve_model_pricing("gpt-5.5-pro", &config);
-        assert!((p55pro.pricing.input_per_million - 30.0).abs() < 0.0001);
-        assert!((p55pro.pricing.cached_input_per_million - 3.0).abs() < 0.0001);
-        assert!((p55pro.pricing.output_per_million - 180.0).abs() < 0.0001);
-
-        let p54 = resolve_model_pricing("gpt-5.4", &config);
-        assert!((p54.pricing.input_per_million - 2.5).abs() < 0.0001);
-        assert!((p54.pricing.cached_input_per_million - 0.25).abs() < 0.0001);
-        assert!((p54.pricing.output_per_million - 15.0).abs() < 0.0001);
-
-        let p54mini = resolve_model_pricing("gpt-5.4-mini", &config);
-        assert!((p54mini.pricing.input_per_million - 0.25).abs() < 0.0001);
-        assert!((p54mini.pricing.cached_input_per_million - 0.025).abs() < 0.0001);
-        assert!((p54mini.pricing.output_per_million - 2.0).abs() < 0.0001);
-
-        let p53codex = resolve_model_pricing("gpt-5.3-codex", &config);
-        assert!((p53codex.pricing.input_per_million - 1.75).abs() < 0.0001);
-        assert!((p53codex.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
-        assert!((p53codex.pricing.output_per_million - 14.0).abs() < 0.0001);
-
-        let p52 = resolve_model_pricing("gpt-5.2", &config);
-        assert!((p52.pricing.input_per_million - 1.75).abs() < 0.0001);
-        assert!((p52.pricing.cached_input_per_million - 0.175).abs() < 0.0001);
-        assert!((p52.pricing.output_per_million - 14.0).abs() < 0.0001);
-
-        let p51max = resolve_model_pricing("gpt-5.1-codex-max", &config);
-        assert!((p51max.pricing.input_per_million - 1.25).abs() < 0.0001);
-        assert!((p51max.pricing.cached_input_per_million - 0.125).abs() < 0.0001);
-        assert!((p51max.pricing.output_per_million - 10.0).abs() < 0.0001);
-
-        let p51mini = resolve_model_pricing("gpt-5.1-codex-mini", &config);
-        assert!((p51mini.pricing.input_per_million - 0.25).abs() < 0.0001);
-        assert!((p51mini.pricing.cached_input_per_million - 0.025).abs() < 0.0001);
-        assert!((p51mini.pricing.output_per_million - 2.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn catalog_context_window_for_gpt5_family_is_400k() {
-        assert_eq!(default_model_context_window("gpt-5.2"), Some(400_000));
-        assert_eq!(default_model_context_window("gpt-5.2-codex"), Some(400_000));
-        assert_eq!(
-            default_model_context_window("gpt-5.1-codex-mini"),
-            Some(400_000)
+        assert!(
+            computed
+                .breakdown
+                .reconciles_with(computed.known_total_cost_usd)
         );
-        assert_eq!(default_model_context_window("gpt-5.3-codex"), Some(400_000));
-        assert_eq!(default_model_context_window("gpt-5.4-mini"), Some(400_000));
-        assert_eq!(default_model_context_window("gpt-5.5"), Some(400_000));
-        assert_eq!(default_model_context_window("gpt-5.5-pro"), Some(400_000));
     }
 
     #[test]
-    fn catalog_context_window_for_unknown_model_is_none() {
-        assert_eq!(default_model_context_window("unknown-model"), None);
+    fn cached_tokens_are_clamped_before_costing() {
+        let computed = compute_total_cost("gpt-5.4", 100, 1_000, 0, &PricingConfig::default());
+        assert_eq!(computed.breakdown.input_cost_usd, 0.0);
+        assert!((computed.breakdown.cached_input_cost_usd - 0.000025).abs() < 0.000001);
+    }
+
+    #[test]
+    fn gpt_5_6_has_no_invented_api_context_or_fast_multiplier() {
+        let metadata = model_context_metadata("gpt-5.6-sol").expect("metadata");
+        assert_eq!(metadata.raw_context_window, 372_000);
+        assert_eq!(metadata.oauth_context_window, 353_400);
+        assert_eq!(metadata.api_context_window, None);
+        assert_eq!(metadata.long_context_input_threshold, None);
+        assert_eq!(metadata.max_output_tokens, None);
+        assert_eq!(speed_multiplier("gpt-5.6-sol", true), 1.0);
+    }
+
+    #[test]
+    fn cumulative_input_above_long_context_threshold_is_a_lower_bound() {
+        let computed = compute_cost(
+            "gpt-5.5",
+            TokenUsage {
+                input_tokens: 272_001,
+                output_tokens: 1_000,
+                ..TokenUsage::default()
+            },
+            SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
+            &PricingConfig::default(),
+        );
+        assert_eq!(computed.status, PricingStatus::Partial);
+        assert!(computed.known_total_cost_usd.is_some());
+    }
+
+    #[test]
+    fn partial_and_unavailable_costs_cannot_render_as_exact() {
+        assert_eq!(
+            format_presentable_cost(Some(0.0065), PricingStatus::Partial),
+            Some(">=$0.0065".to_string())
+        );
+        assert_eq!(
+            format_presentable_cost(None, PricingStatus::Unavailable),
+            None
+        );
+        assert_eq!(
+            format_presentable_cost(Some(0.0), PricingStatus::Exact),
+            Some("$0.00".to_string())
+        );
     }
 }

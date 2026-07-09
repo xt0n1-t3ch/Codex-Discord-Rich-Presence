@@ -58,6 +58,13 @@ version = "$Version"
 "@ | Set-Content -LiteralPath (Join-Path $fixture "Cargo.lock") -Encoding utf8NoBOM
     "fn main() {}" | Set-Content -LiteralPath (Join-Path $fixture "src/main.rs") -Encoding utf8NoBOM
     $Changelog | Set-Content -LiteralPath (Join-Path $fixture "CHANGELOG.md") -Encoding utf8NoBOM
+    @"
+# Fixture
+
+Release v$Version
+
+## What's New in v$Version
+"@ | Set-Content -LiteralPath (Join-Path $fixture "README.md") -Encoding utf8NoBOM
     return $fixture
 }
 
@@ -129,6 +136,24 @@ try {
     Assert-Equal 1 $mismatch.ExitCode "A tag/Cargo mismatch must fail."
     Assert-Matches "does not match Cargo package version" $mismatch.Output "Version-mismatch failure is unclear."
 
+    $readmeMismatchFixture = New-ReleaseFixture -Name "readme-mismatch" -Version "1.7.2" -Changelog @"
+# Changelog
+
+## [1.7.2] - 2026-07-09
+
+- Release notes.
+"@
+    @"
+# Fixture
+
+Release v1.7.1
+
+## What's New in v1.7.1
+"@ | Set-Content -LiteralPath (Join-Path $readmeMismatchFixture "README.md") -Encoding utf8NoBOM
+    $readmeMismatch = Invoke-MetadataCheck -Tag "v1.7.2" -Fixture $readmeMismatchFixture
+    Assert-Equal 1 $readmeMismatch.ExitCode "A stale README version must fail."
+    Assert-Matches "README.md release badge" $readmeMismatch.Output "README mismatch failure is unclear."
+
     $missingChangelogFixture = New-ReleaseFixture -Name "missing-changelog" -Version "1.7.2" -Changelog @"
 # Changelog
 
@@ -180,7 +205,7 @@ try {
     Assert-Matches 'v1\.8\.0%2Bbuild\.7' $releaseNotes "Build metadata must be URL-escaped in the comparison link."
     Assert-Matches 'codex-discord-rich-presence-windows-x64\.exe' $releaseNotes "Release notes must list portable asset names."
 
-    Write-Output "release metadata contract: 6 scenarios passed"
+    Write-Output "release metadata contract: 7 scenarios passed"
 }
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {

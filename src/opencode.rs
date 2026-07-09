@@ -7,10 +7,20 @@ use rusqlite::{Connection, params};
 use serde_json::Value;
 
 use crate::config::{self, PricingConfig};
-use crate::cost::{compute_total_cost, default_model_context_window};
+use crate::cost::{
+    CostAttribution, CostComputation, PricingSource, PricingStatus, TokenCostBreakdown, TokenUsage,
+    compute_cost,
+};
+use crate::model::{
+    ReasoningEffort, SessionSpeed, SpeedMode, SpeedSource, canonical_model_key,
+    model_requests_fast, resolve_context_window_from_cache_path, resolve_model,
+};
+#[cfg(test)]
+use crate::session::ContextWindowSource;
 use crate::session::{
-    CodexSessionSnapshot, ContextWindowSnapshot, ContextWindowSource, RateLimits,
-    SessionActivityKind, SessionActivitySnapshot,
+    CodexSessionSnapshot, ContextWindowSnapshot, RateLimits, SessionActivityKind,
+    SessionActivitySnapshot, sanitize_domain_target, sanitize_file_target,
+    summarize_command_for_presence,
 };
 use crate::util::truncate;
 
@@ -165,32 +175,36 @@ fn row_to_snapshot(
     {
         return Ok(None);
     }
-    let Some(model) = parse_model_id(row.model.as_deref()) else {
+    let Some(descriptor) = parse_model_descriptor(row.model.as_deref()) else {
         return Ok(None);
     };
+    let model = descriptor.model_id;
     if !model.to_ascii_lowercase().starts_with("gpt-") {
         return Ok(None);
     }
 
     let activity = latest_activity(connection, &row.id)?;
     let context_window = latest_context_window(connection, &row.id, &model)?;
-    let input_total = row
-        .tokens_input
-        .saturating_add(row.tokens_cache_read)
-        .saturating_add(row.tokens_cache_write);
+    let costed_input_total = row.tokens_input.saturating_add(row.tokens_cache_read);
+    let input_total = costed_input_total.saturating_add(row.tokens_cache_write);
     let output_total = row.tokens_output.saturating_add(row.tokens_reasoning);
     let token_total = input_total.saturating_add(output_total);
-    let computed = compute_total_cost(
+    let computed = compute_cost(
         &model,
-        input_total,
-        row.tokens_cache_read,
-        output_total,
+        TokenUsage {
+            input_tokens: costed_input_total,
+            cached_input_tokens: row.tokens_cache_read,
+            cache_write_tokens: Some(row.tokens_cache_write),
+            output_tokens: output_total,
+        },
+        descriptor.speed,
         pricing_config,
     );
-    let total_cost_usd = if row.cost.is_finite() && row.cost > 0.0 {
-        row.cost
+    let provider_reported_cost = row.cost.is_finite() && row.cost > 0.0;
+    let session_cost = if provider_reported_cost {
+        reconcile_provider_cost(row.cost, computed)
     } else {
-        computed.total_cost_usd
+        ResolvedSessionCost::from_computed(computed)
     };
 
     Ok(Some(CodexSessionSnapshot {
@@ -201,7 +215,8 @@ fn row_to_snapshot(
         originator: Some("opencode".to_string()),
         source: Some(row.agent.unwrap_or_else(|| "opencode".to_string())),
         model: Some(model),
-        reasoning_effort: None,
+        reasoning_effort: descriptor.reasoning_effort,
+        speed: descriptor.speed,
         approval_policy: None,
         sandbox_policy: None,
         session_total_tokens: (token_total > 0).then_some(token_total),
@@ -213,9 +228,13 @@ fn row_to_snapshot(
         last_input_tokens: None,
         last_cached_input_tokens: None,
         last_output_tokens: None,
-        total_cost_usd,
-        cost_breakdown: computed.breakdown,
-        pricing_source: computed.source,
+        total_cost_usd: session_cost.known_total_cost_usd.unwrap_or(0.0),
+        known_cost_usd: session_cost.known_total_cost_usd,
+        cost_breakdown: session_cost.breakdown,
+        pricing_source: session_cost.source,
+        pricing_status: session_cost.status,
+        cost_attribution: CostAttribution::SingleModel,
+        cost_breakdown_reconciled: session_cost.breakdown_reconciled,
         context_window,
         limits: RateLimits::default(),
         rate_limit_envelopes: Vec::new(),
@@ -247,12 +266,22 @@ fn latest_context_window(
 }
 
 fn context_window_from_part(data: &str, model: &str) -> Option<ContextWindowSnapshot> {
+    let cache_path = config::codex_home().join("models_cache.json");
+    context_window_from_part_with_cache_path(data, model, &cache_path)
+}
+
+fn context_window_from_part_with_cache_path(
+    data: &str,
+    model: &str,
+    cache_path: &Path,
+) -> Option<ContextWindowSnapshot> {
     let parsed = serde_json::from_str::<Value>(data).ok()?;
     if parsed.get("type").and_then(Value::as_str) != Some("step-finish") {
         return None;
     }
     let used_tokens = step_finish_token_total(parsed.get("tokens")?)?;
-    let window_tokens = default_model_context_window(model)?;
+    let resolved_context = resolve_context_window_from_cache_path(model, None, cache_path)?;
+    let window_tokens = resolved_context.effective_tokens;
     if window_tokens == 0 {
         return None;
     }
@@ -261,11 +290,14 @@ fn context_window_from_part(data: &str, model: &str) -> Option<ContextWindowSnap
     let remaining_percent =
         ((remaining_tokens as f64 / window_tokens as f64) * 100.0).clamp(0.0, 100.0);
     Some(ContextWindowSnapshot {
+        raw_window_tokens: resolved_context.raw_tokens,
         window_tokens,
+        effective_percent: resolved_context.effective_percent,
         used_tokens,
         remaining_tokens,
         remaining_percent,
-        source: ContextWindowSource::Catalog,
+        source: resolved_context.source,
+        raw_source: resolved_context.raw_source,
     })
 }
 
@@ -290,7 +322,14 @@ fn uint_value(value: Option<&Value>) -> Option<u64> {
     }
 }
 
-fn parse_model_id(raw: Option<&str>) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedModelDescriptor {
+    model_id: String,
+    reasoning_effort: Option<ReasoningEffort>,
+    speed: SessionSpeed,
+}
+
+fn parse_model_descriptor(raw: Option<&str>) -> Option<ParsedModelDescriptor> {
     let value = raw?.trim();
     if value.is_empty() {
         return None;
@@ -298,9 +337,68 @@ fn parse_model_id(raw: Option<&str>) -> Option<String> {
     if let Ok(json) = serde_json::from_str::<Value>(value)
         && let Some(id) = json.get("id").and_then(Value::as_str)
     {
-        return Some(id.trim().to_ascii_lowercase());
+        return Some(model_descriptor(
+            id,
+            json.get("variant").and_then(Value::as_str),
+        ));
     }
-    Some(value.to_ascii_lowercase())
+    Some(model_descriptor(value, None))
+}
+
+fn model_descriptor(model_id: &str, variant: Option<&str>) -> ParsedModelDescriptor {
+    let fast = model_requests_fast(model_id);
+    let resolved = resolve_model(model_id);
+    let mode = resolved
+        .map(|model| model.resolve_speed(fast))
+        .unwrap_or(SpeedMode::Standard);
+    ParsedModelDescriptor {
+        model_id: canonical_model_key(model_id),
+        reasoning_effort: ReasoningEffort::parse(variant),
+        speed: SessionSpeed::explicit(mode, SpeedSource::OpenCodeDescriptor),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedSessionCost {
+    known_total_cost_usd: Option<f64>,
+    source: PricingSource,
+    status: PricingStatus,
+    breakdown: TokenCostBreakdown,
+    breakdown_reconciled: bool,
+}
+
+impl ResolvedSessionCost {
+    fn from_computed(computed: CostComputation) -> Self {
+        let breakdown_reconciled = computed
+            .breakdown
+            .reconciles_with(computed.known_total_cost_usd);
+        Self {
+            known_total_cost_usd: computed.known_total_cost_usd,
+            source: computed.source,
+            status: computed.status,
+            breakdown: computed.breakdown,
+            breakdown_reconciled,
+        }
+    }
+}
+
+fn reconcile_provider_cost(
+    provider_total_cost_usd: f64,
+    computed: CostComputation,
+) -> ResolvedSessionCost {
+    let known_total_cost_usd = Some(provider_total_cost_usd);
+    let breakdown_reconciled = computed.breakdown.reconciles_with(known_total_cost_usd);
+    ResolvedSessionCost {
+        known_total_cost_usd,
+        source: PricingSource::ProviderReported,
+        status: PricingStatus::Exact,
+        breakdown: if breakdown_reconciled {
+            computed.breakdown
+        } else {
+            TokenCostBreakdown::default()
+        },
+        breakdown_reconciled,
+    }
 }
 
 fn latest_activity(
@@ -370,15 +468,22 @@ fn tool_activity(
 
 fn tool_target(tool: &str, input: Option<&Value>) -> Option<String> {
     let input = input?;
-    for key in ["filePath", "path", "command", "description", "pattern"] {
-        if let Some(value) = input
-            .get(key)
+    if matches!(tool, "read" | "view" | "write" | "edit" | "apply_patch") {
+        return ["filePath", "path"]
+            .into_iter()
+            .find_map(|key| input.get(key).and_then(Value::as_str))
+            .map(|value| sanitize_file_target(value, 72));
+    }
+    if let Some(command) = input.get("command").and_then(Value::as_str) {
+        return Some(summarize_command_for_presence(command, 72));
+    }
+    if matches!(tool, "fetch" | "webfetch" | "http")
+        && let Some(url) = input
+            .get("url")
+            .or_else(|| input.get("uri"))
             .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Some(truncate(value, 72));
-        }
+    {
+        return sanitize_domain_target(url, 72).or_else(|| Some(tool.to_string()));
     }
     Some(truncate(tool, 72))
 }
@@ -427,13 +532,54 @@ mod tests {
 
     #[test]
     fn parses_fast_gpt_model_from_opencode_json() {
+        let descriptor = parse_model_descriptor(Some(
+            r#"{"id":"gpt-5.6-sol-fast","providerID":"openai","variant":"xhigh"}"#,
+        ))
+        .expect("descriptor");
+        assert_eq!(descriptor.model_id, "gpt-5.6-sol");
+        assert_eq!(descriptor.reasoning_effort, Some(ReasoningEffort::XHigh));
+        assert_eq!(descriptor.speed.mode, SpeedMode::Fast);
+        assert_eq!(descriptor.speed.source, SpeedSource::OpenCodeDescriptor);
         assert_eq!(
-            parse_model_id(Some(
-                r#"{"id":"gpt-5.5-fast","providerID":"openai","variant":"high"}"#
-            ))
-            .as_deref(),
-            Some("gpt-5.5-fast")
+            crate::model::format_model_display(
+                &descriptor.model_id,
+                descriptor.reasoning_effort,
+                descriptor.speed.mode == SpeedMode::Fast,
+            ),
+            "5.6 Sol Extra High · Fast"
         );
+    }
+
+    #[test]
+    fn provider_total_without_component_reconciliation_hides_breakdown() {
+        let computed = compute_cost(
+            "gpt-5.6-sol",
+            TokenUsage {
+                input_tokens: 1_000,
+                cache_write_tokens: Some(100),
+                output_tokens: 100,
+                ..TokenUsage::default()
+            },
+            SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::OpenCodeDescriptor),
+            &PricingConfig::default(),
+        );
+        let resolved = reconcile_provider_cost(99.0, computed);
+        assert_eq!(resolved.source, PricingSource::ProviderReported);
+        assert_eq!(resolved.status, PricingStatus::Exact);
+        assert_eq!(resolved.known_total_cost_usd, Some(99.0));
+        assert_eq!(resolved.breakdown, TokenCostBreakdown::default());
+        assert!(!resolved.breakdown_reconciled);
+    }
+
+    #[test]
+    fn opencode_activity_does_not_publish_command_arguments_or_patterns() {
+        let command = r#"{"type":"tool","tool":"bash","state":{"status":"running","input":{"command":"curl https://user:secret@example.com/private?token=abc"}}}"#;
+        let command_activity = activity_from_part(command, 1_780_955_191_186).expect("activity");
+        assert_eq!(command_activity.target.as_deref(), Some("curl"));
+
+        let pattern = r#"{"type":"tool","tool":"grep","state":{"status":"running","input":{"pattern":"customer-secret-password"}}}"#;
+        let pattern_activity = activity_from_part(pattern, 1_780_955_191_186).expect("activity");
+        assert_eq!(pattern_activity.target.as_deref(), Some("grep"));
     }
 
     #[test]
@@ -458,7 +604,7 @@ mod tests {
         let part = r#"{"type":"tool","tool":"bash","state":{"status":"running","input":{"command":"cargo test --workspace"}}}"#;
         let activity = activity_from_part(part, 1_780_955_191_186).expect("activity");
         assert_eq!(activity.kind, SessionActivityKind::RunningCommand);
-        assert_eq!(activity.target.as_deref(), Some("cargo test --workspace"));
+        assert_eq!(activity.target.as_deref(), Some("cargo test"));
         assert_eq!(activity.pending_calls, 1);
     }
 
@@ -467,27 +613,43 @@ mod tests {
         let part = r#"{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"D:/repo/src/main.rs"}}}"#;
         let activity = activity_from_part(part, 1_780_955_191_186).expect("activity");
         assert_eq!(activity.kind, SessionActivityKind::ReadingFile);
-        assert_eq!(activity.target.as_deref(), Some("D:/repo/src/main.rs"));
+        assert_eq!(activity.target.as_deref(), Some("main.rs"));
     }
 
     #[test]
     fn parses_context_window_from_latest_step_finish_total() {
+        let dir = tempfile::tempdir().expect("tempdir");
         let part = r#"{"type":"step-finish","tokens":{"total":231782,"input":185000,"output":10000,"reasoning":20000,"cache":{"read":16782,"write":0}}}"#;
-        let context = context_window_from_part(part, "gpt-5.5-fast").expect("context");
-        assert_eq!(context.window_tokens, 400_000);
+        let context = context_window_from_part_with_cache_path(
+            part,
+            "gpt-5.5-fast",
+            &dir.path().join("missing.json"),
+        )
+        .expect("context");
+        assert_eq!(context.raw_window_tokens, 272_000);
+        assert_eq!(context.window_tokens, 258_400);
+        assert_eq!(context.effective_percent, Some(95));
         assert_eq!(context.used_tokens, 231_782);
-        assert_eq!(context.remaining_tokens, 168_218);
-        assert!((context.remaining_percent - 42.05).abs() < 0.05);
+        assert_eq!(context.remaining_tokens, 26_618);
+        assert!((context.remaining_percent - 10.30).abs() < 0.05);
         assert_eq!(context.source, ContextWindowSource::Catalog);
+        assert_eq!(context.raw_source, ContextWindowSource::Catalog);
     }
 
     #[test]
     fn parses_context_window_from_step_finish_token_fields() {
+        let dir = tempfile::tempdir().expect("tempdir");
         let part = r#"{"type":"step-finish","tokens":{"input":"210000","output":12000,"reasoning":9000,"cache":{"read":782,"write":0}}}"#;
-        let context = context_window_from_part(part, "gpt-5.5").expect("context");
-        assert_eq!(context.window_tokens, 400_000);
+        let context = context_window_from_part_with_cache_path(
+            part,
+            "gpt-5.5",
+            &dir.path().join("missing.json"),
+        )
+        .expect("context");
+        assert_eq!(context.raw_window_tokens, 272_000);
+        assert_eq!(context.window_tokens, 258_400);
         assert_eq!(context.used_tokens, 231_782);
-        assert!((context.remaining_percent - 42.05).abs() < 0.05);
+        assert!((context.remaining_percent - 10.30).abs() < 0.05);
     }
 
     #[test]
@@ -498,9 +660,17 @@ mod tests {
 
     #[test]
     fn clamps_context_window_when_step_finish_exceeds_window() {
+        let dir = tempfile::tempdir().expect("tempdir");
         let part = r#"{"type":"step-finish","tokens":{"total":900000}}"#;
-        let context = context_window_from_part(part, "gpt-5.5").expect("context");
-        assert_eq!(context.used_tokens, 400_000);
+        let context = context_window_from_part_with_cache_path(
+            part,
+            "gpt-5.5",
+            &dir.path().join("missing.json"),
+        )
+        .expect("context");
+        assert_eq!(context.raw_window_tokens, 272_000);
+        assert_eq!(context.window_tokens, 258_400);
+        assert_eq!(context.used_tokens, 258_400);
         assert_eq!(context.remaining_tokens, 0);
         assert_eq!(context.remaining_percent, 0.0);
     }

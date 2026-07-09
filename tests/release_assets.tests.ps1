@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $assetScript = Join-Path $repositoryRoot "scripts/release-assets.ps1"
+$localBuildScript = Join-Path $repositoryRoot "scripts/build-release.ps1"
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-release-assets-" + [guid]::NewGuid())
 
 function Assert-Equal {
@@ -57,6 +58,12 @@ function Add-FixtureFile {
 }
 
 try {
+    $localBuild = Get-Content -Raw -LiteralPath $localBuildScript
+    Assert-True ($localBuild -match 'cargoCmd build --locked --workspace --release --all-features') "Local release build must use the locked full workspace gate."
+    Assert-True ($localBuild -match 'codex-app-logo\.png') "Local release build must package the portable Codex App logo."
+    Assert-True ($localBuild -match 'chatgpt-app-logo\.jpg') "Local release build must package the portable ChatGPT App logo."
+    Assert-True ($localBuild -match 'SHA256SUMS\.txt') "Local release build must emit a checksum manifest."
+
     New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 
     $emptyRoot = Join-Path $temporaryRoot "empty"
@@ -74,6 +81,7 @@ try {
     Add-FixtureFile -Root $artifactRoot -RelativePath "macos-x64/releases/macos/codex-discord-rich-presence-macos-x64" -Content "macos-x64-binary"
     Add-FixtureFile -Root $artifactRoot -RelativePath "macos-arm64/releases/macos/codex-discord-rich-presence-macos-arm64" -Content "macos-arm64-binary"
     Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/codex-app-logo.png" -Content "logo"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/chatgpt-app-logo.jpg" -Content "chatgpt-logo"
 
     $complete = Invoke-AssetBuild -ArtifactRoot $artifactRoot -OutputDirectory $outputDirectory
     Assert-Equal 0 $complete.ExitCode "A complete artifact set must pass."
@@ -84,6 +92,7 @@ try {
         "codex-discord-rich-presence-macos-x64"
         "codex-discord-rich-presence-macos-arm64"
         "codex-app-logo.png"
+        "chatgpt-app-logo.jpg"
         "SHA256SUMS.txt"
     )
     $actualNames = @(Get-ChildItem -LiteralPath $outputDirectory -File | Sort-Object Name | ForEach-Object Name)
@@ -93,7 +102,7 @@ try {
     }
 
     $manifestLines = @(Get-Content -LiteralPath (Join-Path $outputDirectory "SHA256SUMS.txt"))
-    Assert-Equal 5 $manifestLines.Count "Checksum manifest must cover each published payload."
+    Assert-Equal 6 $manifestLines.Count "Checksum manifest must cover each published payload."
     foreach ($name in $expectedNames | Where-Object { $_ -ne "SHA256SUMS.txt" }) {
         $path = Join-Path $outputDirectory $name
         $expectedHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()

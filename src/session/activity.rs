@@ -7,7 +7,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::config::PricingConfig;
-use crate::cost;
+use crate::cost::{self, CostAttribution, TokenUsage};
+use crate::model::{
+    SessionSpeed, SpeedMode, SpeedSource, canonical_model_key, model_requests_fast, resolve_model,
+};
 use crate::telemetry::limits::{
     RateLimitEnvelope, RateLimits, limits_present as telemetry_limits_present,
     parse_rate_limit_envelope, select_session_envelope_global_first,
@@ -47,6 +50,11 @@ pub(super) struct SessionAccumulator {
     last_cached_input_tokens: Option<u64>,
     last_output_tokens: Option<u64>,
     model_context_window: Option<u64>,
+    pricing_is_mixed_model: bool,
+    pricing_is_mixed_speed: bool,
+    pricing_had_unpriced_fast: bool,
+    pricing_had_unknown_speed: bool,
+    speed: SessionSpeed,
     limits: RateLimits,
     rate_limit_envelopes: HashMap<String, RateLimitEnvelope>,
     last_token_event_at: Option<DateTime<Utc>>,
@@ -264,8 +272,8 @@ impl SessionAccumulator {
                 if self.cwd.is_none() {
                     self.cwd = str_at(payload, &["cwd"]).map(PathBuf::from);
                 }
-                if self.model.is_none() {
-                    self.model = str_at(payload, &["model"]);
+                if let Some(model) = str_at(payload, &["model"]) {
+                    self.update_model(model, None);
                 }
                 if let Some(reasoning_effort) = turn_context_reasoning_effort(payload) {
                     self.reasoning_effort = Some(reasoning_effort);
@@ -279,6 +287,24 @@ impl SessionAccumulator {
                 }
             }
             Some("event_msg") => match str_at(payload, &["type"]).as_deref() {
+                Some("thread_settings_applied") => {
+                    let settings = payload.get("thread_settings").unwrap_or(&Value::Null);
+                    if let Some(cwd) = str_at(settings, &["cwd"]) {
+                        self.cwd = Some(PathBuf::from(cwd));
+                    }
+                    if let Some(model) = str_at(settings, &["model"]) {
+                        self.update_model(model, str_at(settings, &["service_tier"]));
+                    }
+                    if let Some(reasoning_effort) = str_at(settings, &["reasoning_effort"])
+                        .as_deref()
+                        .and_then(|raw| ReasoningEffort::parse(Some(raw)))
+                    {
+                        self.reasoning_effort = Some(reasoning_effort);
+                    }
+                    if let Some(approval_policy) = str_at(settings, &["approval_policy"]) {
+                        self.approval_policy = Some(approval_policy);
+                    }
+                }
                 Some("token_count") => {
                     self.previous_session_total_tokens = self.session_total_tokens;
 
@@ -288,7 +314,8 @@ impl SessionAccumulator {
                     if let Some(total_cached_input_tokens) =
                         total_cached_input_tokens_from_info(payload)
                     {
-                        self.cached_input_tokens_total = total_cached_input_tokens;
+                        self.cached_input_tokens_total =
+                            total_cached_input_tokens.min(self.input_tokens_total);
                     }
                     if let Some(total_output_tokens) = total_output_tokens_from_info(payload) {
                         self.output_tokens_total = total_output_tokens;
@@ -300,17 +327,31 @@ impl SessionAccumulator {
                     if let Some(last_cached_input_tokens) =
                         last_cached_input_tokens_from_info(payload)
                     {
-                        self.last_cached_input_tokens = Some(last_cached_input_tokens);
+                        self.last_cached_input_tokens = Some(
+                            last_cached_input_tokens
+                                .min(self.last_input_tokens.unwrap_or(last_cached_input_tokens)),
+                        );
                     }
                     if let Some(last_output_tokens) = last_output_tokens_from_info(payload) {
                         self.last_output_tokens = Some(last_output_tokens);
                     }
 
+                    self.cached_input_tokens_total =
+                        self.cached_input_tokens_total.min(self.input_tokens_total);
+                    if let Some(last_cached_input_tokens) = self.last_cached_input_tokens.as_mut()
+                        && let Some(last_input_tokens) = self.last_input_tokens
+                    {
+                        *last_cached_input_tokens =
+                            (*last_cached_input_tokens).min(last_input_tokens);
+                    }
+
                     if let Some(total_tokens) = total_tokens_from_info(payload) {
                         self.session_total_tokens = Some(total_tokens);
                     } else if self.input_tokens_total > 0 || self.output_tokens_total > 0 {
-                        self.session_total_tokens =
-                            Some(self.input_tokens_total + self.output_tokens_total);
+                        self.session_total_tokens = Some(
+                            self.input_tokens_total
+                                .saturating_add(self.output_tokens_total),
+                        );
                     }
 
                     if let Some(last_tokens) = last_tokens_from_info(payload) {
@@ -319,8 +360,9 @@ impl SessionAccumulator {
                     {
                         let last_input = self.last_input_tokens.unwrap_or(0);
                         let last_output = self.last_output_tokens.unwrap_or(0);
-                        self.last_turn_tokens = Some(last_input + last_output);
+                        self.last_turn_tokens = Some(last_input.saturating_add(last_output));
                     }
+                    self.record_speed_pricing_state();
                     if let Some(context_window) = model_context_window_from_info(payload) {
                         self.model_context_window = Some(context_window);
                     }
@@ -418,6 +460,54 @@ impl SessionAccumulator {
         self.session_id = Some(session_id);
     }
 
+    fn update_model(&mut self, model: String, service_tier: Option<String>) {
+        let normalized = canonical_model_key(&model);
+        let current = self.model.as_deref().map(canonical_model_key);
+        let changed = self
+            .model
+            .as_deref()
+            .map(canonical_model_key)
+            .is_some_and(|current| current != normalized);
+        let explicit_speed = speed_from_signal(&model, service_tier.as_deref());
+        if changed {
+            self.model_context_window = None;
+            if self.has_usage() {
+                self.pricing_is_mixed_model = true;
+            }
+            self.speed = explicit_speed.unwrap_or_default();
+        } else if current.is_none() {
+            self.speed = explicit_speed.unwrap_or_default();
+        } else if let Some(speed) = explicit_speed {
+            self.update_speed(speed);
+        }
+        self.model = Some(normalized);
+    }
+
+    fn update_speed(&mut self, speed: SessionSpeed) {
+        if self.has_usage() && (self.speed.mode != speed.mode || self.speed.known != speed.known) {
+            self.pricing_is_mixed_speed = true;
+        }
+        self.speed = speed;
+    }
+
+    fn has_usage(&self) -> bool {
+        self.session_total_tokens.is_some()
+            || self.input_tokens_total > 0
+            || self.output_tokens_total > 0
+    }
+
+    fn record_speed_pricing_state(&mut self) {
+        let Some(model) = self.model.as_deref().and_then(resolve_model) else {
+            return;
+        };
+        if self.speed.mode == SpeedMode::Fast && model.fast_usage_multiplier().is_none() {
+            self.pricing_had_unpriced_fast = true;
+        }
+        if !self.speed.known && model.supports_fast() {
+            self.pricing_had_unknown_speed = true;
+        }
+    }
+
     pub(super) fn build_snapshot(
         &self,
         jsonl_path: &Path,
@@ -461,13 +551,34 @@ impl SessionAccumulator {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown-session")
             .to_string();
-        let cost = cost::compute_total_cost(
-            self.model.as_deref().unwrap_or(""),
-            self.input_tokens_total,
-            self.cached_input_tokens_total,
-            self.output_tokens_total,
+        let mut cost = cost::compute_cost(
+            if self.pricing_is_mixed_model {
+                ""
+            } else {
+                self.model.as_deref().unwrap_or("")
+            },
+            TokenUsage {
+                input_tokens: self.input_tokens_total,
+                cached_input_tokens: self.cached_input_tokens_total,
+                cache_write_tokens: None,
+                output_tokens: self.output_tokens_total,
+            },
+            self.speed,
             pricing_config,
         );
+        if self.pricing_had_unpriced_fast
+            || self.pricing_had_unknown_speed
+            || self.pricing_is_mixed_speed
+        {
+            cost.mark_partial();
+        }
+        let cost_attribution = match (self.pricing_is_mixed_model, self.pricing_is_mixed_speed) {
+            (false, false) => CostAttribution::SingleModel,
+            (true, false) => CostAttribution::MixedModels,
+            (false, true) => CostAttribution::MixedSpeeds,
+            (true, true) => CostAttribution::MixedModelsAndSpeeds,
+        };
+        let cost_breakdown_reconciled = cost.breakdown.reconciles_with(cost.known_total_cost_usd);
         let mut rate_limit_envelopes: Vec<RateLimitEnvelope> =
             self.rate_limit_envelopes.values().cloned().collect();
         rate_limit_envelopes.sort_by_key(|item| {
@@ -496,6 +607,7 @@ impl SessionAccumulator {
             source: self.source.clone(),
             model: self.model.clone(),
             reasoning_effort: self.reasoning_effort,
+            speed: self.speed,
             approval_policy: self.approval_policy.clone(),
             sandbox_policy: self.sandbox_policy.clone(),
             session_total_tokens: self.session_total_tokens,
@@ -508,8 +620,12 @@ impl SessionAccumulator {
             last_cached_input_tokens: self.last_cached_input_tokens,
             last_output_tokens: self.last_output_tokens,
             total_cost_usd: cost.total_cost_usd,
+            known_cost_usd: cost.known_total_cost_usd,
             cost_breakdown: cost.breakdown,
             pricing_source: cost.source,
+            pricing_status: cost.status,
+            cost_attribution,
+            cost_breakdown_reconciled,
             context_window,
             limits: selected_limits,
             rate_limit_envelopes,
@@ -522,9 +638,26 @@ impl SessionAccumulator {
     }
 }
 
-pub(super) fn looks_like_desktop_surface(value: &str) -> bool {
-    let normalized = value.to_ascii_lowercase();
-    normalized.contains("desktop") || normalized.contains("opencode")
+fn speed_from_signal(model_id: &str, service_tier: Option<&str>) -> Option<SessionSpeed> {
+    let model = resolve_model(model_id);
+    if let Some(tier) = service_tier.map(str::trim).map(str::to_ascii_lowercase) {
+        let requested = match tier.as_str() {
+            "priority" | "fast" => SpeedMode::Fast,
+            "default" | "standard" => SpeedMode::Standard,
+            _ => return None,
+        };
+        let mode = model
+            .map(|resolved| resolved.resolve_speed(requested == SpeedMode::Fast))
+            .unwrap_or(SpeedMode::Standard);
+        return Some(SessionSpeed::explicit(mode, SpeedSource::ThreadSettings));
+    }
+    if model_requests_fast(model_id) {
+        let mode = model
+            .map(|resolved| resolved.resolve_speed(true))
+            .unwrap_or(SpeedMode::Standard);
+        return Some(SessionSpeed::explicit(mode, SpeedSource::ModelSuffix));
+    }
+    None
 }
 
 fn classify_shell_command(arguments: &str) -> PendingActivity {
@@ -581,20 +714,7 @@ fn classify_custom_tool_call(name: &str, input: &str) -> PendingActivity {
 }
 
 fn web_search_target(payload: &Value) -> Option<String> {
-    if let Some(query) = str_at(payload, &["action", "query"]) {
-        return Some(truncate_activity_target(format!("web search: {query}"), 72));
-    }
-
-    if let Some(query) = payload
-        .get("action")
-        .and_then(|value| value.get("queries"))
-        .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(Value::as_str)
-    {
-        return Some(truncate_activity_target(format!("web search: {query}"), 72));
-    }
-
+    let _ = payload;
     Some("web search".to_string())
 }
 
@@ -610,33 +730,57 @@ fn shell_command_text(arguments: &str) -> String {
     arguments.to_string()
 }
 
-fn summarize_command_for_presence(command: &str, max_len: usize) -> String {
+pub(crate) fn summarize_command_for_presence(command: &str, max_len: usize) -> String {
     let tokens: Vec<String> = command
         .split_whitespace()
         .map(clean_shell_token)
         .filter(|token| !token.is_empty())
         .collect();
     if tokens.is_empty() {
-        return truncate_activity_target(command.trim().to_string(), max_len);
+        return "command".to_string();
     }
 
-    let first = tokens[0].clone();
+    let first = command_verb(&tokens[0]);
     let second = tokens.get(1).cloned();
     let summary = match (first.as_str(), second.as_deref()) {
         ("rg", Some("--files")) => "rg --files".to_string(),
-        ("cargo", Some(sub)) => format!("cargo {sub}"),
+        ("cargo", Some(sub))
+            if matches!(sub, "build" | "check" | "clippy" | "fmt" | "run" | "test") =>
+        {
+            format!("cargo {sub}")
+        }
         ("sed", Some("-n")) => "sed -n".to_string(),
-        ("git", Some(sub)) => format!("git {sub}"),
-        ("cmd", Some("/c")) => "cmd /c".to_string(),
-        ("powershell", Some(sub)) => format!("powershell {sub}"),
-        ("pwsh", Some(sub)) => format!("pwsh {sub}"),
-        (_, Some(sub)) if !sub.starts_with('-') && sub.len() <= 18 => {
-            format!("{first} {sub}")
+        ("git", Some(sub))
+            if matches!(
+                sub,
+                "add"
+                    | "branch"
+                    | "commit"
+                    | "diff"
+                    | "fetch"
+                    | "log"
+                    | "pull"
+                    | "push"
+                    | "show"
+                    | "status"
+                    | "tag"
+            ) =>
+        {
+            format!("git {sub}")
         }
         _ => first,
     };
 
     truncate_activity_target(summary, max_len)
+}
+
+fn command_verb(raw: &str) -> String {
+    let cleaned = clean_shell_token(raw);
+    let file_name = portable_basename(&cleaned);
+    file_name
+        .strip_suffix(".exe")
+        .unwrap_or(file_name)
+        .to_ascii_lowercase()
 }
 
 fn clean_shell_token(token: &str) -> String {
@@ -840,16 +984,10 @@ fn extract_patch_target(input: &str) -> Option<String> {
 }
 
 fn truncate_activity_target(input: String, max_len: usize) -> String {
-    if input.len() <= max_len {
-        return input;
-    }
-    if max_len <= 3 {
-        return input[..max_len].to_string();
-    }
-    format!("{}...", &input[..max_len - 3])
+    crate::util::truncate(&input, max_len)
 }
 
-fn sanitize_file_target(raw: &str, max_len: usize) -> String {
+pub(crate) fn sanitize_file_target(raw: &str, max_len: usize) -> String {
     let cleaned = raw
         .trim()
         .trim_matches('"')
@@ -859,12 +997,38 @@ fn sanitize_file_target(raw: &str, max_len: usize) -> String {
         return String::new();
     }
 
-    let path = Path::new(cleaned);
-    if let Some(file_name) = path.file_name().and_then(|item| item.to_str())
-        && !file_name.trim().is_empty()
-    {
+    let file_name = portable_basename(cleaned);
+    if !file_name.trim().is_empty() {
         return truncate_activity_target(file_name.trim().to_string(), max_len);
     }
 
     truncate_activity_target(cleaned.to_string(), max_len)
+}
+
+fn portable_basename(raw: &str) -> &str {
+    raw.rsplit(['/', '\\']).next().unwrap_or(raw)
+}
+
+pub(crate) fn sanitize_domain_target(raw: &str, max_len: usize) -> Option<String> {
+    let trimmed = raw.trim();
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let authority = without_scheme.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let host = host_port
+        .strip_prefix('[')
+        .and_then(|value| value.split(']').next())
+        .unwrap_or_else(|| host_port.split(':').next().unwrap_or_default())
+        .trim()
+        .to_ascii_lowercase();
+    if host.is_empty()
+        || !host
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))
+    {
+        return None;
+    }
+    Some(truncate_activity_target(host, max_len))
 }

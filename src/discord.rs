@@ -6,11 +6,15 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::config::{PresenceConfig, PresenceSurface};
-use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind};
+use crate::config::{DesktopPresenceDesign, PresenceConfig, PresenceSurface};
+use crate::cost::format_presentable_cost;
+use crate::model::format_model_display;
+use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind, SpeedMode};
 use crate::telemetry::plan::ResolvedPlan;
 use crate::telemetry::service_tier::ResolvedServiceTier;
-use crate::util::{format_cost, format_model_display, format_tokens};
+#[cfg(test)]
+use crate::util::format_cost;
+use crate::util::format_tokens;
 
 pub struct DiscordPresence {
     surface: PresenceSurface,
@@ -47,7 +51,7 @@ struct PresencePayload {
 
 impl DiscordPresence {
     pub fn new(client_id: Option<String>) -> Self {
-        let surface = PresenceSurface::Default;
+        let surface = PresenceSurface::Cli;
         let last_status = status_for_client_id(surface, client_id.as_deref());
         Self {
             surface,
@@ -81,7 +85,7 @@ impl DiscordPresence {
         fallback_surface: PresenceSurface,
     ) -> Result<()> {
         self.surface = detect_surface(active_session, fallback_surface, self.last_known_surface);
-        self.last_known_surface = remember_surface(active_session, fallback_surface, self.surface);
+        self.last_known_surface = self.surface;
         let desired_client_id = config.effective_client_id_for_surface(self.surface);
         self.switch_client_if_needed(desired_client_id);
 
@@ -370,44 +374,34 @@ fn detect_surface(
     fallback_surface: PresenceSurface,
     last_known_surface: PresenceSurface,
 ) -> PresenceSurface {
-    if active_session.is_some_and(CodexSessionSnapshot::is_desktop_surface)
-        || (active_session.is_none() && matches!(last_known_surface, PresenceSurface::Desktop))
-    {
-        PresenceSurface::Desktop
-    } else {
-        fallback_surface
+    if let Some(surface) = active_session.and_then(CodexSessionSnapshot::detected_surface) {
+        return surface;
     }
-}
-
-fn remember_surface(
-    active_session: Option<&CodexSessionSnapshot>,
-    fallback_surface: PresenceSurface,
-    current_surface: PresenceSurface,
-) -> PresenceSurface {
-    if active_session.is_some()
-        || matches!(fallback_surface, PresenceSurface::Desktop)
-        || matches!(current_surface, PresenceSurface::Desktop)
-    {
-        current_surface
-    } else {
-        fallback_surface
+    if active_session.is_none() {
+        if fallback_surface != PresenceSurface::Cli {
+            return fallback_surface;
+        }
+        return last_known_surface;
     }
+    fallback_surface
 }
 
 fn display_branding<'a>(
     surface: PresenceSurface,
     config: &'a PresenceConfig,
 ) -> SurfaceDisplay<'a> {
-    match surface {
-        PresenceSurface::Default => SurfaceDisplay {
+    let label = surface.label(config.display.desktop_presence_design);
+    match (surface, config.display.desktop_presence_design) {
+        (PresenceSurface::Cli | PresenceSurface::VsCode, _)
+        | (PresenceSurface::Desktop, DesktopPresenceDesign::ChatGptApp) => SurfaceDisplay {
             large_image_key: &config.display.large_image_key,
-            large_text: &config.display.large_text,
-            idle_details: "Codex CLI / Codex VS Code Extension",
+            large_text: label,
+            idle_details: label,
         },
-        PresenceSurface::Desktop => SurfaceDisplay {
+        (PresenceSurface::Desktop, DesktopPresenceDesign::CodexApp) => SurfaceDisplay {
             large_image_key: &config.display.desktop_large_image_key,
-            large_text: &config.display.desktop_large_text,
-            idle_details: "Codex App",
+            large_text: label,
+            idle_details: label,
         },
     }
 }
@@ -423,7 +417,10 @@ fn status_for_client_id(surface: PresenceSurface, client_id: Option<&str>) -> St
     } else if matches!(surface, PresenceSurface::Desktop) {
         "Missing desktop Discord client id".to_string()
     } else {
-        "Missing CODEX_DISCORD_CLIENT_ID".to_string()
+        format!(
+            "Missing Discord client id for {}",
+            surface.label(DesktopPresenceDesign::CodexApp)
+        )
     }
 }
 
@@ -498,7 +495,7 @@ fn presence_lines(
     session: &CodexSessionSnapshot,
     effective_limits: Option<&RateLimits>,
     resolved_plan: &ResolvedPlan,
-    resolved_service_tier: &ResolvedServiceTier,
+    _resolved_service_tier: &ResolvedServiceTier,
     config: &PresenceConfig,
 ) -> (String, String) {
     if config.privacy.enabled {
@@ -548,14 +545,16 @@ fn presence_lines(
             format_model_display(
                 model,
                 session.reasoning_effort,
-                resolved_service_tier.is_fast()
+                session.speed.mode == SpeedMode::Fast,
             ),
             resolved_plan.label(config.openai_plan.show_price)
         );
         state_parts.push(truncate_for_limit(&label, 68));
     }
-    if config.privacy.show_cost && session.total_cost_usd > 0.0 {
-        state_parts.push(format_cost(session.total_cost_usd));
+    if config.privacy.show_cost
+        && let Some(cost) = format_presentable_cost(session.known_cost_usd, session.pricing_status)
+    {
+        state_parts.push(cost);
     }
     if let Some(usage) = usage_state_part(session, config.privacy.show_tokens) {
         state_parts.push(usage);
@@ -788,7 +787,8 @@ fn truncate_for_limit(input: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use crate::config::PresenceConfig;
-    use crate::cost::{PricingSource, TokenCostBreakdown};
+    use crate::cost::{CostAttribution, PricingSource, PricingStatus, TokenCostBreakdown};
+    use crate::model::SessionSpeed;
     use crate::session::{ContextWindowSnapshot, ContextWindowSource, RateLimits, UsageWindow};
     use crate::telemetry::plan::{DetectedPlanSource, DetectedPlanTier, ResolvedPlan};
     use crate::telemetry::service_tier::ServiceTier;
@@ -815,6 +815,7 @@ mod tests {
             source: None,
             model: Some("gpt-5.3-codex".to_string()),
             reasoning_effort: None,
+            speed: SessionSpeed::default(),
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: Some(30_000),
@@ -827,19 +828,27 @@ mod tests {
             last_cached_input_tokens: Some(900),
             last_output_tokens: Some(200),
             total_cost_usd: 1.234,
+            known_cost_usd: Some(1.234),
             cost_breakdown: TokenCostBreakdown {
                 input_cost_usd: 0.5,
+                cache_write_cost_usd: 0.0,
                 cached_input_cost_usd: 0.2,
                 output_cost_usd: 0.534,
                 cached_input_savings_usd: 0.3,
             },
             pricing_source: PricingSource::Alias,
+            pricing_status: PricingStatus::Exact,
+            cost_attribution: CostAttribution::SingleModel,
+            cost_breakdown_reconciled: true,
             context_window: Some(ContextWindowSnapshot {
+                raw_window_tokens: 258_400,
                 window_tokens: 258_400,
+                effective_percent: None,
                 used_tokens: 15_674,
                 remaining_tokens: 242_726,
                 remaining_percent: 93.94,
                 source: ContextWindowSource::Event,
+                raw_source: ContextWindowSource::Event,
             }),
             limits: RateLimits {
                 primary: Some(UsageWindow {
@@ -938,7 +947,7 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("GPT-5.3-Codex | Pro 20x ($200/month)"));
+        assert!(state.contains("5.3 Codex | Pro 20x ($200/month)"));
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K tok"));
         assert!(state.contains("Ctx 6% used"));
@@ -1029,13 +1038,18 @@ mod tests {
         );
         assert!(details.starts_with("Editing"));
         assert!(details.contains("project-alpha"));
-        assert!(state.contains("GPT-5.3-Codex"));
+        assert!(state.contains("5.3 Codex"));
     }
 
     #[test]
-    fn state_prefixes_model_with_fast_icon_and_effort() {
+    fn state_uses_session_scoped_fast_and_effort_labels() {
         let mut session = sample_session();
-        session.reasoning_effort = Some(crate::session::ReasoningEffort::XHigh);
+        session.model = Some("gpt-5.6-sol".to_string());
+        session.reasoning_effort = Some(crate::session::ReasoningEffort::Max);
+        session.speed = crate::model::SessionSpeed::explicit(
+            SpeedMode::Fast,
+            crate::model::SpeedSource::ThreadSettings,
+        );
         let config = PresenceConfig::default();
         let plan = resolved_plan_pro();
         let service_tier = resolved_service_tier(true);
@@ -1046,7 +1060,45 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("⚡ GPT-5.3-Codex (Extra High) | Pro 20x ($200/month)"));
+        assert!(state.contains("5.6 Sol Max · Fast | Pro 20x ($200/month)"));
+    }
+
+    #[test]
+    fn branding_uses_exact_surface_and_selected_desktop_design_labels() {
+        let mut config = PresenceConfig::default();
+        assert_eq!(
+            display_branding(PresenceSurface::Cli, &config).large_text,
+            "Codex CLI"
+        );
+        assert_eq!(
+            display_branding(PresenceSurface::VsCode, &config).large_text,
+            "Codex VS Code Extension"
+        );
+        assert_eq!(
+            display_branding(PresenceSurface::Desktop, &config).large_text,
+            "Codex App"
+        );
+
+        config.display.desktop_presence_design = crate::config::DesktopPresenceDesign::ChatGptApp;
+        let chatgpt = display_branding(PresenceSurface::Desktop, &config);
+        assert_eq!(chatgpt.large_text, "ChatGPT App");
+        assert_eq!(chatgpt.idle_details, "ChatGPT App");
+        assert_eq!(chatgpt.large_image_key, config.display.large_image_key);
+    }
+
+    #[test]
+    fn active_surface_uses_session_metadata_before_runtime_fallback() {
+        let mut session = sample_session();
+        session.originator = Some("codex_vscode".to_string());
+        session.source = Some("vscode".to_string());
+        assert_eq!(
+            detect_surface(
+                Some(&session),
+                PresenceSurface::Cli,
+                PresenceSurface::Desktop,
+            ),
+            PresenceSurface::VsCode
+        );
     }
 
     #[test]
@@ -1114,11 +1166,7 @@ mod tests {
         let mut session = sample_session();
         session.originator = Some("Codex Desktop".to_string());
         assert_eq!(
-            detect_surface(
-                Some(&session),
-                PresenceSurface::Default,
-                PresenceSurface::Default
-            ),
+            detect_surface(Some(&session), PresenceSurface::Cli, PresenceSurface::Cli),
             PresenceSurface::Desktop
         );
     }
@@ -1126,7 +1174,7 @@ mod tests {
     #[test]
     fn detect_surface_uses_desktop_fallback_for_opencode_idle() {
         assert_eq!(
-            detect_surface(None, PresenceSurface::Desktop, PresenceSurface::Default),
+            detect_surface(None, PresenceSurface::Desktop, PresenceSurface::Cli),
             PresenceSurface::Desktop
         );
     }
@@ -1138,7 +1186,7 @@ mod tests {
             detect_surface(
                 Some(&session),
                 PresenceSurface::Desktop,
-                PresenceSurface::Default
+                PresenceSurface::Cli
             ),
             PresenceSurface::Desktop
         );
@@ -1147,7 +1195,7 @@ mod tests {
     #[test]
     fn idle_surface_keeps_last_desktop_branding() {
         assert_eq!(
-            detect_surface(None, PresenceSurface::Default, PresenceSurface::Desktop),
+            detect_surface(None, PresenceSurface::Cli, PresenceSurface::Desktop),
             PresenceSurface::Desktop
         );
     }

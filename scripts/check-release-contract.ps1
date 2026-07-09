@@ -72,6 +72,29 @@ function Get-ChangelogSection {
     return $section.Groups["body"].Value.Trim()
 }
 
+function Assert-ReleaseVersionSurfaces {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Root,
+
+        [Parameter(Mandatory)]
+        [string] $Version
+    )
+
+    $readmePath = Join-Path $Root "README.md"
+    if (-not (Test-Path -LiteralPath $readmePath -PathType Leaf)) {
+        throw "README.md is missing at '$readmePath'."
+    }
+    $readme = Get-Content -Raw -LiteralPath $readmePath
+    $escapedVersion = [regex]::Escape($Version)
+    if ($readme -notmatch "Release v$escapedVersion") {
+        throw "README.md release badge does not match version '$Version'."
+    }
+    if ($readme -notmatch "What's New in v$escapedVersion") {
+        throw "README.md What's New heading does not match version '$Version'."
+    }
+}
+
 function Write-ReleaseNotes {
     param(
         [Parameter(Mandatory)]
@@ -128,6 +151,7 @@ function Write-ReleaseNotes {
         "- codex-discord-rich-presence-macos-x64"
         "- codex-discord-rich-presence-macos-arm64"
         "- codex-app-logo.png"
+        "- chatgpt-app-logo.jpg"
         "- SHA256SUMS.txt"
         ""
         "## Integrity"
@@ -169,6 +193,7 @@ try {
     if ($version -ne $cargoVersion) {
         throw "Tag version '$version' does not match Cargo package version '$cargoVersion'."
     }
+    Assert-ReleaseVersionSurfaces -Root $root -Version $version
 
     $changelogSection = Get-ChangelogSection -Root $root -Version $version
 

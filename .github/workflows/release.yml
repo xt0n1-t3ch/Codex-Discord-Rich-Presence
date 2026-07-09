@@ -45,6 +45,12 @@ jobs:
         with:
           shared-key: codex-discord-presence-release-preflight
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: RustSec audit
+        run: cargo audit --deny warnings
+
       - name: Validate release metadata
         id: metadata
         shell: pwsh
@@ -142,6 +148,7 @@ jobs:
           cp "${CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence" "${output_directory}/${binary_name}"
           chmod +x "${output_directory}/${binary_name}"
           cp assets/branding/codex-app.png "${output_directory}/codex-app-logo.png"
+          cp assets/branding/chatgpt-app.jpg "${output_directory}/chatgpt-app-logo.jpg"
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
@@ -151,6 +158,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
           Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence.exe" "$outputDirectory/codex-discord-rich-presence-windows-x64.exe"
           Copy-Item "assets/branding/codex-app.png" "$outputDirectory/codex-app-logo.png"
+          Copy-Item "assets/branding/chatgpt-app.jpg" "$outputDirectory/chatgpt-app-logo.jpg"
 
       - name: Upload target artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -198,7 +206,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s release-assets/SHA256SUMS.txt
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 6
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 7
           cd release-assets
           sha256sum --check SHA256SUMS.txt
 

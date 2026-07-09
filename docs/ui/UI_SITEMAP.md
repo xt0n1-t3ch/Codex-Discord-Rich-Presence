@@ -14,13 +14,14 @@ The foreground terminal is a Ratatui dashboard over the same daemon runtime that
 
 | Widget | Contract |
 |:---|:---|
-| Runtime header | Large centered Codex wordmark, local-first subtitle, animated spinner, mode, Discord status, poll cadence |
-| Active session | Project, branch, model, reasoning effort, Fast state, cost, token triplet, context use, activity target |
+| Runtime header | Large centered Codex wordmark, local-first subtitle, animated spinner, mode, Discord status, poll cadence, selected desktop design |
+| Active session | Project, branch, model, reasoning effort, Fast state, cost, token triplet, usable/raw context, activity target |
 | Quota + context | Primary/secondary gauges, plan label, Fast label, source freshness, OAuth/API context copy |
 | Usage snapshot | Total cost, cache hit ratio, cached-input savings, uptime, spend sparkline by model |
 | Recent sessions | Responsive list of recent project/model/token summaries |
 | Plan picker | Centered selector with Auto Detect plus Free, Go, Plus, Pro 5x, Pro 20x, Business, and Enterprise presets |
-| Footer | Author credit plus available keyboard actions; collapses safely on narrow terminals |
+| Desktop design | `D` immediately toggles and persists `Codex App` / `ChatGPT App`; the next publish reconnects to the matching Discord application |
+| Footer | Author credit plus `P`, `D`, and quit actions; collapses safely on narrow terminals |
 
 ## Theme
 
@@ -34,16 +35,16 @@ The theme is Codex dark with a restrained black-and-white terminal palette:
 
 ## Motion
 
-Animation is tick-driven by `RenderData.banner_phase`. The frame signature includes `banner_phase`, active session fields, limits, metrics, and plan picker state so the runtime redraws only when visible state changes.
+Animation is tick-driven by `RenderData.banner_phase`. The frame signature includes `banner_phase`, desktop design, active model/effort/speed, limits, metrics, and plan picker state so the runtime redraws only when visible state changes.
 
 ## Logo Policy
 
-`assets/branding/codex-app.png` remains the real Codex App source image for README and Discord preview assets. The terminal header intentionally uses a text wordmark instead of duplicating the app icon, so Codex stays large, centered, and readable on every platform terminal.
+`assets/branding/codex-app.png` and `assets/branding/chatgpt-app.jpg` are the canonical desktop preview sources. The terminal header intentionally uses a text wordmark instead of duplicating either app icon, so the UI stays readable and the selected design remains a semantic status label.
 
 ## Accessibility + Resilience
 
 - No mouse dependency.
 - Compact and minimal modes avoid horizontal overflow.
 - Quota colors are paired with text labels and percentages.
-- Idle copy explicitly explains sticky Codex App branding.
+- Idle copy reports the selected desktop design without collapsing CLI and VS Code into one label.
 - If metrics are not ready, the widget renders a warm-up state instead of blank space.
