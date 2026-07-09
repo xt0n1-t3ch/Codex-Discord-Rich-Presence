@@ -172,6 +172,14 @@ impl ContextSource {
     pub const Event: Self = Self::ObservedJsonl;
     #[allow(non_upper_case_globals)]
     pub const Catalog: Self = Self::BundledCatalog;
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ObservedJsonl => "observed JSONL",
+            Self::LocalModelCache => "models_cache.json",
+            Self::BundledCatalog => "bundled catalog",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,6 +188,7 @@ pub struct ResolvedContextWindow {
     pub effective_tokens: u64,
     pub effective_percent: Option<u8>,
     pub source: ContextSource,
+    pub raw_source: ContextSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,25 +343,37 @@ pub fn resolve_context_window_from_cache_path(
     observed_window_tokens: Option<u64>,
     cache_path: &Path,
 ) -> Option<ResolvedContextWindow> {
+    let inventory = context_from_local_cache(model_id, cache_path).or_else(|| {
+        let context = resolve_model(model_id)?.context()?;
+        Some(context_resolution(
+            context.raw_tokens,
+            context.effective_percent,
+            ContextSource::BundledCatalog,
+        ))
+    });
+
     if let Some(observed) = observed_window_tokens.filter(|value| valid_context(*value)) {
+        if let Some(inventory) = inventory
+            && inventory.effective_tokens == observed
+        {
+            return Some(ResolvedContextWindow {
+                raw_tokens: inventory.raw_tokens,
+                effective_tokens: observed,
+                effective_percent: inventory.effective_percent,
+                source: ContextSource::ObservedJsonl,
+                raw_source: inventory.raw_source,
+            });
+        }
         return Some(ResolvedContextWindow {
             raw_tokens: observed,
             effective_tokens: observed,
             effective_percent: None,
             source: ContextSource::ObservedJsonl,
+            raw_source: ContextSource::ObservedJsonl,
         });
     }
 
-    if let Some(local) = context_from_local_cache(model_id, cache_path) {
-        return Some(local);
-    }
-
-    let context = resolve_model(model_id)?.context()?;
-    Some(context_resolution(
-        context.raw_tokens,
-        context.effective_percent,
-        ContextSource::BundledCatalog,
-    ))
+    inventory
 }
 
 fn resolve_pricing_model(model: &'static CatalogModel) -> Option<&'static CatalogModel> {
@@ -406,6 +427,7 @@ fn context_resolution(
         effective_tokens,
         effective_percent: Some(effective_percent),
         source,
+        raw_source: source,
     }
 }
 

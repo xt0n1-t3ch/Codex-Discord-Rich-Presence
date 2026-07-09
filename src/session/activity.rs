@@ -660,11 +660,6 @@ fn speed_from_signal(model_id: &str, service_tier: Option<&str>) -> Option<Sessi
     None
 }
 
-pub(super) fn looks_like_desktop_surface(value: &str) -> bool {
-    let normalized = value.to_ascii_lowercase();
-    normalized.contains("desktop") || normalized.contains("opencode")
-}
-
 fn classify_shell_command(arguments: &str) -> PendingActivity {
     let command = shell_command_text(arguments);
     if command.trim().is_empty() {

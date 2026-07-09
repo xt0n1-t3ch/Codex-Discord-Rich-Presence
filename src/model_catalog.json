@@ -4,7 +4,12 @@
   "sources": [
     {
       "kind": "openai_model_guide",
-      "url": "https://developers.openai.com/api/docs/guides/latest-model.md",
+      "url": "https://developers.openai.com/api/docs/guides/latest-model",
+      "verified_on": "2026-07-09"
+    },
+    {
+      "kind": "openai_model_catalog",
+      "url": "https://developers.openai.com/api/docs/models",
       "verified_on": "2026-07-09"
     },
     {
@@ -73,9 +78,9 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": true,
       "fast_usage_multiplier": 2.5,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 272000, "effective_percent": 95, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 5.0, "cache_write_per_million": null, "cached_input_per_million": 0.5, "output_per_million": 30.0 },
-      "credit_rates": null
+      "credit_rates": { "input_per_million": 125.0, "cache_write_per_million": null, "cached_input_per_million": 12.5, "output_per_million": 750.0 }
     },
     {
       "id": "gpt-5.5-pro",
@@ -84,7 +89,7 @@
       "reasoning_efforts": ["high", "xhigh"],
       "supports_fast": true,
       "fast_usage_multiplier": 2.5,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 1050000, "effective_percent": 100, "api_tokens": 1050000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 30.0, "cache_write_per_million": null, "cached_input_per_million": 3.0, "output_per_million": 180.0 },
       "credit_rates": null
     },
@@ -95,20 +100,20 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": true,
       "fast_usage_multiplier": 2.0,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 272000, "effective_percent": 95, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 2.5, "cache_write_per_million": null, "cached_input_per_million": 0.25, "output_per_million": 15.0 },
-      "credit_rates": null
+      "credit_rates": { "input_per_million": 62.5, "cache_write_per_million": null, "cached_input_per_million": 6.25, "output_per_million": 375.0 }
     },
     {
       "id": "gpt-5.4-mini",
       "aliases": [],
       "display_name": "5.4 Mini",
-      "reasoning_efforts": ["low", "medium", "high"],
-      "supports_fast": true,
-      "fast_usage_multiplier": 2.0,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
-      "api_pricing": { "input_per_million": 0.25, "cache_write_per_million": null, "cached_input_per_million": 0.025, "output_per_million": 2.0 },
-      "credit_rates": null
+      "reasoning_efforts": ["low", "medium", "high", "xhigh"],
+      "supports_fast": false,
+      "fast_usage_multiplier": null,
+      "context": { "raw_tokens": 272000, "effective_percent": 95, "api_tokens": 400000, "max_output_tokens": 128000 },
+      "api_pricing": { "input_per_million": 0.75, "cache_write_per_million": null, "cached_input_per_million": 0.075, "output_per_million": 4.5 },
+      "credit_rates": { "input_per_million": 18.75, "cache_write_per_million": null, "cached_input_per_million": 1.875, "output_per_million": 113.0 }
     },
     {
       "id": "gpt-5.3-codex",
@@ -117,19 +122,19 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": false,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 400000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 1.75, "cache_write_per_million": null, "cached_input_per_million": 0.175, "output_per_million": 14.0 },
-      "credit_rates": null
+      "credit_rates": { "input_per_million": 43.75, "cache_write_per_million": null, "cached_input_per_million": 4.375, "output_per_million": 350.0 }
     },
     {
       "id": "gpt-5.3-codex-spark",
       "aliases": ["gpt-5.3-codex-spark-latest"],
       "display_name": "5.3 Codex Spark",
-      "reasoning_efforts": ["low", "medium", "high"],
+      "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": false,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
-      "pricing_model": "gpt-5.3-codex",
+      "context": { "raw_tokens": 128000, "effective_percent": 95 },
+      "pricing_model": null,
       "api_pricing": null,
       "credit_rates": null
     },
@@ -140,7 +145,7 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": false,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 400000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 1.75, "cache_write_per_million": null, "cached_input_per_million": 0.175, "output_per_million": 14.0 },
       "credit_rates": null
     },
@@ -151,7 +156,7 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": false,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 400000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 1.25, "cache_write_per_million": null, "cached_input_per_million": 0.125, "output_per_million": 10.0 },
       "credit_rates": null
     },
@@ -162,7 +167,7 @@
       "reasoning_efforts": ["low", "medium", "high"],
       "supports_fast": false,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 400000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 0.25, "cache_write_per_million": null, "cached_input_per_million": 0.025, "output_per_million": 2.0 },
       "credit_rates": null
     },
@@ -173,7 +178,7 @@
       "reasoning_efforts": ["low", "medium"],
       "supports_fast": false,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
+      "context": { "raw_tokens": 400000, "effective_percent": 100, "api_tokens": 400000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 0.05, "cache_write_per_million": null, "cached_input_per_million": 0.005, "output_per_million": 0.4 },
       "credit_rates": null
     },

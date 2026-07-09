@@ -193,10 +193,17 @@ pub fn compute_cost(
 
     let cache_complete =
         pricing.cache_write_per_million.is_none() || usage.cache_write_tokens.is_some();
+    // Session telemetry is cumulative and cannot prove whether any one prompt crossed the
+    // model's long-context threshold. Preserve the published base-rate subtotal as a lower
+    // bound instead of presenting it as exact once cumulative input exceeds that boundary.
+    let long_context_complete = model
+        .and_then(|model| model.context())
+        .and_then(|context| context.long_context_input_threshold)
+        .is_none_or(|threshold| usage.input_tokens <= threshold);
     let Some(known_total) = breakdown.known_component_total() else {
         return unavailable_computation();
     };
-    let status = if cache_complete && speed_complete {
+    let status = if cache_complete && speed_complete && long_context_complete {
         PricingStatus::Exact
     } else {
         PricingStatus::Partial
@@ -431,6 +438,22 @@ mod tests {
         assert_eq!(metadata.long_context_input_threshold, None);
         assert_eq!(metadata.max_output_tokens, None);
         assert_eq!(speed_multiplier("gpt-5.6-sol", true), 1.0);
+    }
+
+    #[test]
+    fn cumulative_input_above_long_context_threshold_is_a_lower_bound() {
+        let computed = compute_cost(
+            "gpt-5.5",
+            TokenUsage {
+                input_tokens: 272_001,
+                output_tokens: 1_000,
+                ..TokenUsage::default()
+            },
+            SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
+            &PricingConfig::default(),
+        );
+        assert_eq!(computed.status, PricingStatus::Partial);
+        assert!(computed.known_total_cost_usd.is_some());
     }
 
     #[test]

@@ -290,11 +290,14 @@ fn context_window_from_part_with_cache_path(
     let remaining_percent =
         ((remaining_tokens as f64 / window_tokens as f64) * 100.0).clamp(0.0, 100.0);
     Some(ContextWindowSnapshot {
+        raw_window_tokens: resolved_context.raw_tokens,
         window_tokens,
+        effective_percent: resolved_context.effective_percent,
         used_tokens,
         remaining_tokens,
         remaining_percent,
         source: resolved_context.source,
+        raw_source: resolved_context.raw_source,
     })
 }
 
@@ -623,11 +626,14 @@ mod tests {
             &dir.path().join("missing.json"),
         )
         .expect("context");
-        assert_eq!(context.window_tokens, 400_000);
+        assert_eq!(context.raw_window_tokens, 272_000);
+        assert_eq!(context.window_tokens, 258_400);
+        assert_eq!(context.effective_percent, Some(95));
         assert_eq!(context.used_tokens, 231_782);
-        assert_eq!(context.remaining_tokens, 168_218);
-        assert!((context.remaining_percent - 42.05).abs() < 0.05);
+        assert_eq!(context.remaining_tokens, 26_618);
+        assert!((context.remaining_percent - 10.30).abs() < 0.05);
         assert_eq!(context.source, ContextWindowSource::Catalog);
+        assert_eq!(context.raw_source, ContextWindowSource::Catalog);
     }
 
     #[test]
@@ -640,9 +646,10 @@ mod tests {
             &dir.path().join("missing.json"),
         )
         .expect("context");
-        assert_eq!(context.window_tokens, 400_000);
+        assert_eq!(context.raw_window_tokens, 272_000);
+        assert_eq!(context.window_tokens, 258_400);
         assert_eq!(context.used_tokens, 231_782);
-        assert!((context.remaining_percent - 42.05).abs() < 0.05);
+        assert!((context.remaining_percent - 10.30).abs() < 0.05);
     }
 
     #[test]
@@ -661,7 +668,9 @@ mod tests {
             &dir.path().join("missing.json"),
         )
         .expect("context");
-        assert_eq!(context.used_tokens, 400_000);
+        assert_eq!(context.raw_window_tokens, 272_000);
+        assert_eq!(context.window_tokens, 258_400);
+        assert_eq!(context.used_tokens, 258_400);
         assert_eq!(context.remaining_tokens, 0);
         assert_eq!(context.remaining_percent, 0.0);
     }

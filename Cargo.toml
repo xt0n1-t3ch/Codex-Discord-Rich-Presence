@@ -1,8 +1,8 @@
 [package]
 name = "codex-discord-presence"
-version = "1.7.1"
+version = "1.7.2"
 edition = "2024"
-description = "Discord Rich Presence for Codex CLI/VS Code and Codex App (Desktop) sessions"
+description = "Discord Rich Presence for Codex CLI, Codex VS Code Extension, Codex App, and ChatGPT App sessions"
 license = "MIT"
 keywords = ["codex", "discord", "rich-presence", "cli", "tui"]
 categories = ["command-line-utilities"]
@@ -14,7 +14,7 @@ panic = "abort"
 strip = true
 
 [dependencies]
-anyhow = "1.0.100"
+anyhow = "1.0.103"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
 clap = { version = "4.5.51", features = ["derive"] }
 crossterm = "0.29.0"
@@ -32,7 +32,6 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "time"] }
 ureq = { version = "2.12.1", default-features = true }
 walkdir = "2.5.0"
-viuer = { version = "0.11.0", features = ["print-file"] }
 
 [build-dependencies]
 ico = "0.4.0"

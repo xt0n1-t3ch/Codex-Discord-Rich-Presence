@@ -84,6 +84,11 @@ Assert-Matches '(?m)^profile = "minimal"\r?$' $toolchain "Rust toolchain must us
 Assert-ImmutableActionPins -Workflow $ci -WorkflowName "CI"
 Assert-ImmutableActionPins -Workflow $release -WorkflowName "Release"
 Assert-Matches 'tests/release_approval.tests.ps1' $ci "CI must run the immutable-release approval contract on every platform."
+foreach ($workflow in @($ci, $release)) {
+    Assert-Matches 'cargo install cargo-audit --version 0\.22\.2 --locked' $workflow "Every validation workflow must pin cargo-audit 0.22.2."
+    Assert-Matches 'cargo audit --deny warnings' $workflow "Every validation workflow must reject RustSec warnings."
+}
+Assert-Matches "(?ms)- name: RustSec audit\r?\n\s+if: runner\.os == 'Linux'" $ci "CI must run RustSec once on Linux."
 
 Assert-Matches '(?ms)^permissions:\r?\n  contents: read\s*$' $release "Release workflow must default to contents: read."
 Assert-NotMatches '(?m)^\s*workflow_dispatch:' $release "Release workflow must remain tag-only."
@@ -102,6 +107,7 @@ foreach ($requiredCommand in @(
     'tests/release_target.tests.ps1'
     'tests/release_assets.tests.ps1'
     'tests/release_workflow.tests.ps1'
+    'cargo audit --deny warnings'
     'cargo --locked fmt --check'
     'cargo --locked clippy --workspace --all-targets --all-features -- -D warnings'
     'cargo --locked test --workspace --all-features --verbose'
@@ -143,6 +149,7 @@ Assert-NotMatches 'awk -v version=' $publish "Changelog extraction must not inte
 Assert-NotMatches 'Codex Discord Rich Presence -' $release "Release assets must not use filenames GitHub normalizes."
 Assert-Matches 'codex-discord-rich-presence-windows-x64\.exe' $release "Windows packaging must keep the portable release filename."
 Assert-Matches 'codex-app-logo\.png' $release "The packaged logo must keep the portable release filename."
+Assert-Matches 'chatgpt-app-logo\.jpg' $release "The ChatGPT design logo must keep the portable release filename."
 Assert-Matches 'Upload validated release metadata' $preflight "Validated release notes must cross the workflow as an artifact."
 Assert-Matches 'downloaded-artifacts/release-metadata/RELEASE_NOTES\.md' $publish "Publish must consume the notes validated during preflight."
 
@@ -157,7 +164,16 @@ if ($cargoCommands.Count -eq 0) {
     throw "Workflow contract did not discover any Cargo commands."
 }
 foreach ($cargoCommand in $cargoCommands) {
-    Assert-Matches '\bcargo --locked\s+' $cargoCommand.Value "Cargo command is not lockfile-enforced: $($cargoCommand.Value.Trim())"
+    $command = $cargoCommand.Value.Trim()
+    if ($command -match '^run: cargo install cargo-audit ') {
+        Assert-Matches '--version 0\.22\.2 --locked$' $command "cargo-audit installation must pin its version and lockfile: $command"
+        continue
+    }
+    if ($command -match '^run: cargo audit ') {
+        Assert-Matches '^run: cargo audit --deny warnings$' $command "RustSec audit must reject every warning: $command"
+        continue
+    }
+    Assert-Matches '\bcargo --locked\s+' $command "Cargo command is not lockfile-enforced: $command"
 }
 
 foreach ($workflow in @($ci, $release)) {

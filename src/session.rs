@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-use crate::config::PricingConfig;
+use crate::config::{PresenceSurface, PricingConfig};
 use crate::cost::{CostAttribution, PricingSource, PricingStatus, TokenCostBreakdown};
 pub use crate::model::{
     ContextSource as ContextWindowSource, ReasoningEffort, SessionSpeed, SpeedMode, SpeedSource,
@@ -24,7 +24,7 @@ use crate::telemetry::limits::{
 mod activity;
 mod parser;
 
-use activity::{SessionAccumulator, looks_like_desktop_surface};
+use activity::SessionAccumulator;
 pub(crate) use activity::{
     sanitize_domain_target, sanitize_file_target, summarize_command_for_presence,
 };
@@ -34,11 +34,17 @@ use parser::{parse_new_lines, parse_session_file, parse_utc_timestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ContextWindowSnapshot {
+    #[serde(default)]
+    pub raw_window_tokens: u64,
     pub window_tokens: u64,
+    #[serde(default)]
+    pub effective_percent: Option<u8>,
     pub used_tokens: u64,
     pub remaining_tokens: u64,
     pub remaining_percent: f64,
     pub source: ContextWindowSource,
+    #[serde(default)]
+    pub raw_source: ContextWindowSource,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -132,14 +138,12 @@ pub struct CodexSessionSnapshot {
 }
 
 impl CodexSessionSnapshot {
+    pub fn detected_surface(&self) -> Option<PresenceSurface> {
+        PresenceSurface::detect(self.originator.as_deref(), self.source.as_deref())
+    }
+
     pub fn is_desktop_surface(&self) -> bool {
-        self.originator
-            .as_deref()
-            .is_some_and(looks_like_desktop_surface)
-            || self
-                .source
-                .as_deref()
-                .is_some_and(looks_like_desktop_surface)
+        self.detected_surface() == Some(PresenceSurface::Desktop)
     }
 }
 
@@ -686,6 +690,33 @@ mod tests {
         assert_eq!(snapshot.originator.as_deref(), Some("Codex Desktop"));
         assert_eq!(snapshot.source.as_deref(), Some("vscode"));
         assert!(snapshot.is_desktop_surface());
+    }
+
+    #[test]
+    fn session_meta_distinguishes_cli_vscode_and_desktop_surfaces() {
+        let desktop = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"desktop","cwd":"C:\\repo\\app","originator":"Codex Desktop","source":"vscode"}}"#,
+        );
+        assert_eq!(
+            desktop.detected_surface(),
+            Some(crate::config::PresenceSurface::Desktop)
+        );
+
+        let vscode = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"vscode","cwd":"C:\\repo\\app","originator":"codex_vscode","source":"vscode"}}"#,
+        );
+        assert_eq!(
+            vscode.detected_surface(),
+            Some(crate::config::PresenceSurface::VsCode)
+        );
+
+        let cli = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"cli","cwd":"C:\\repo\\app","originator":"codex-tui","source":"cli"}}"#,
+        );
+        assert_eq!(
+            cli.detected_surface(),
+            Some(crate::config::PresenceSurface::Cli)
+        );
     }
 
     #[test]

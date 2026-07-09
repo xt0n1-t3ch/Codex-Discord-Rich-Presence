@@ -123,8 +123,11 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
     }
     println!("config: {}", config::config_path().display());
     print_session_roots("sessions_dirs", &session_roots);
-    println!("runtime_surface: {}", surface_label(runtime_surface_hint()));
-    let default_client_id = config.effective_client_id_for_surface(PresenceSurface::Default);
+    println!(
+        "runtime_surface: {}",
+        runtime_surface_hint().label(config.display.desktop_presence_design)
+    );
+    let default_client_id = config.effective_client_id_for_surface(PresenceSurface::Cli);
     let desktop_client_id = config.effective_client_id_for_surface(PresenceSurface::Desktop);
     println!(
         "discord_client_id_default: {}",
@@ -189,7 +192,7 @@ pub fn doctor(config: &PresenceConfig) -> Result<u8> {
         );
     }
 
-    let default_client_id = config.effective_client_id_for_surface(PresenceSurface::Default);
+    let default_client_id = config.effective_client_id_for_surface(PresenceSurface::Cli);
     let desktop_client_id = config.effective_client_id_for_surface(PresenceSurface::Desktop);
     if default_client_id.is_none() && desktop_client_id.is_none() {
         issues += 1;
@@ -308,7 +311,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     mode_label: "Smart Foreground",
                     discord_status: discord.status(),
                     client_id_configured: config
-                        .effective_client_id_for_surface(PresenceSurface::Default)
+                        .effective_client_id_for_surface(PresenceSurface::Cli)
                         .is_some()
                         || config
                             .effective_client_id_for_surface(PresenceSurface::Desktop)
@@ -326,6 +329,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     spark_plan_warning,
                     logo_mode: config.display.terminal_logo_mode.clone(),
                     logo_path: config.display.terminal_logo_path.as_deref(),
+                    desktop_design_label: config.display.desktop_presence_design.label(),
                     banner_phase: ((started.elapsed().as_millis() / 450) % 8) as u8,
                     active,
                     effective_limits: snapshot.effective_limits(),
@@ -432,6 +436,15 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                         } else if is_plan_picker_toggle_key(&key) {
                             plan_picker_selected = plan_preset_index(&config.openai_plan);
                             plan_picker_open = true;
+                            request_redraw(
+                                &mut force_redraw,
+                                &mut last_tick,
+                                runtime.poll_interval,
+                            );
+                        } else if is_desktop_design_toggle_key(&key) {
+                            config.display.desktop_presence_design =
+                                config.display.desktop_presence_design.toggled();
+                            config.save()?;
                             request_redraw(
                                 &mut force_redraw,
                                 &mut last_tick,
@@ -752,42 +765,67 @@ fn publish_runtime_snapshot(
 }
 
 fn runtime_surface_hint() -> PresenceSurface {
-    if env::vars().any(|(key, value)| looks_like_opencode(&key) || looks_like_opencode(&value)) {
-        return PresenceSurface::Desktop;
-    }
-    if process_list_contains_desktop_codex_surface() {
-        PresenceSurface::Desktop
+    let lineage_surface = process_lineage_surface();
+    if let Some(surface @ (PresenceSurface::Desktop | PresenceSurface::VsCode)) = lineage_surface {
+        surface
+    } else if let Some(surface) = surface_from_environment(env::vars()) {
+        surface
     } else {
-        PresenceSurface::Default
+        lineage_surface.unwrap_or(PresenceSurface::Cli)
     }
 }
 
-fn surface_label(surface: PresenceSurface) -> &'static str {
-    match surface {
-        PresenceSurface::Default => "Codex CLI / Codex VS Code Extension",
-        PresenceSurface::Desktop => "Codex App",
+fn surface_from_environment<I, K, V>(vars: I) -> Option<PresenceSurface>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    for (key, value) in vars {
+        let key = key.as_ref().trim().to_ascii_uppercase();
+        let value = value.as_ref().trim();
+        if key == "CODEX_PRESENCE_SURFACE"
+            && let Some(surface) = crate::config::PresenceSurface::detect(Some(value), None)
+        {
+            return Some(surface);
+        }
+        if (key == "OPENCODE" || key.starts_with("OPENCODE_")) && !value.is_empty() {
+            return Some(PresenceSurface::Desktop);
+        }
     }
+    None
 }
 
-fn process_list_contains_desktop_codex_surface() -> bool {
-    process_list_text()
-        .map(|text| surface_from_process_list(&text) == PresenceSurface::Desktop)
-        .unwrap_or(false)
+fn process_lineage_surface() -> Option<PresenceSurface> {
+    process_lineage_text().map(|text| surface_from_process_lineage(&text))
 }
 
-fn surface_from_process_list(text: &str) -> PresenceSurface {
-    if text
-        .lines()
-        .any(|line| looks_like_opencode(line) || looks_like_codex_app(line))
-    {
-        PresenceSurface::Desktop
+fn surface_from_process_lineage(text: &str) -> PresenceSurface {
+    let mut vscode_detected = false;
+    for line in text.lines() {
+        if looks_like_opencode(line) || looks_like_codex_app(line) {
+            return PresenceSurface::Desktop;
+        }
+        if looks_like_vscode_process(line) {
+            vscode_detected = true;
+        }
+    }
+    if vscode_detected {
+        PresenceSurface::VsCode
     } else {
-        PresenceSurface::Default
+        PresenceSurface::Cli
     }
 }
 
 fn looks_like_opencode(value: &str) -> bool {
     value.to_ascii_lowercase().contains("opencode")
+}
+
+fn looks_like_vscode_process(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    normalized.contains("extensionhostprocess.js")
+        || normalized.contains("extension-host")
+        || normalized.contains("extension_host")
 }
 
 fn looks_like_codex_app(value: &str) -> bool {
@@ -800,13 +838,26 @@ fn looks_like_codex_app(value: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn process_list_text() -> Option<String> {
+fn process_lineage_text() -> Option<String> {
+    let process_id = std::process::id();
+    let script = format!(
+        r#"$processId = {process_id}
+$lines = [System.Collections.Generic.List[string]]::new()
+for ($depth = 0; $depth -lt 8; $depth++) {{
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
+    if ($null -eq $process) {{ break }}
+    [void]$lines.Add("$($process.Name) $($process.CommandLine)")
+    if ($process.ParentProcessId -eq 0 -or $process.ParentProcessId -eq $processId) {{ break }}
+    $processId = [uint32]$process.ParentProcessId
+}}
+$lines -join "`n""#
+    );
     let output = Command::new("powershell")
         .arg("-NoProfile")
         .arg("-ExecutionPolicy")
         .arg("Bypass")
         .arg("-Command")
-        .arg("Get-CimInstance Win32_Process | Select-Object -ExpandProperty CommandLine")
+        .arg(script)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
@@ -818,17 +869,41 @@ fn process_list_text() -> Option<String> {
 }
 
 #[cfg(not(windows))]
-fn process_list_text() -> Option<String> {
-    let output = Command::new("ps")
-        .args(["-eo", "comm,args"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+fn process_lineage_text() -> Option<String> {
+    let mut process_id = std::process::id();
+    let mut lineage = Vec::new();
+    for _ in 0..8 {
+        let output = Command::new("ps")
+            .args([
+                "-o",
+                "ppid=",
+                "-o",
+                "comm=",
+                "-o",
+                "args=",
+                "-p",
+                &process_id.to_string(),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            break;
+        }
+        let row = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let mut fields = row.splitn(2, char::is_whitespace);
+        let parent_id = fields.next()?.trim().parse::<u32>().ok()?;
+        let process = fields.next().unwrap_or_default().trim();
+        if !process.is_empty() {
+            lineage.push(process.to_string());
+        }
+        if parent_id == 0 || parent_id == process_id {
+            break;
+        }
+        process_id = parent_id;
+    }
+    (!lineage.is_empty()).then(|| lineage.join("\n"))
 }
 
 fn print_active_summary(
@@ -920,6 +995,19 @@ fn print_active_summary(
             crate::util::format_tokens(context.window_tokens),
             (100.0 - context.remaining_percent).clamp(0.0, 100.0)
         );
+        println!(
+            "  context_window_usable: {}",
+            crate::util::format_tokens(context.window_tokens)
+        );
+        println!(
+            "  context_window_raw: {}",
+            crate::util::format_tokens(context.raw_window_tokens)
+        );
+        println!("  context_source: {}", context.source.label());
+        println!("  context_raw_source: {}", context.raw_source.label());
+        if let Some(percent) = context.effective_percent {
+            println!("  context_effective_percent: {percent}%");
+        }
     } else {
         println!("  context: n/a");
     }
@@ -1022,6 +1110,17 @@ fn is_plan_picker_toggle_key(key: &KeyEvent) -> bool {
         && !key.modifiers.contains(KeyModifiers::SUPER)
 }
 
+fn is_desktop_design_toggle_key(key: &KeyEvent) -> bool {
+    if !matches!(key.kind, KeyEventKind::Press) {
+        return false;
+    }
+
+    matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D'))
+        && !key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+        && !key.modifiers.contains(KeyModifiers::SUPER)
+}
+
 fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interval: Duration) {
     *force_redraw = true;
     *last_tick = Instant::now() - poll_interval;
@@ -1032,39 +1131,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opencode_process_list_selects_codex_app_surface() {
+    fn opencode_process_lineage_selects_codex_app_surface() {
         let processes = "WindowsTerminal.exe\nopencode.exe --project app\ncmd.exe";
         assert_eq!(
-            surface_from_process_list(processes),
+            surface_from_process_lineage(processes),
             PresenceSurface::Desktop
         );
     }
 
     #[test]
-    fn official_codex_app_process_list_selects_codex_app_surface() {
+    fn official_codex_app_process_lineage_selects_codex_app_surface() {
         let processes = r#"
 "Codex.exe" "C:\Program Files\WindowsApps\OpenAI.Codex_26.623.13972.0_x64__2p2nqsd0c76g0\app\Codex.exe"
 "codex.exe" "C:\Program Files\WindowsApps\OpenAI.Codex_26.623.13972.0_x64__2p2nqsd0c76g0\app\resources\codex.exe" app-server --analytics-default-enabled
 "#;
 
         assert_eq!(
-            surface_from_process_list(processes),
+            surface_from_process_lineage(processes),
             PresenceSurface::Desktop
         );
     }
 
     #[test]
-    fn process_list_without_opencode_selects_default_surface() {
+    fn terminal_process_lineage_selects_cli_surface() {
         let processes = "WindowsTerminal.exe\ncodex.exe\ncmd.exe";
         assert_eq!(
-            surface_from_process_list(processes),
-            PresenceSurface::Default
+            surface_from_process_lineage(processes),
+            PresenceSurface::Cli
         );
     }
 
     #[test]
+    fn vscode_process_lineage_selects_extension_surface() {
+        let processes = r#"codex.exe
+Code.exe --ms-enable-electron-run-as-node C:\Microsoft VS Code\resources\app\out\vs\workbench\api\node\extensionHostProcess.js
+explorer.exe"#;
+        assert_eq!(
+            surface_from_process_lineage(processes),
+            PresenceSurface::VsCode
+        );
+    }
+
+    #[test]
+    fn explicit_codex_environment_selects_vscode_extension_surface() {
+        let vars = [("CODEX_PRESENCE_SURFACE", "vscode")];
+        assert_eq!(
+            surface_from_environment(vars),
+            Some(PresenceSurface::VsCode)
+        );
+    }
+
+    #[test]
+    fn vscode_terminal_environment_remains_cli_fallback() {
+        let vars = [("TERM_PROGRAM", "vscode"), ("VSCODE_PID", "1234")];
+        assert_eq!(surface_from_environment(vars), None);
+    }
+
+    #[test]
+    fn vscode_terminal_process_lineage_remains_cli_fallback() {
+        let processes = r#"codex.exe
+pwsh.exe
+Code.exe --type=utility --utility-sub-type=node.mojom.NodeService
+explorer.exe"#;
+        assert_eq!(
+            surface_from_process_lineage(processes),
+            PresenceSurface::Cli
+        );
+    }
+
+    #[test]
+    fn unrelated_environment_does_not_override_cli_surface() {
+        let vars = [("TERM_PROGRAM", "WindowsTerminal"), ("SHELL", "pwsh")];
+        assert_eq!(surface_from_environment(vars), None);
+    }
+
+    #[test]
+    fn desktop_design_key_toggles_without_modifiers() {
+        let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+        assert!(is_desktop_design_toggle_key(&key));
+        let modified = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert!(!is_desktop_design_toggle_key(&modified));
+    }
+
+    #[test]
     fn opencode_environment_value_is_detected_case_insensitively() {
-        assert!(looks_like_opencode("OpenCode Desktop"));
-        assert!(looks_like_opencode("OPENCODE_SESSION"));
+        let vars = [("opencode_session", "session-123")];
+        assert_eq!(
+            surface_from_environment(vars),
+            Some(PresenceSurface::Desktop)
+        );
     }
 }

@@ -47,6 +47,46 @@ fn gpt_5_6_aliases_capabilities_and_efforts_are_centralized() {
 }
 
 #[test]
+fn codex_app_model_inventory_matches_current_local_catalog() {
+    let cases = [
+        ("gpt-5.5", 272_000, 258_400, true),
+        ("gpt-5.6-sol", 372_000, 353_400, true),
+        ("gpt-5.6-terra", 372_000, 353_400, true),
+        ("gpt-5.6-luna", 372_000, 353_400, true),
+        ("gpt-5.4", 272_000, 258_400, true),
+        ("gpt-5.4-mini", 272_000, 258_400, false),
+        ("gpt-5.3-codex-spark", 128_000, 121_600, false),
+    ];
+
+    for (id, raw, effective, supports_fast) in cases {
+        let model = resolve_model(id).expect("listed model");
+        let context = model.context().expect("listed context");
+        assert_eq!(context.raw_tokens, raw, "raw context for {id}");
+        assert_eq!(
+            context.raw_tokens * u64::from(context.effective_percent) / 100,
+            effective,
+            "usable context for {id}"
+        );
+        assert_eq!(model.supports_fast(), supports_fast, "Fast for {id}");
+    }
+}
+
+#[test]
+fn current_non_5_6_rates_do_not_reuse_stale_values() {
+    let config = PricingConfig::default();
+    let mini = resolve_model_pricing("gpt-5.4-mini", &config)
+        .pricing
+        .expect("5.4 Mini pricing");
+    assert_eq!(mini.input_per_million, 0.75);
+    assert_eq!(mini.cached_input_per_million, 0.075);
+    assert_eq!(mini.output_per_million, 4.5);
+
+    let spark = resolve_model_pricing("gpt-5.3-codex-spark", &config);
+    assert_eq!(spark.pricing, None);
+    assert_eq!(spark.source, PricingSource::Unavailable);
+}
+
+#[test]
 fn reasoning_effort_parses_codex_app_modes_and_uses_light_label() {
     assert_eq!(
         ReasoningEffort::parse(Some("low")),
@@ -69,20 +109,23 @@ fn gpt_5_6_context_prefers_observed_then_local_cache_then_bundle() {
     let cache = dir.path().join("models_cache.json");
     fs::write(
         &cache,
-        r#"{"models":[{"slug":"gpt-5.6-sol","context_window":380000,"effective_context_window_percent":90}]}"#,
+        r#"{"models":[{"slug":"gpt-5.6-sol","context_window":372000,"effective_context_window_percent":95}]}"#,
     )
     .expect("cache fixture");
 
     let observed = resolve_context_window_from_cache_path("gpt-5.6", Some(353_400), &cache)
         .expect("observed context");
     assert_eq!(observed.effective_tokens, 353_400);
+    assert_eq!(observed.raw_tokens, 372_000);
     assert_eq!(observed.source, ContextSource::ObservedJsonl);
+    assert_eq!(observed.raw_source, ContextSource::LocalModelCache);
 
     let local =
         resolve_context_window_from_cache_path("gpt-5.6", None, &cache).expect("local context");
-    assert_eq!(local.raw_tokens, 380_000);
-    assert_eq!(local.effective_tokens, 342_000);
+    assert_eq!(local.raw_tokens, 372_000);
+    assert_eq!(local.effective_tokens, 353_400);
     assert_eq!(local.source, ContextSource::LocalModelCache);
+    assert_eq!(local.raw_source, ContextSource::LocalModelCache);
 
     fs::write(&cache, r#"{"models":[]}"#).expect("empty cache");
     let bundled =
@@ -90,6 +133,26 @@ fn gpt_5_6_context_prefers_observed_then_local_cache_then_bundle() {
     assert_eq!(bundled.raw_tokens, 372_000);
     assert_eq!(bundled.effective_tokens, 353_400);
     assert_eq!(bundled.source, ContextSource::BundledCatalog);
+    assert_eq!(bundled.raw_source, ContextSource::BundledCatalog);
+}
+
+#[test]
+fn observed_context_does_not_inherit_mismatched_raw_inventory() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = dir.path().join("models_cache.json");
+    fs::write(
+        &cache,
+        r#"{"models":[{"slug":"gpt-5.6-sol","context_window":380000,"effective_context_window_percent":90}]}"#,
+    )
+    .expect("cache fixture");
+
+    let observed = resolve_context_window_from_cache_path("gpt-5.6", Some(353_400), &cache)
+        .expect("observed context");
+    assert_eq!(observed.raw_tokens, 353_400);
+    assert_eq!(observed.effective_tokens, 353_400);
+    assert_eq!(observed.effective_percent, None);
+    assert_eq!(observed.source, ContextSource::ObservedJsonl);
+    assert_eq!(observed.raw_source, ContextSource::ObservedJsonl);
 }
 
 #[test]
@@ -190,8 +253,8 @@ fn public_cost_presentation_preserves_completeness() {
 fn fast_economics_are_applied_or_marked_partial() {
     let config = PricingConfig::default();
     let usage = TokenUsage {
-        input_tokens: 1_000_000,
-        output_tokens: 100_000,
+        input_tokens: 100_000,
+        output_tokens: 10_000,
         ..TokenUsage::default()
     };
     let known_fast = compute_cost(
@@ -201,7 +264,7 @@ fn fast_economics_are_applied_or_marked_partial() {
         &config,
     );
     assert_eq!(known_fast.status, PricingStatus::Exact);
-    assert_eq!(known_fast.known_total_cost_usd, Some(20.0));
+    assert_eq!(known_fast.known_total_cost_usd, Some(2.0));
 
     let unpublished_fast = compute_cost(
         "gpt-5.6-sol",
@@ -210,7 +273,7 @@ fn fast_economics_are_applied_or_marked_partial() {
         &config,
     );
     assert_eq!(unpublished_fast.status, PricingStatus::Partial);
-    assert_eq!(unpublished_fast.known_total_cost_usd, Some(8.0));
+    assert_eq!(unpublished_fast.known_total_cost_usd, Some(0.8));
     assert_eq!(unpublished_fast.source, PricingSource::Exact);
 }
 

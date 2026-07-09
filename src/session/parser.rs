@@ -193,7 +193,6 @@ pub(super) fn build_context_window_snapshot(
 ) -> Option<ContextWindowSnapshot> {
     let resolved = model::resolve_context_window(model_id.unwrap_or(""), event_window_tokens)?;
     let window_tokens = resolved.effective_tokens;
-    let source = resolved.source;
     if window_tokens == 0 {
         return None;
     }
@@ -210,11 +209,14 @@ pub(super) fn build_context_window_snapshot(
     let remaining_percent =
         ((remaining_tokens as f64 / window_tokens as f64) * 100.0).clamp(0.0, 100.0);
     Some(ContextWindowSnapshot {
+        raw_window_tokens: resolved.raw_tokens,
         window_tokens,
+        effective_percent: resolved.effective_percent,
         used_tokens,
         remaining_tokens,
         remaining_percent,
-        source,
+        source: resolved.source,
+        raw_source: resolved.raw_source,
     })
 }
 

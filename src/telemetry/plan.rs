@@ -389,11 +389,14 @@ mod tests {
             cost_attribution: CostAttribution::SingleModel,
             cost_breakdown_reconciled: true,
             context_window: Some(ContextWindowSnapshot {
+                raw_window_tokens: 100,
                 window_tokens: 100,
+                effective_percent: None,
                 used_tokens: 1,
                 remaining_tokens: 99,
                 remaining_percent: 99.0,
                 source: ContextWindowSource::Event,
+                raw_source: ContextWindowSource::Event,
             }),
             limits: RateLimits::default(),
             rate_limit_envelopes: vec![RateLimitEnvelope {

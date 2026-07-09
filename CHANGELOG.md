@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.2] - 2026-07-09
+
+### Added
+
+- A machine-readable GPT-5.6 catalog for Sol, Terra, and Luna with App labels, aliases, supported efforts, Fast capability, 372K raw / 353.4K usable context, verified API rates, Codex credit rates, prompt-cache policy, and dated source metadata.
+- Persistent schema-10 desktop design selection. Press `D` in Ratatui to switch between `Codex App` and `ChatGPT App`; the runtime reconnects through the corresponding Discord application id.
+- `assets/branding/chatgpt-app.jpg`, copied byte-for-byte from the selected ChatGPT-style source asset for downstream Pulse previews.
+
+### Changed
+
+- Discord and Ratatui now show the chosen reasoning level and independent speed, including `5.6 Sol Max` and `5.6 Sol Max · Fast`.
+- CLI, VS Code Extension, desktop, and OpenCode surfaces use exact labels. Active-session metadata wins; fallback detection now requires an extension-host or explicit environment marker instead of inferring VS Code/OpenCode from generic process names, terminal variables, or `PATH` entries.
+- Cost output carries known subtotal, cache-write component, provenance, reconciliation, attribution, and `exact` / `partial` / `unavailable` status. Unknown models never inherit an older model's price.
+- Context resolution is `observed JSONL > local models_cache.json > bundled catalog`; snapshots retain usable and raw windows plus the source of each, and UI copy no longer substitutes blanket 400K/1.05M assumptions for GPT-5.6.
+- The carried-forward App inventory now matches Codex 0.144.0: 5.5/5.4/5.4 Mini use 272K raw at 95%, Spark uses 128K raw at 95%, and Fast is unavailable for 5.4 Mini and Spark. GPT-5.4 Mini uses current `$0.75 / $0.075 / $4.50` API rates; Spark remains unpriced while its credit rates are marked research preview.
+
+### Fixed
+
+- Session-scoped Standard/Fast state survives later turn-context records and never inherits a global speed. Mixed models or speeds are attributed explicitly.
+- Cached input is bounded by input tokens, hostile totals saturate safely, local model-cache reads are size bounded through one file handle, and activity text no longer leaks command arguments, search queries, credentials, URLs, or host-specific path prefixes.
+- Provider-reported OpenCode totals keep their own provenance and hide component breakdowns unless those components reconcile.
+- Cumulative session input above a published long-context threshold is marked partial because session totals cannot prove whether a single prompt crossed the billing boundary.
+
+### Security
+
+- Removed the unused `viuer` dependency and its vulnerable/unmaintained AVIF stack, updated `anyhow` to 1.0.103, and made pinned `cargo-audit 0.22.2 --deny warnings` a required CI and release-preflight gate.
+- CI and immutable release publication now use Rust 1.96.1, locked dependencies, pinned Actions, least-privilege permissions, annotated-tag and exact-SHA approval, latest protected-check validation, portable asset names, digest verification, and `SHA256SUMS.txt` across Windows, macOS, and Linux.
+
+### Validated
+
+- `cargo --locked fmt --check`
+- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo --locked test --workspace --all-features`
+- `cargo --locked build --workspace --release --all-features`
+- `cargo audit --deny warnings`
+- `pwsh -NoProfile -File tests/release_contract.tests.ps1`
+- `pwsh -NoProfile -File tests/release_approval.tests.ps1`
+- `pwsh -NoProfile -File tests/release_target.tests.ps1`
+- `pwsh -NoProfile -File tests/release_assets.tests.ps1`
+- `pwsh -NoProfile -File tests/release_workflow.tests.ps1`
+
 ## [1.7.1] - 2026-07-06
 
 ### Changed
@@ -230,3 +271,6 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Live usage windows (5h/7d) and token display.
 - Single-instance lock handling.
 - Open source docs and CI/release workflows.
+
+[1.7.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.0...v1.7.1
