@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 
 use crate::config::PricingConfig;
 use crate::cost::{PricingSource, TokenCostBreakdown};
+pub use crate::model::{ContextSource as ContextWindowSource, ReasoningEffort};
 pub use crate::telemetry::limits::{
     EffectiveLimitSelection, RateLimitEnvelope, RateLimitScope, RateLimits, UsageWindow,
 };
@@ -25,14 +26,6 @@ use activity::{SessionAccumulator, looks_like_desktop_surface};
 use parser::{fetch_git_branch, parse_session_file_cached};
 #[cfg(test)]
 use parser::{parse_new_lines, parse_session_file, parse_utc_timestamp};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ContextWindowSource {
-    #[default]
-    Event,
-    Catalog,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ContextWindowSnapshot {
@@ -86,43 +79,6 @@ impl SessionActivitySnapshot {
             return format!("{} {}", self.action_text(), target);
         }
         self.action_text().to_string()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReasoningEffort {
-    Minimal,
-    Low,
-    Medium,
-    High,
-    XHigh,
-}
-
-impl ReasoningEffort {
-    pub fn parse(raw: Option<&str>) -> Option<Self> {
-        let normalized = raw
-            .map(str::trim)
-            .map(str::to_ascii_lowercase)
-            .filter(|value| !value.is_empty())?;
-        match normalized.as_str() {
-            "minimal" => Some(Self::Minimal),
-            "low" => Some(Self::Low),
-            "medium" => Some(Self::Medium),
-            "high" => Some(Self::High),
-            "xhigh" | "extra_high" | "extra-high" => Some(Self::XHigh),
-            _ => None,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Minimal => "Minimal",
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
-            Self::XHigh => "Extra High",
-        }
     }
 }
 
@@ -799,6 +755,66 @@ mod tests {
             r#"{"timestamp":"2026-02-23T03:40:38Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.4","collaboration_mode":{"mode":"default","settings":{"reasoning_effort":"high"}}}}"#,
         );
         assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::High));
+    }
+
+    #[test]
+    fn latest_turn_context_updates_model_effort_and_resets_fallback_context() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.5","effort":"high"}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":12000}}}}
+{"timestamp":"2026-07-09T10:01:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.6-sol","effort":"ultra"}}
+{"timestamp":"2026-07-09T10:01:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":18000}}}}"#,
+        );
+
+        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Ultra));
+        let context = snapshot.context_window.expect("5.6 fallback context");
+        assert_eq!(context.window_tokens, 353_400);
+    }
+
+    #[test]
+    fn cached_input_tokens_are_clamped_to_input_tokens() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.6-terra","effort":"max"}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":5000,"output_tokens":100},"last_token_usage":{"input_tokens":100,"cached_input_tokens":900,"output_tokens":10}}}}"#,
+        );
+
+        assert_eq!(snapshot.cached_input_tokens_total, 1_000);
+        assert_eq!(snapshot.last_cached_input_tokens, Some(100));
+    }
+
+    #[test]
+    fn thread_settings_keep_fast_mode_scoped_to_the_session() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.6-sol","effort":"high"}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6-sol","service_tier":"priority","reasoning_effort":"max","cwd":"C:\\repo\\app"}}}"#,
+        );
+
+        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-sol-fast"));
+        assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Max));
+    }
+
+    #[test]
+    fn thread_settings_reject_fast_for_unsupported_model() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.3-codex","service_tier":"priority","reasoning_effort":"high","cwd":"C:\\repo\\app"}}}"#,
+        );
+
+        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.3-codex"));
+    }
+
+    #[test]
+    fn mixed_model_session_does_not_price_all_tokens_at_latest_rate() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.5","effort":"high"}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":200,"total_tokens":1200}}}}
+{"timestamp":"2026-07-09T10:01:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.6-luna","effort":"max"}}
+{"timestamp":"2026-07-09T10:01:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2000,"cached_input_tokens":200,"output_tokens":400,"total_tokens":2400}}}}"#,
+        );
+
+        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-luna"));
+        assert_eq!(snapshot.pricing_source, PricingSource::Unavailable);
+        assert_eq!(snapshot.total_cost_usd, 0.0);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use serde::Serialize;
 use tempfile::NamedTempFile;
 use tracing_subscriber::{EnvFilter, fmt};
 
-use crate::session::ReasoningEffort;
+use crate::model::{ReasoningEffort, SpeedMode, model_requests_fast, resolve_model};
 
 pub fn setup_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -72,14 +72,13 @@ pub fn format_model_name(model_id: &str) -> String {
 }
 
 pub fn model_display_parts(model_id: &str) -> (String, bool) {
-    let trimmed = model_id.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if let Some(base) = lower.strip_suffix("-fast")
-        && base.starts_with("gpt-")
-    {
-        return (format_model_name(base), true);
-    }
-    (format_model_name(trimmed), false)
+    let resolution = resolve_model(model_id);
+    let display = resolution
+        .map(|model| model.display_name().to_string())
+        .unwrap_or_else(|| format_model_name(model_id.trim_end_matches("-fast")));
+    let fast = resolution
+        .is_some_and(|model| model.resolve_speed(model_requests_fast(model_id)) == SpeedMode::Fast);
+    (display, fast)
 }
 
 pub fn model_uses_fast_mode(model_id: &str) -> bool {
@@ -91,15 +90,7 @@ pub fn format_model_display(
     reasoning_effort: Option<ReasoningEffort>,
     fast_active: bool,
 ) -> String {
-    let (base, model_fast) = model_display_parts(model_id);
-    let effort_suffix = reasoning_effort
-        .map(|value| format!(" ({})", value.label()))
-        .unwrap_or_default();
-    if fast_active || model_fast {
-        format!("⚡ {base}{effort_suffix}")
-    } else {
-        format!("{base}{effort_suffix}")
-    }
+    crate::model::format_model_display(model_id, reasoning_effort, fast_active)
 }
 
 fn format_model_component(component: &str) -> String {
@@ -283,7 +274,7 @@ mod tests {
     fn model_display_includes_fast_icon_and_effort() {
         assert_eq!(
             format_model_display("gpt-5.4", Some(ReasoningEffort::XHigh), true),
-            "⚡ GPT-5.4 (Extra High)"
+            "5.4 Extra High · Fast"
         );
     }
 

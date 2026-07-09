@@ -7,11 +7,12 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkline, Wrap};
 
 use crate::config::{PlanPreset, TerminalLogoMode, plan_presets};
+use crate::cost::format_presentable_cost;
 use crate::metrics::MetricsSnapshot;
+use crate::model::{format_model_display, model_requests_fast};
 use crate::session::{CodexSessionSnapshot, RateLimits, UsageWindow};
 use crate::util::{
-    format_cost, format_model_display, format_time_until, format_token_triplet, format_tokens,
-    human_duration, truncate,
+    format_cost, format_time_until, format_token_triplet, format_tokens, human_duration, truncate,
 };
 
 const FOOTER_ROWS: u16 = 1;
@@ -273,13 +274,13 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
                 format_model_display(
                     session.model.as_deref().unwrap_or("unknown"),
                     session.reasoning_effort,
-                    data.fast_active,
+                    session.model.as_deref().is_some_and(model_requests_fast),
                 ),
                 Style::default().fg(theme::PINK),
             ),
             Span::styled(" · ", theme::muted()),
             Span::styled(
-                format_cost(session.total_cost_usd),
+                presentable_cost(session),
                 Style::default().fg(theme::YELLOW),
             ),
         ]));
@@ -460,7 +461,7 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
             let model = format_model_display(
                 session.model.as_deref().unwrap_or("unknown"),
                 session.reasoning_effort,
-                data.fast_active,
+                session.model.as_deref().is_some_and(model_requests_fast),
             );
             let tokens = format_tokens(
                 session
@@ -488,6 +489,11 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
         list.block(panel("Recent sessions", Some(theme::BORDER))),
         area,
     );
+}
+
+fn presentable_cost(session: &CodexSessionSnapshot) -> String {
+    format_presentable_cost(session.total_cost_usd, session.pricing_source)
+        .unwrap_or_else(|| "cost unavailable".to_string())
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool) {

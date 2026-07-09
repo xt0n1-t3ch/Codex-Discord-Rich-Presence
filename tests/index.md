@@ -15,14 +15,15 @@
 
 | Area | Module/Test seam |
 |:---|:---|
-| Pricing catalog | `src/cost.rs` unit tests for GPT-5.4/GPT-5.5 pricing, aliases, OAuth context, API metadata |
-| Fast mode | `src/cost.rs` multipliers and `tests/integration/model_display.rs` labels |
+| Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, GPT-5.6 capabilities, context precedence, prices, credits, and cache policy |
+| Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, unknown-model fail-closed behavior, and cache clamping |
+| Fast mode | `src/session.rs` parses per-session service tier; `tests/integration/model_display.rs` validates Codex App labels and capability gating |
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
 | Discord branding | `src/discord.rs` sticky desktop surface and Codex App asset tests |
 | Terminal layout | `src/ui.rs` layout, monochrome Codex wordmark, plan picker, footer, spinner, reserved rows |
 | Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
 | Config migration | `tests/integration/config_migration.rs` identity normalization |
-| Session parsing | `src/session.rs` and `src/session/*` JSONL, activity, context, ranking |
+| Session parsing | `src/session.rs` and `src/session/*` cover JSONL, activity, latest model/effort changes, session-scoped speed, context provenance, cache bounds, and ranking |
 | OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
 | Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
 

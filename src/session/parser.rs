@@ -9,12 +9,12 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::config::PricingConfig;
-use crate::cost;
+use crate::model;
 
 use super::activity::SessionAccumulator;
 use super::{
-    CachedSessionEntry, CodexSessionSnapshot, ContextWindowSnapshot, ContextWindowSource,
-    GitBranchCache, ReasoningEffort, SessionParseCache,
+    CachedSessionEntry, CodexSessionSnapshot, ContextWindowSnapshot, GitBranchCache,
+    ReasoningEffort, SessionParseCache,
 };
 
 #[cfg(test)]
@@ -191,12 +191,9 @@ pub(super) fn build_context_window_snapshot(
     last_turn_tokens: Option<u64>,
     session_total_tokens: Option<u64>,
 ) -> Option<ContextWindowSnapshot> {
-    let (window_tokens, source) = if let Some(window_tokens) = event_window_tokens {
-        (window_tokens, ContextWindowSource::Event)
-    } else {
-        let fallback_window = cost::default_model_context_window(model_id.unwrap_or(""))?;
-        (fallback_window, ContextWindowSource::Catalog)
-    };
+    let resolved = model::resolve_context_window(model_id.unwrap_or(""), event_window_tokens)?;
+    let window_tokens = resolved.effective_tokens;
+    let source = resolved.source;
     if window_tokens == 0 {
         return None;
     }

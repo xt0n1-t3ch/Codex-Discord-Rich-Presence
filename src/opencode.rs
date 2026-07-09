@@ -7,10 +7,13 @@ use rusqlite::{Connection, params};
 use serde_json::Value;
 
 use crate::config::{self, PricingConfig};
-use crate::cost::{compute_total_cost, default_model_context_window};
+use crate::cost::{PricingSource, TokenUsage, compute_cost};
+use crate::model::resolve_context_window_from_cache_path;
+#[cfg(test)]
+use crate::session::ContextWindowSource;
 use crate::session::{
-    CodexSessionSnapshot, ContextWindowSnapshot, ContextWindowSource, RateLimits,
-    SessionActivityKind, SessionActivitySnapshot,
+    CodexSessionSnapshot, ContextWindowSnapshot, RateLimits, SessionActivityKind,
+    SessionActivitySnapshot,
 };
 use crate::util::truncate;
 
@@ -174,23 +177,30 @@ fn row_to_snapshot(
 
     let activity = latest_activity(connection, &row.id)?;
     let context_window = latest_context_window(connection, &row.id, &model)?;
-    let input_total = row
-        .tokens_input
-        .saturating_add(row.tokens_cache_read)
-        .saturating_add(row.tokens_cache_write);
+    let costed_input_total = row.tokens_input.saturating_add(row.tokens_cache_read);
+    let input_total = costed_input_total.saturating_add(row.tokens_cache_write);
     let output_total = row.tokens_output.saturating_add(row.tokens_reasoning);
     let token_total = input_total.saturating_add(output_total);
-    let computed = compute_total_cost(
+    let computed = compute_cost(
         &model,
-        input_total,
-        row.tokens_cache_read,
-        output_total,
+        TokenUsage {
+            input_tokens: costed_input_total,
+            cached_input_tokens: row.tokens_cache_read,
+            cache_write_tokens: Some(row.tokens_cache_write),
+            output_tokens: output_total,
+        },
         pricing_config,
     );
-    let total_cost_usd = if row.cost.is_finite() && row.cost > 0.0 {
+    let provider_reported_cost = row.cost.is_finite() && row.cost > 0.0;
+    let total_cost_usd = if provider_reported_cost {
         row.cost
     } else {
         computed.total_cost_usd
+    };
+    let pricing_source = if provider_reported_cost {
+        PricingSource::Override
+    } else {
+        computed.source
     };
 
     Ok(Some(CodexSessionSnapshot {
@@ -215,7 +225,7 @@ fn row_to_snapshot(
         last_output_tokens: None,
         total_cost_usd,
         cost_breakdown: computed.breakdown,
-        pricing_source: computed.source,
+        pricing_source,
         context_window,
         limits: RateLimits::default(),
         rate_limit_envelopes: Vec::new(),
@@ -247,12 +257,22 @@ fn latest_context_window(
 }
 
 fn context_window_from_part(data: &str, model: &str) -> Option<ContextWindowSnapshot> {
+    let cache_path = config::codex_home().join("models_cache.json");
+    context_window_from_part_with_cache_path(data, model, &cache_path)
+}
+
+fn context_window_from_part_with_cache_path(
+    data: &str,
+    model: &str,
+    cache_path: &Path,
+) -> Option<ContextWindowSnapshot> {
     let parsed = serde_json::from_str::<Value>(data).ok()?;
     if parsed.get("type").and_then(Value::as_str) != Some("step-finish") {
         return None;
     }
     let used_tokens = step_finish_token_total(parsed.get("tokens")?)?;
-    let window_tokens = default_model_context_window(model)?;
+    let resolved_context = resolve_context_window_from_cache_path(model, None, cache_path)?;
+    let window_tokens = resolved_context.effective_tokens;
     if window_tokens == 0 {
         return None;
     }
@@ -265,7 +285,7 @@ fn context_window_from_part(data: &str, model: &str) -> Option<ContextWindowSnap
         used_tokens,
         remaining_tokens,
         remaining_percent,
-        source: ContextWindowSource::Catalog,
+        source: resolved_context.source,
     })
 }
 
@@ -472,8 +492,14 @@ mod tests {
 
     #[test]
     fn parses_context_window_from_latest_step_finish_total() {
+        let dir = tempfile::tempdir().expect("tempdir");
         let part = r#"{"type":"step-finish","tokens":{"total":231782,"input":185000,"output":10000,"reasoning":20000,"cache":{"read":16782,"write":0}}}"#;
-        let context = context_window_from_part(part, "gpt-5.5-fast").expect("context");
+        let context = context_window_from_part_with_cache_path(
+            part,
+            "gpt-5.5-fast",
+            &dir.path().join("missing.json"),
+        )
+        .expect("context");
         assert_eq!(context.window_tokens, 400_000);
         assert_eq!(context.used_tokens, 231_782);
         assert_eq!(context.remaining_tokens, 168_218);
@@ -483,8 +509,14 @@ mod tests {
 
     #[test]
     fn parses_context_window_from_step_finish_token_fields() {
+        let dir = tempfile::tempdir().expect("tempdir");
         let part = r#"{"type":"step-finish","tokens":{"input":"210000","output":12000,"reasoning":9000,"cache":{"read":782,"write":0}}}"#;
-        let context = context_window_from_part(part, "gpt-5.5").expect("context");
+        let context = context_window_from_part_with_cache_path(
+            part,
+            "gpt-5.5",
+            &dir.path().join("missing.json"),
+        )
+        .expect("context");
         assert_eq!(context.window_tokens, 400_000);
         assert_eq!(context.used_tokens, 231_782);
         assert!((context.remaining_percent - 42.05).abs() < 0.05);
@@ -498,8 +530,14 @@ mod tests {
 
     #[test]
     fn clamps_context_window_when_step_finish_exceeds_window() {
+        let dir = tempfile::tempdir().expect("tempdir");
         let part = r#"{"type":"step-finish","tokens":{"total":900000}}"#;
-        let context = context_window_from_part(part, "gpt-5.5").expect("context");
+        let context = context_window_from_part_with_cache_path(
+            part,
+            "gpt-5.5",
+            &dir.path().join("missing.json"),
+        )
+        .expect("context");
         assert_eq!(context.used_tokens, 400_000);
         assert_eq!(context.remaining_tokens, 0);
         assert_eq!(context.remaining_percent, 0.0);

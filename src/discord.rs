@@ -7,10 +7,14 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::config::{PresenceConfig, PresenceSurface};
+use crate::cost::format_presentable_cost;
+use crate::model::{format_model_display, model_requests_fast};
 use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind};
 use crate::telemetry::plan::ResolvedPlan;
 use crate::telemetry::service_tier::ResolvedServiceTier;
-use crate::util::{format_cost, format_model_display, format_tokens};
+#[cfg(test)]
+use crate::util::format_cost;
+use crate::util::format_tokens;
 
 pub struct DiscordPresence {
     surface: PresenceSurface,
@@ -498,7 +502,7 @@ fn presence_lines(
     session: &CodexSessionSnapshot,
     effective_limits: Option<&RateLimits>,
     resolved_plan: &ResolvedPlan,
-    resolved_service_tier: &ResolvedServiceTier,
+    _resolved_service_tier: &ResolvedServiceTier,
     config: &PresenceConfig,
 ) -> (String, String) {
     if config.privacy.enabled {
@@ -545,17 +549,16 @@ fn presence_lines(
     {
         let label = format!(
             "{} | {}",
-            format_model_display(
-                model,
-                session.reasoning_effort,
-                resolved_service_tier.is_fast()
-            ),
+            format_model_display(model, session.reasoning_effort, model_requests_fast(model)),
             resolved_plan.label(config.openai_plan.show_price)
         );
         state_parts.push(truncate_for_limit(&label, 68));
     }
-    if config.privacy.show_cost && session.total_cost_usd > 0.0 {
-        state_parts.push(format_cost(session.total_cost_usd));
+    if config.privacy.show_cost
+        && session.total_cost_usd > 0.0
+        && let Some(cost) = format_presentable_cost(session.total_cost_usd, session.pricing_source)
+    {
+        state_parts.push(cost);
     }
     if let Some(usage) = usage_state_part(session, config.privacy.show_tokens) {
         state_parts.push(usage);
@@ -938,7 +941,7 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("GPT-5.3-Codex | Pro 20x ($200/month)"));
+        assert!(state.contains("5.3 Codex | Pro 20x ($200/month)"));
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K tok"));
         assert!(state.contains("Ctx 6% used"));
@@ -1029,13 +1032,14 @@ mod tests {
         );
         assert!(details.starts_with("Editing"));
         assert!(details.contains("project-alpha"));
-        assert!(state.contains("GPT-5.3-Codex"));
+        assert!(state.contains("5.3 Codex"));
     }
 
     #[test]
-    fn state_prefixes_model_with_fast_icon_and_effort() {
+    fn state_uses_session_scoped_fast_and_effort_labels() {
         let mut session = sample_session();
-        session.reasoning_effort = Some(crate::session::ReasoningEffort::XHigh);
+        session.model = Some("gpt-5.6-sol-fast".to_string());
+        session.reasoning_effort = Some(crate::session::ReasoningEffort::Max);
         let config = PresenceConfig::default();
         let plan = resolved_plan_pro();
         let service_tier = resolved_service_tier(true);
@@ -1046,7 +1050,7 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("⚡ GPT-5.3-Codex (Extra High) | Pro 20x ($200/month)"));
+        assert!(state.contains("5.6 Sol Max · Fast | Pro 20x ($200/month)"));
     }
 
     #[test]

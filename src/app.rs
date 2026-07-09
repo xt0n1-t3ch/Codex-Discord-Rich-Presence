@@ -16,6 +16,7 @@ use crate::config::{
     self, OpenAiPlanDisplayConfig, PresenceConfig, PresenceSurface, RuntimeSettings,
     apply_plan_preset, plan_preset_index, plan_presets,
 };
+use crate::cost::format_presentable_cost;
 use crate::discord::DiscordPresence;
 use crate::metrics::MetricsTracker;
 use crate::opencode::collect_opencode_sessions;
@@ -29,7 +30,7 @@ use crate::telemetry::plan::{PlanDetector, ResolvedPlan, is_model_allowed_for_pl
 use crate::telemetry::service_tier::{ResolvedServiceTier, ServiceTier, resolve_service_tier};
 use crate::ui::{self, RenderData};
 use crate::util::{
-    format_cost, format_model_display, format_since, format_time_until, format_token_triplet,
+    format_model_display, format_since, format_time_until, format_token_triplet,
     model_uses_fast_mode,
 };
 
@@ -885,8 +886,10 @@ fn print_active_summary(
             activity.to_text(config.privacy.show_activity_target)
         );
     }
-    if active.total_cost_usd > 0.0 {
-        println!("  cost: {}", format_cost(active.total_cost_usd));
+    if active.total_cost_usd > 0.0
+        && let Some(cost) = format_presentable_cost(active.total_cost_usd, active.pricing_source)
+    {
+        println!("  cost: {cost}");
     }
     println!(
         "  tokens io: in {} | cached {} | out {}",

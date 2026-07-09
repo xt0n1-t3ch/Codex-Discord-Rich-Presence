@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::config::PricingConfig;
 use crate::cost;
+use crate::model::{SpeedMode, model_requests_fast, normalize_model_key, resolve_model};
 use crate::telemetry::limits::{
     RateLimitEnvelope, RateLimits, limits_present as telemetry_limits_present,
     parse_rate_limit_envelope, select_session_envelope_global_first,
@@ -47,6 +48,7 @@ pub(super) struct SessionAccumulator {
     last_cached_input_tokens: Option<u64>,
     last_output_tokens: Option<u64>,
     model_context_window: Option<u64>,
+    pricing_is_mixed_model: bool,
     limits: RateLimits,
     rate_limit_envelopes: HashMap<String, RateLimitEnvelope>,
     last_token_event_at: Option<DateTime<Utc>>,
@@ -264,8 +266,8 @@ impl SessionAccumulator {
                 if self.cwd.is_none() {
                     self.cwd = str_at(payload, &["cwd"]).map(PathBuf::from);
                 }
-                if self.model.is_none() {
-                    self.model = str_at(payload, &["model"]);
+                if let Some(model) = str_at(payload, &["model"]) {
+                    self.update_model(model, None);
                 }
                 if let Some(reasoning_effort) = turn_context_reasoning_effort(payload) {
                     self.reasoning_effort = Some(reasoning_effort);
@@ -279,6 +281,24 @@ impl SessionAccumulator {
                 }
             }
             Some("event_msg") => match str_at(payload, &["type"]).as_deref() {
+                Some("thread_settings_applied") => {
+                    let settings = payload.get("thread_settings").unwrap_or(&Value::Null);
+                    if let Some(cwd) = str_at(settings, &["cwd"]) {
+                        self.cwd = Some(PathBuf::from(cwd));
+                    }
+                    if let Some(model) = str_at(settings, &["model"]) {
+                        self.update_model(model, str_at(settings, &["service_tier"]));
+                    }
+                    if let Some(reasoning_effort) = str_at(settings, &["reasoning_effort"])
+                        .as_deref()
+                        .and_then(|raw| ReasoningEffort::parse(Some(raw)))
+                    {
+                        self.reasoning_effort = Some(reasoning_effort);
+                    }
+                    if let Some(approval_policy) = str_at(settings, &["approval_policy"]) {
+                        self.approval_policy = Some(approval_policy);
+                    }
+                }
                 Some("token_count") => {
                     self.previous_session_total_tokens = self.session_total_tokens;
 
@@ -288,7 +308,8 @@ impl SessionAccumulator {
                     if let Some(total_cached_input_tokens) =
                         total_cached_input_tokens_from_info(payload)
                     {
-                        self.cached_input_tokens_total = total_cached_input_tokens;
+                        self.cached_input_tokens_total =
+                            total_cached_input_tokens.min(self.input_tokens_total);
                     }
                     if let Some(total_output_tokens) = total_output_tokens_from_info(payload) {
                         self.output_tokens_total = total_output_tokens;
@@ -300,10 +321,22 @@ impl SessionAccumulator {
                     if let Some(last_cached_input_tokens) =
                         last_cached_input_tokens_from_info(payload)
                     {
-                        self.last_cached_input_tokens = Some(last_cached_input_tokens);
+                        self.last_cached_input_tokens = Some(
+                            last_cached_input_tokens
+                                .min(self.last_input_tokens.unwrap_or(last_cached_input_tokens)),
+                        );
                     }
                     if let Some(last_output_tokens) = last_output_tokens_from_info(payload) {
                         self.last_output_tokens = Some(last_output_tokens);
+                    }
+
+                    self.cached_input_tokens_total =
+                        self.cached_input_tokens_total.min(self.input_tokens_total);
+                    if let Some(last_cached_input_tokens) = self.last_cached_input_tokens.as_mut()
+                        && let Some(last_input_tokens) = self.last_input_tokens
+                    {
+                        *last_cached_input_tokens =
+                            (*last_cached_input_tokens).min(last_input_tokens);
                     }
 
                     if let Some(total_tokens) = total_tokens_from_info(payload) {
@@ -418,6 +451,39 @@ impl SessionAccumulator {
         self.session_id = Some(session_id);
     }
 
+    fn update_model(&mut self, model: String, service_tier: Option<String>) {
+        let normalized = normalize_model_key(&model);
+        let changed = self
+            .model
+            .as_deref()
+            .map(normalize_model_key)
+            .is_some_and(|current| current != normalized);
+        if changed {
+            self.model_context_window = None;
+            if self.session_total_tokens.is_some()
+                || self.input_tokens_total > 0
+                || self.output_tokens_total > 0
+            {
+                self.pricing_is_mixed_model = true;
+            }
+        }
+
+        let fast_requested = model_requests_fast(&model)
+            || service_tier.as_deref().is_some_and(|tier| {
+                matches!(
+                    tier.trim().to_ascii_lowercase().as_str(),
+                    "priority" | "fast"
+                )
+            });
+        let fast_supported = resolve_model(&normalized)
+            .is_some_and(|resolved| resolved.resolve_speed(fast_requested) == SpeedMode::Fast);
+        self.model = Some(if fast_supported {
+            format!("{normalized}-fast")
+        } else {
+            normalized
+        });
+    }
+
     pub(super) fn build_snapshot(
         &self,
         jsonl_path: &Path,
@@ -461,8 +527,13 @@ impl SessionAccumulator {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown-session")
             .to_string();
+        let pricing_model = if self.pricing_is_mixed_model {
+            ""
+        } else {
+            self.model.as_deref().unwrap_or("")
+        };
         let cost = cost::compute_total_cost(
-            self.model.as_deref().unwrap_or(""),
+            pricing_model,
             self.input_tokens_total,
             self.cached_input_tokens_total,
             self.output_tokens_total,
