@@ -48,7 +48,7 @@ pub struct PrivacyConfig {
     pub show_activity_target: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct PricingConfig {
     pub aliases: BTreeMap<String, String>,
@@ -332,24 +332,6 @@ impl Default for DisplayConfig {
             activity_small_image_keys: ActivitySmallImageKeys::default(),
             terminal_logo_mode: TerminalLogoMode::Auto,
             terminal_logo_path: None,
-        }
-    }
-}
-
-impl Default for PricingConfig {
-    fn default() -> Self {
-        let mut aliases = BTreeMap::new();
-        aliases.insert(
-            "gpt-5.3-codex-spark".to_string(),
-            "gpt-5.3-codex".to_string(),
-        );
-        aliases.insert(
-            "gpt-5.3-codex-spark-latest".to_string(),
-            "gpt-5.3-codex".to_string(),
-        );
-        Self {
-            aliases,
-            overrides: BTreeMap::new(),
         }
     }
 }
@@ -653,7 +635,7 @@ fn normalize_pricing_config(pricing: &mut PricingConfig) -> bool {
     let mut normalized_aliases: BTreeMap<String, String> = BTreeMap::new();
     for (raw_key, raw_target) in pricing.aliases.iter() {
         let key = raw_key.trim().to_ascii_lowercase();
-        let mut target = raw_target.trim().to_ascii_lowercase();
+        let target = raw_target.trim().to_ascii_lowercase();
         if matches!(key.as_str(), "gpt-5.3-codex" | "gpt-5.3-codex-latest")
             && target == "gpt-5.2-codex"
         {
@@ -663,10 +645,10 @@ fn normalize_pricing_config(pricing: &mut PricingConfig) -> bool {
         if matches!(
             key.as_str(),
             "gpt-5.3-codex-spark" | "gpt-5.3-codex-spark-latest"
-        ) && target == "gpt-5.2-codex"
+        ) && matches!(target.as_str(), "gpt-5.2-codex" | "gpt-5.3-codex")
         {
-            target = "gpt-5.3-codex".to_string();
             changed = true;
+            continue;
         }
         if key.is_empty() || target.is_empty() || key == target {
             if !raw_key.trim().is_empty() || !raw_target.trim().is_empty() {
@@ -982,16 +964,9 @@ mod tests {
     }
 
     #[test]
-    fn pricing_defaults_include_gpt_5_3_spark_aliases() {
+    fn pricing_defaults_leave_builtin_aliases_to_model_catalog() {
         let cfg = PresenceConfig::default();
-        assert_eq!(
-            cfg.pricing
-                .aliases
-                .get("gpt-5.3-codex-spark")
-                .map(String::as_str),
-            Some("gpt-5.3-codex")
-        );
-        assert!(!cfg.pricing.aliases.contains_key("gpt-5.3-codex"));
+        assert!(cfg.pricing.aliases.is_empty());
     }
 
     #[test]
@@ -1018,13 +993,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
         assert!(changed);
         assert!(!cfg.pricing.aliases.contains_key("gpt-5.3-codex"));
-        assert_eq!(
-            cfg.pricing
-                .aliases
-                .get("gpt-5.3-codex-spark")
-                .map(String::as_str),
-            Some("gpt-5.3-codex")
-        );
+        assert!(!cfg.pricing.aliases.contains_key("gpt-5.3-codex-spark"));
         assert!(cfg.pricing.overrides.contains_key("gpt-5.2-codex"));
     }
 

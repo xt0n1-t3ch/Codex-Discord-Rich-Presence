@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -8,6 +9,7 @@ const MAX_MODEL_CACHE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_MODEL_CACHE_ENTRIES: usize = 512;
 const MAX_MODEL_ID_BYTES: usize = 128;
 const MAX_CONTEXT_TOKENS: u64 = 10_000_000;
+const MAX_RATE_PER_MILLION: f64 = 1_000_000_000.0;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelCatalog {
@@ -116,6 +118,34 @@ pub enum SpeedMode {
     Fast,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeedSource {
+    #[default]
+    Unknown,
+    ModelSuffix,
+    ThreadSettings,
+    OpenCodeDescriptor,
+    LegacyDefault,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionSpeed {
+    pub mode: SpeedMode,
+    pub source: SpeedSource,
+    pub known: bool,
+}
+
+impl SessionSpeed {
+    pub const fn explicit(mode: SpeedMode, source: SpeedSource) -> Self {
+        Self {
+            mode,
+            source,
+            known: true,
+        }
+    }
+}
+
 impl SpeedMode {
     pub fn label(self) -> &'static str {
         match self {
@@ -129,8 +159,11 @@ impl SpeedMode {
 #[serde(rename_all = "snake_case")]
 pub enum ContextSource {
     #[default]
+    #[serde(rename = "observed_jsonl", alias = "event")]
     ObservedJsonl,
+    #[serde(alias = "model_cache")]
     LocalModelCache,
+    #[serde(alias = "catalog")]
     BundledCatalog,
 }
 
@@ -184,6 +217,10 @@ impl ModelResolution {
         } else {
             SpeedMode::Standard
         }
+    }
+
+    pub fn supports_fast(self) -> bool {
+        self.model.supports_fast
     }
 
     pub fn fast_usage_multiplier(self) -> Option<f64> {
@@ -249,6 +286,12 @@ pub fn resolve_model(model_id: &str) -> Option<ModelResolution> {
             model,
             source: ModelResolutionSource::Alias,
         })
+}
+
+pub fn canonical_model_key(model_id: &str) -> String {
+    resolve_model(model_id)
+        .map(|model| model.canonical_id().to_string())
+        .unwrap_or_else(|| normalize_model_key(model_id))
 }
 
 pub fn format_model_display(
@@ -323,12 +366,15 @@ fn resolve_pricing_model(model: &'static CatalogModel) -> Option<&'static Catalo
 }
 
 fn context_from_local_cache(model_id: &str, path: &Path) -> Option<ResolvedContextWindow> {
-    let metadata = fs::metadata(path).ok()?;
-    if metadata.len() == 0 || metadata.len() > MAX_MODEL_CACHE_BYTES {
+    let file = File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(MAX_MODEL_CACHE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_MODEL_CACHE_BYTES {
         return None;
     }
-    let raw = fs::read_to_string(path).ok()?;
-    let parsed: LocalModelCache = serde_json::from_str(&raw).ok()?;
+    let parsed: LocalModelCache = serde_json::from_slice(&bytes).ok()?;
     if parsed.models.len() > MAX_MODEL_CACHE_ENTRIES {
         return None;
     }
@@ -453,7 +499,7 @@ fn valid_rates(rates: CatalogRates) -> bool {
 }
 
 fn valid_non_negative_rate(rate: f64) -> bool {
-    rate.is_finite() && rate >= 0.0
+    rate.is_finite() && (0.0..=MAX_RATE_PER_MILLION).contains(&rate)
 }
 
 fn valid_positive_rate(rate: f64) -> bool {
@@ -512,7 +558,7 @@ mod tests {
     fn rejects_oversized_local_cache() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("models_cache.json");
-        fs::write(&path, "x".repeat(MAX_MODEL_CACHE_BYTES as usize + 1)).expect("fixture");
+        std::fs::write(&path, "x".repeat(MAX_MODEL_CACHE_BYTES as usize + 1)).expect("fixture");
         let context = resolve_context_window_from_cache_path("gpt-5.6", None, &path)
             .expect("bundled fallback");
         assert_eq!(context.source, ContextSource::BundledCatalog);

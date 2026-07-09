@@ -23,16 +23,13 @@ use crate::opencode::collect_opencode_sessions;
 use crate::process_guard::{self, RunningState};
 use crate::session::{
     CodexSessionSnapshot, EffectiveLimitSelection, GitBranchCache, RateLimits, SessionParseCache,
-    collect_active_sessions_multi, collect_active_sessions_multi_with_diagnostics,
+    SpeedMode, collect_active_sessions_multi, collect_active_sessions_multi_with_diagnostics,
     latest_limits_source, preferred_active_session,
 };
 use crate::telemetry::plan::{PlanDetector, ResolvedPlan, is_model_allowed_for_plan};
 use crate::telemetry::service_tier::{ResolvedServiceTier, ServiceTier, resolve_service_tier};
 use crate::ui::{self, RenderData};
-use crate::util::{
-    format_model_display, format_since, format_time_until, format_token_triplet,
-    model_uses_fast_mode,
-};
+use crate::util::{format_model_display, format_since, format_time_until, format_token_triplet};
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
 
@@ -59,12 +56,16 @@ impl RuntimeSnapshot {
         let limits_source = latest_limits_source(&sessions);
         let resolved_plan = plan_detector.resolve_from_sessions(&sessions, plan_config);
         let mut resolved_service_tier = resolve_service_tier();
-        if preferred_active_session(&sessions)
-            .and_then(|session| session.model.as_deref())
-            .is_some_and(model_uses_fast_mode)
+        if let Some(session) = preferred_active_session(&sessions)
+            && session.speed.known
         {
-            resolved_service_tier.tier = ServiceTier::Fast;
-            resolved_service_tier.raw_tier = Some("fast".to_string());
+            resolved_service_tier.tier = match session.speed.mode {
+                SpeedMode::Fast => ServiceTier::Fast,
+                SpeedMode::Standard => ServiceTier::Standard,
+            };
+            resolved_service_tier.raw_tier = Some(session.speed.mode.label().to_ascii_lowercase());
+            resolved_service_tier.observed_at = session.last_token_event_at;
+            resolved_service_tier.source_path = Some(session.source_file.clone());
         }
 
         Self {
@@ -866,6 +867,8 @@ fn print_active_summary(
     );
     println!("  plan: {}", resolved_plan.status_label());
     println!("  fast_mode: {}", resolved_service_tier.fast_mode_label());
+    println!("  speed_known: {}", active.speed.known);
+    println!("  speed_source: {:?}", active.speed.source);
     if let Some(raw_tier) = resolved_service_tier.raw_tier.as_deref() {
         println!("  service_tier: {raw_tier}");
     }
@@ -886,9 +889,14 @@ fn print_active_summary(
             activity.to_text(config.privacy.show_activity_target)
         );
     }
-    if active.total_cost_usd > 0.0
-        && let Some(cost) = format_presentable_cost(active.total_cost_usd, active.pricing_source)
-    {
+    println!("  pricing_status: {:?}", active.pricing_status);
+    println!("  pricing_source: {:?}", active.pricing_source);
+    println!("  cost_attribution: {:?}", active.cost_attribution);
+    println!(
+        "  incomplete_cost: {}",
+        active.pricing_status != crate::cost::PricingStatus::Exact
+    );
+    if let Some(cost) = format_presentable_cost(active.known_cost_usd, active.pricing_status) {
         println!("  cost: {cost}");
     }
     println!(

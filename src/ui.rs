@@ -8,9 +8,9 @@ use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkli
 
 use crate::config::{PlanPreset, TerminalLogoMode, plan_presets};
 use crate::cost::format_presentable_cost;
-use crate::metrics::MetricsSnapshot;
-use crate::model::{format_model_display, model_requests_fast};
-use crate::session::{CodexSessionSnapshot, RateLimits, UsageWindow};
+use crate::metrics::{MetricsSnapshot, format_metrics_cost};
+use crate::model::format_model_display;
+use crate::session::{CodexSessionSnapshot, RateLimits, SpeedMode, UsageWindow};
 use crate::util::{
     format_cost, format_time_until, format_token_triplet, format_tokens, human_duration, truncate,
 };
@@ -274,7 +274,7 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
                 format_model_display(
                     session.model.as_deref().unwrap_or("unknown"),
                     session.reasoning_effort,
-                    session.model.as_deref().is_some_and(model_requests_fast),
+                    session.speed.mode == SpeedMode::Fast,
                 ),
                 Style::default().fg(theme::PINK),
             ),
@@ -415,7 +415,7 @@ fn render_metrics(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
         Line::from(vec![
             Span::styled("cost ", theme::muted()),
             Span::styled(
-                format_cost(metrics.totals.cost_usd),
+                format_metrics_cost(&metrics.totals),
                 Style::default().fg(theme::YELLOW),
             ),
             Span::styled(" · cache ", theme::muted()),
@@ -432,6 +432,12 @@ fn render_metrics(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
             ),
             Span::styled(" · uptime ", theme::muted()),
             Span::raw(human_duration(Duration::from_secs(metrics.uptime_seconds))),
+        ]),
+        Line::from(vec![
+            Span::styled("pricing ", theme::muted()),
+            Span::raw(format!("{:?}", metrics.totals.pricing_status)),
+            Span::styled(" · incomplete ", theme::muted()),
+            Span::raw(metrics.totals.incomplete_sessions.to_string()),
         ]),
     ];
     frame.render_widget(
@@ -461,7 +467,7 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
             let model = format_model_display(
                 session.model.as_deref().unwrap_or("unknown"),
                 session.reasoning_effort,
-                session.model.as_deref().is_some_and(model_requests_fast),
+                session.speed.mode == SpeedMode::Fast,
             );
             let tokens = format_tokens(
                 session
@@ -492,7 +498,7 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
 }
 
 fn presentable_cost(session: &CodexSessionSnapshot) -> String {
-    format_presentable_cost(session.total_cost_usd, session.pricing_source)
+    format_presentable_cost(session.known_cost_usd, session.pricing_status)
         .unwrap_or_else(|| "cost unavailable".to_string())
 }
 
@@ -589,13 +595,14 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     if let Some(active) = data.active {
         let _ = write!(
             signature,
-            "active:{}|{}|{}|{}|{}|{}|",
+            "active:{}|{}|{}|{}|{}|{}|{}|",
             active.session_id,
             active.model.as_deref().unwrap_or(""),
             active
                 .reasoning_effort
                 .map(|value| value.label())
                 .unwrap_or(""),
+            active.speed.mode.label(),
             active.git_branch.as_deref().unwrap_or(""),
             active.session_total_tokens.unwrap_or(0),
             active.session_delta_tokens.unwrap_or(0),
@@ -606,8 +613,10 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     if let Some(metrics) = data.metrics {
         let _ = write!(
             signature,
-            "metrics:{:.6}|{}|{}|{}|{:.4}|",
+            "metrics:{:.6}|{:?}|{}|{}|{}|{}|{:.4}|",
             metrics.totals.cost_usd,
+            metrics.totals.pricing_status,
+            metrics.totals.incomplete_sessions,
             metrics.totals.input_tokens,
             metrics.totals.cached_input_tokens,
             metrics.totals.output_tokens,
@@ -707,7 +716,12 @@ fn sparkline_samples(metrics: &MetricsSnapshot) -> Vec<u64> {
     let mut values: Vec<u64> = metrics
         .by_model
         .iter()
-        .map(|model| (model.cost_usd * 10_000.0).round().max(1.0) as u64)
+        .map(|model| {
+            model
+                .known_cost_usd
+                .map(|cost| (cost * 10_000.0).round().max(1.0) as u64)
+                .unwrap_or(1)
+        })
         .collect();
     if values.is_empty() {
         values.push(1);

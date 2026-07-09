@@ -352,7 +352,8 @@ fn select_plan_signal(sessions: &[CodexSessionSnapshot]) -> Option<PlanSignal> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cost::{PricingSource, TokenCostBreakdown};
+    use crate::cost::{CostAttribution, PricingSource, PricingStatus, TokenCostBreakdown};
+    use crate::model::SessionSpeed;
     use crate::session::{CodexSessionSnapshot, ContextWindowSnapshot, ContextWindowSource};
     use crate::telemetry::limits::{RateLimitEnvelope, RateLimitScope, RateLimits, UsageWindow};
     use chrono::TimeZone;
@@ -368,6 +369,7 @@ mod tests {
             source: None,
             model: Some("gpt-5.3-codex".to_string()),
             reasoning_effort: None,
+            speed: SessionSpeed::default(),
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: Some(1),
@@ -380,8 +382,12 @@ mod tests {
             last_cached_input_tokens: Some(0),
             last_output_tokens: Some(0),
             total_cost_usd: 0.0,
+            known_cost_usd: Some(0.0),
             cost_breakdown: TokenCostBreakdown::default(),
             pricing_source: PricingSource::Exact,
+            pricing_status: PricingStatus::Exact,
+            cost_attribution: CostAttribution::SingleModel,
+            cost_breakdown_reconciled: true,
             context_window: Some(ContextWindowSnapshot {
                 window_tokens: 100,
                 used_tokens: 1,

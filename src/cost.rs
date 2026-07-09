@@ -1,9 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ModelPricingOverride, PricingConfig};
-use crate::model::{CatalogRates, ModelResolutionSource, resolve_context_window, resolve_model};
+use crate::model::{
+    CatalogRates, ModelResolutionSource, SessionSpeed, SpeedMode, SpeedSource,
+    resolve_context_window, resolve_model,
+};
 
 pub use crate::model::normalize_model_key;
+
+const MAX_RATE_PER_MILLION: f64 = 1_000_000_000.0;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 pub struct ModelPricing {
@@ -19,8 +24,10 @@ pub enum PricingSource {
     Exact,
     Alias,
     Override,
-    Partial,
+    ProviderReported,
     Unavailable,
+    // Legacy wire values retained for backwards-compatible deserialization.
+    Partial,
     #[default]
     Fallback,
 }
@@ -34,6 +41,16 @@ pub enum PricingStatus {
     Unavailable,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CostAttribution {
+    #[default]
+    SingleModel,
+    MixedModels,
+    MixedSpeeds,
+    MixedModelsAndSpeeds,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct TokenUsage {
     pub input_tokens: u64,
@@ -42,13 +59,57 @@ pub struct TokenUsage {
     pub output_tokens: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TokenCostBreakdown {
     pub input_cost_usd: f64,
+    #[serde(default)]
+    pub cache_write_cost_usd: f64,
     pub cached_input_cost_usd: f64,
     pub output_cost_usd: f64,
     #[serde(default)]
     pub cached_input_savings_usd: f64,
+}
+
+impl TokenCostBreakdown {
+    pub fn known_component_total(&self) -> Option<f64> {
+        let components = [
+            self.input_cost_usd,
+            self.cache_write_cost_usd,
+            self.cached_input_cost_usd,
+            self.output_cost_usd,
+        ];
+        if components
+            .iter()
+            .any(|component| !component.is_finite() || *component < 0.0)
+        {
+            return None;
+        }
+        let total = components.into_iter().sum::<f64>();
+        total.is_finite().then_some(total)
+    }
+
+    pub fn reconciles_with(&self, known_total_cost_usd: Option<f64>) -> bool {
+        let Some(known) = known_total_cost_usd.filter(|value| value.is_finite() && *value >= 0.0)
+        else {
+            return false;
+        };
+        let Some(components) = self.known_component_total() else {
+            return false;
+        };
+        let tolerance = known
+            .abs()
+            .max(components.abs())
+            .mul_add(0.000_001, 0.000_000_001);
+        (known - components).abs() <= tolerance
+    }
+
+    fn apply_multiplier(&mut self, multiplier: f64) {
+        self.input_cost_usd *= multiplier;
+        self.cache_write_cost_usd *= multiplier;
+        self.cached_input_cost_usd *= multiplier;
+        self.output_cost_usd *= multiplier;
+        self.cached_input_savings_usd *= multiplier;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,10 +119,17 @@ pub struct CostComputation {
     pub status: PricingStatus,
     pub resolved_model: Option<String>,
     pub breakdown: TokenCostBreakdown,
-    pub cache_write_cost_usd: Option<f64>,
     pub known_total_cost_usd: Option<f64>,
     /// Backward-compatible known subtotal. Consult `status` before presenting it as exact.
     pub total_cost_usd: f64,
+}
+
+impl CostComputation {
+    pub fn mark_partial(&mut self) {
+        if self.status != PricingStatus::Unavailable {
+            self.status = PricingStatus::Partial;
+        }
+    }
 }
 
 pub fn compute_total_cost(
@@ -79,6 +147,7 @@ pub fn compute_total_cost(
             cache_write_tokens: None,
             output_tokens: output_tokens_total,
         },
+        SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::LegacyDefault),
         pricing_config,
     )
 }
@@ -86,77 +155,86 @@ pub fn compute_total_cost(
 pub fn compute_cost(
     model_id: &str,
     usage: TokenUsage,
+    speed: SessionSpeed,
     pricing_config: &PricingConfig,
 ) -> CostComputation {
     let resolved = resolve_model_pricing(model_id, pricing_config);
     let Some(pricing) = resolved.pricing else {
-        return CostComputation {
-            pricing: None,
-            source: PricingSource::Unavailable,
-            status: PricingStatus::Unavailable,
-            resolved_model: None,
-            breakdown: TokenCostBreakdown::default(),
-            cache_write_cost_usd: None,
-            known_total_cost_usd: None,
-            total_cost_usd: 0.0,
-        };
+        return unavailable_computation();
     };
 
     let cached_input_tokens = usage.cached_input_tokens.min(usage.input_tokens);
     let non_cached_input_tokens = usage.input_tokens.saturating_sub(cached_input_tokens);
-    let input_cost_usd = per_million(non_cached_input_tokens, pricing.input_per_million);
-    let cached_input_cost_usd = per_million(cached_input_tokens, pricing.cached_input_per_million);
-    let output_cost_usd = per_million(usage.output_tokens, pricing.output_per_million);
-    let cached_input_standard_cost_usd =
-        per_million(cached_input_tokens, pricing.input_per_million);
-    let cached_input_savings_usd =
-        (cached_input_standard_cost_usd - cached_input_cost_usd).max(0.0);
-    let cache_write_cost_usd = match (usage.cache_write_tokens, pricing.cache_write_per_million) {
-        (Some(tokens), Some(rate)) => Some(per_million(tokens, rate)),
-        _ => None,
+    let mut breakdown = TokenCostBreakdown {
+        input_cost_usd: per_million(non_cached_input_tokens, pricing.input_per_million),
+        cache_write_cost_usd: match (usage.cache_write_tokens, pricing.cache_write_per_million) {
+            (Some(tokens), Some(rate)) => per_million(tokens, rate),
+            _ => 0.0,
+        },
+        cached_input_cost_usd: per_million(cached_input_tokens, pricing.cached_input_per_million),
+        output_cost_usd: per_million(usage.output_tokens, pricing.output_per_million),
+        cached_input_savings_usd: (per_million(cached_input_tokens, pricing.input_per_million)
+            - per_million(cached_input_tokens, pricing.cached_input_per_million))
+        .max(0.0),
     };
-    let status = if pricing.cache_write_per_million.is_some() && usage.cache_write_tokens.is_none()
-    {
-        PricingStatus::Partial
-    } else {
+
+    let model = resolve_model(&resolved.resolved_model);
+    let supports_fast = model.is_some_and(|model| model.supports_fast());
+    let published_fast_multiplier = model.and_then(|model| model.fast_usage_multiplier());
+    let (economic_multiplier, speed_complete) = match speed.mode {
+        SpeedMode::Fast => match published_fast_multiplier {
+            Some(multiplier) => (multiplier, true),
+            None => (1.0, false),
+        },
+        SpeedMode::Standard if !speed.known && supports_fast => (1.0, false),
+        SpeedMode::Standard => (1.0, true),
+    };
+    breakdown.apply_multiplier(economic_multiplier);
+
+    let cache_complete =
+        pricing.cache_write_per_million.is_none() || usage.cache_write_tokens.is_some();
+    let Some(known_total) = breakdown.known_component_total() else {
+        return unavailable_computation();
+    };
+    let status = if cache_complete && speed_complete {
         PricingStatus::Exact
-    };
-    let known_total = input_cost_usd
-        + cached_input_cost_usd
-        + output_cost_usd
-        + cache_write_cost_usd.unwrap_or(0.0);
-    let source = if status == PricingStatus::Partial {
-        PricingSource::Partial
     } else {
-        resolved.source
+        PricingStatus::Partial
     };
 
     CostComputation {
         pricing: Some(pricing),
-        source,
+        source: resolved.source,
         status,
         resolved_model: Some(resolved.resolved_model),
-        breakdown: TokenCostBreakdown {
-            input_cost_usd,
-            cached_input_cost_usd,
-            output_cost_usd,
-            cached_input_savings_usd,
-        },
-        cache_write_cost_usd,
+        breakdown,
         known_total_cost_usd: Some(known_total),
         total_cost_usd: known_total,
     }
 }
 
-pub fn format_presentable_cost(total_cost_usd: f64, source: PricingSource) -> Option<String> {
-    if !total_cost_usd.is_finite() || total_cost_usd < 0.0 {
-        return None;
+fn unavailable_computation() -> CostComputation {
+    CostComputation {
+        pricing: None,
+        source: PricingSource::Unavailable,
+        status: PricingStatus::Unavailable,
+        resolved_model: None,
+        breakdown: TokenCostBreakdown::default(),
+        known_total_cost_usd: None,
+        total_cost_usd: 0.0,
     }
-    let formatted = crate::util::format_cost(total_cost_usd);
-    match source {
-        PricingSource::Unavailable | PricingSource::Fallback => None,
-        PricingSource::Partial => Some(format!(">={formatted}")),
-        PricingSource::Exact | PricingSource::Alias | PricingSource::Override => Some(formatted),
+}
+
+pub fn format_presentable_cost(
+    known_total_cost_usd: Option<f64>,
+    status: PricingStatus,
+) -> Option<String> {
+    let total = known_total_cost_usd.filter(|value| value.is_finite() && *value >= 0.0)?;
+    let formatted = crate::util::format_cost(total);
+    match status {
+        PricingStatus::Exact => Some(formatted),
+        PricingStatus::Partial => Some(format!(">={formatted}")),
+        PricingStatus::Unavailable => None,
     }
 }
 
@@ -242,7 +320,7 @@ fn lookup_override(
 }
 
 fn valid_rate(rate: f64) -> bool {
-    rate.is_finite() && rate >= 0.0
+    rate.is_finite() && (0.0..=MAX_RATE_PER_MILLION).contains(&rate)
 }
 
 fn per_million(tokens: u64, rate: f64) -> f64 {
@@ -330,6 +408,11 @@ mod tests {
         assert_eq!(computed.status, PricingStatus::Exact);
         assert!((computed.total_cost_usd - 5.3375).abs() < 0.0001);
         assert!((computed.breakdown.cached_input_savings_usd - 0.7875).abs() < 0.0001);
+        assert!(
+            computed
+                .breakdown
+                .reconciles_with(computed.known_total_cost_usd)
+        );
     }
 
     #[test]
@@ -353,15 +436,15 @@ mod tests {
     #[test]
     fn partial_and_unavailable_costs_cannot_render_as_exact() {
         assert_eq!(
-            format_presentable_cost(0.0065, PricingSource::Partial),
+            format_presentable_cost(Some(0.0065), PricingStatus::Partial),
             Some(">=$0.0065".to_string())
         );
         assert_eq!(
-            format_presentable_cost(0.0065, PricingSource::Unavailable),
+            format_presentable_cost(None, PricingStatus::Unavailable),
             None
         );
         assert_eq!(
-            format_presentable_cost(0.0, PricingSource::Exact),
+            format_presentable_cost(Some(0.0), PricingStatus::Exact),
             Some("$0.00".to_string())
         );
     }

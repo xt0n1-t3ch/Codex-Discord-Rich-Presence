@@ -6,8 +6,8 @@ use codex_discord_presence::cost::{
     resolve_model_pricing,
 };
 use codex_discord_presence::model::{
-    ContextSource, ReasoningEffort, SpeedMode, model_catalog, prompt_cache_policy,
-    resolve_context_window_from_cache_path, resolve_model,
+    ContextSource, ReasoningEffort, SessionSpeed, SpeedMode, SpeedSource, model_catalog,
+    prompt_cache_policy, resolve_context_window_from_cache_path, resolve_model,
 };
 
 #[test]
@@ -130,6 +130,7 @@ fn pricing_status_distinguishes_exact_partial_and_unavailable() {
             cache_write_tokens: None,
             output_tokens: 200_000,
         },
+        SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
         &config,
     );
     assert_eq!(partial.status, PricingStatus::Partial);
@@ -141,11 +142,17 @@ fn pricing_status_distinguishes_exact_partial_and_unavailable() {
             cache_write_tokens: Some(25_000),
             ..TokenUsage::default()
         },
+        SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
         &config,
     );
     assert_eq!(exact.status, PricingStatus::Exact);
 
-    let unavailable = compute_cost("gpt-future-unknown", TokenUsage::default(), &config);
+    let unavailable = compute_cost(
+        "gpt-future-unknown",
+        TokenUsage::default(),
+        SessionSpeed::default(),
+        &config,
+    );
     assert_eq!(unavailable.status, PricingStatus::Unavailable);
     assert_eq!(unavailable.known_total_cost_usd, None);
     assert_eq!(unavailable.source, PricingSource::Unavailable);
@@ -166,15 +173,81 @@ fn prompt_cache_policy_is_explicit_and_verified() {
 #[test]
 fn public_cost_presentation_preserves_completeness() {
     assert_eq!(
-        format_presentable_cost(0.0065, PricingSource::Exact),
+        format_presentable_cost(Some(0.0065), PricingStatus::Exact),
         Some("$0.0065".to_string())
     );
     assert_eq!(
-        format_presentable_cost(0.0065, PricingSource::Partial),
+        format_presentable_cost(Some(0.0065), PricingStatus::Partial),
         Some(">=$0.0065".to_string())
     );
     assert_eq!(
-        format_presentable_cost(0.0065, PricingSource::Unavailable),
+        format_presentable_cost(None, PricingStatus::Unavailable),
         None
+    );
+}
+
+#[test]
+fn fast_economics_are_applied_or_marked_partial() {
+    let config = PricingConfig::default();
+    let usage = TokenUsage {
+        input_tokens: 1_000_000,
+        output_tokens: 100_000,
+        ..TokenUsage::default()
+    };
+    let known_fast = compute_cost(
+        "gpt-5.5",
+        usage,
+        SessionSpeed::explicit(SpeedMode::Fast, SpeedSource::ThreadSettings),
+        &config,
+    );
+    assert_eq!(known_fast.status, PricingStatus::Exact);
+    assert_eq!(known_fast.known_total_cost_usd, Some(20.0));
+
+    let unpublished_fast = compute_cost(
+        "gpt-5.6-sol",
+        usage,
+        SessionSpeed::explicit(SpeedMode::Fast, SpeedSource::ThreadSettings),
+        &config,
+    );
+    assert_eq!(unpublished_fast.status, PricingStatus::Partial);
+    assert_eq!(unpublished_fast.known_total_cost_usd, Some(8.0));
+    assert_eq!(unpublished_fast.source, PricingSource::Exact);
+}
+
+#[test]
+fn cache_write_component_reconciles_with_known_subtotal() {
+    let computed = compute_cost(
+        "gpt-5.6-terra",
+        TokenUsage {
+            input_tokens: 1_000_000,
+            cached_input_tokens: 200_000,
+            cache_write_tokens: Some(100_000),
+            output_tokens: 100_000,
+        },
+        SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
+        &PricingConfig::default(),
+    );
+    assert_eq!(computed.status, PricingStatus::Exact);
+    assert_eq!(computed.breakdown.cache_write_cost_usd, 0.3125);
+    assert!(
+        computed
+            .breakdown
+            .reconciles_with(computed.known_total_cost_usd)
+    );
+}
+
+#[test]
+fn context_source_accepts_legacy_wire_values_and_writes_canonical_values() {
+    let event: ContextSource = serde_json::from_str(r#""event""#).expect("legacy event");
+    let catalog: ContextSource = serde_json::from_str(r#""catalog""#).expect("legacy catalog");
+    assert_eq!(event, ContextSource::ObservedJsonl);
+    assert_eq!(catalog, ContextSource::BundledCatalog);
+    assert_eq!(
+        serde_json::to_string(&event).expect("event serialize"),
+        r#""observed_jsonl""#
+    );
+    assert_eq!(
+        serde_json::to_string(&catalog).expect("catalog serialize"),
+        r#""bundled_catalog""#
     );
 }

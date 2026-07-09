@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::config::PricingConfig;
-use crate::cost::{PricingSource, TokenCostBreakdown};
-pub use crate::model::{ContextSource as ContextWindowSource, ReasoningEffort};
+use crate::cost::{CostAttribution, PricingSource, PricingStatus, TokenCostBreakdown};
+pub use crate::model::{
+    ContextSource as ContextWindowSource, ReasoningEffort, SessionSpeed, SpeedMode, SpeedSource,
+};
 pub use crate::telemetry::limits::{
     EffectiveLimitSelection, RateLimitEnvelope, RateLimitScope, RateLimits, UsageWindow,
 };
@@ -23,6 +25,9 @@ mod activity;
 mod parser;
 
 use activity::{SessionAccumulator, looks_like_desktop_surface};
+pub(crate) use activity::{
+    sanitize_domain_target, sanitize_file_target, summarize_command_for_presence,
+};
 use parser::{fetch_git_branch, parse_session_file_cached};
 #[cfg(test)]
 use parser::{parse_new_lines, parse_session_file, parse_utc_timestamp};
@@ -92,6 +97,8 @@ pub struct CodexSessionSnapshot {
     pub source: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default)]
+    pub speed: SessionSpeed,
     pub approval_policy: Option<String>,
     pub sandbox_policy: Option<String>,
     pub session_total_tokens: Option<u64>,
@@ -104,8 +111,16 @@ pub struct CodexSessionSnapshot {
     pub last_cached_input_tokens: Option<u64>,
     pub last_output_tokens: Option<u64>,
     pub total_cost_usd: f64,
+    #[serde(default)]
+    pub known_cost_usd: Option<f64>,
     pub cost_breakdown: TokenCostBreakdown,
     pub pricing_source: PricingSource,
+    #[serde(default)]
+    pub pricing_status: PricingStatus,
+    #[serde(default)]
+    pub cost_attribution: CostAttribution,
+    #[serde(default)]
+    pub cost_breakdown_reconciled: bool,
     pub context_window: Option<ContextWindowSnapshot>,
     pub limits: RateLimits,
     pub rate_limit_envelopes: Vec<RateLimitEnvelope>,
@@ -572,6 +587,7 @@ mod tests {
             source: None,
             model: None,
             reasoning_effort: None,
+            speed: SessionSpeed::default(),
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: None,
@@ -584,8 +600,12 @@ mod tests {
             last_cached_input_tokens: None,
             last_output_tokens: None,
             total_cost_usd: 0.0,
+            known_cost_usd: None,
             cost_breakdown: TokenCostBreakdown::default(),
-            pricing_source: PricingSource::Fallback,
+            pricing_source: PricingSource::Unavailable,
+            pricing_status: PricingStatus::Unavailable,
+            cost_attribution: CostAttribution::SingleModel,
+            cost_breakdown_reconciled: false,
             context_window: None,
             limits: RateLimits::default(),
             rate_limit_envelopes: Vec::new(),
@@ -790,7 +810,8 @@ mod tests {
 {"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6-sol","service_tier":"priority","reasoning_effort":"max","cwd":"C:\\repo\\app"}}}"#,
         );
 
-        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-sol-fast"));
+        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(snapshot.speed.mode, SpeedMode::Fast);
         assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Max));
     }
 
@@ -815,6 +836,135 @@ mod tests {
         assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-luna"));
         assert_eq!(snapshot.pricing_source, PricingSource::Unavailable);
         assert_eq!(snapshot.total_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn same_model_turn_context_preserves_explicit_fast_speed() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6-sol","service_tier":"priority","reasoning_effort":"max","cwd":"C:\\repo\\app"}}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":200,"total_tokens":1200}}}}
+{"timestamp":"2026-07-09T10:01:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.6","effort":"high"}}
+{"timestamp":"2026-07-09T10:01:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2000,"cached_input_tokens":200,"output_tokens":400,"total_tokens":2400}}}}"#,
+        );
+
+        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(snapshot.speed.mode, SpeedMode::Fast);
+        assert_eq!(snapshot.speed.source, SpeedSource::ThreadSettings);
+        assert!(snapshot.speed.known);
+        assert_eq!(snapshot.pricing_status, PricingStatus::Partial);
+        assert_eq!(snapshot.cost_attribution, CostAttribution::SingleModel);
+    }
+
+    #[test]
+    fn explicit_standard_session_never_inherits_global_fast() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6-terra","service_tier":"default","reasoning_effort":"max","cwd":"C:\\repo\\app"}}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":200,"total_tokens":1200}}}}"#,
+        );
+
+        assert_eq!(snapshot.speed.mode, SpeedMode::Standard);
+        assert_eq!(snapshot.speed.source, SpeedSource::ThreadSettings);
+        assert!(snapshot.speed.known);
+        assert_eq!(snapshot.pricing_status, PricingStatus::Partial);
+        assert!(
+            !crate::model::format_model_display(
+                snapshot.model.as_deref().unwrap_or("unknown"),
+                snapshot.reasoning_effort,
+                snapshot.speed.mode == SpeedMode::Fast,
+            )
+            .contains("Fast")
+        );
+    }
+
+    #[test]
+    fn speed_change_after_usage_retains_mixed_speed_attribution() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.5","service_tier":"priority","reasoning_effort":"high","cwd":"C:\\repo\\app"}}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":200,"total_tokens":1200}}}}
+{"timestamp":"2026-07-09T10:01:00Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.5","service_tier":"default","reasoning_effort":"high","cwd":"C:\\repo\\app"}}}
+{"timestamp":"2026-07-09T10:01:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2000,"cached_input_tokens":200,"output_tokens":400,"total_tokens":2400}}}}"#,
+        );
+
+        assert_eq!(snapshot.speed.mode, SpeedMode::Standard);
+        assert_eq!(snapshot.pricing_status, PricingStatus::Partial);
+        assert_eq!(snapshot.cost_attribution, CostAttribution::MixedSpeeds);
+    }
+
+    #[test]
+    fn alias_and_canonical_id_do_not_create_mixed_model_attribution() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-5.6","service_tier":"default","reasoning_effort":"high","cwd":"C:\\repo\\app"}}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":200,"total_tokens":1200}}}}
+{"timestamp":"2026-07-09T10:01:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.6-sol","effort":"max"}}"#,
+        );
+
+        assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(snapshot.cost_attribution, CostAttribution::SingleModel);
+        assert_ne!(snapshot.pricing_status, PricingStatus::Unavailable);
+    }
+
+    #[test]
+    fn hostile_token_totals_saturate_without_panicking() {
+        let snapshot = parse_one(
+            r#"{"timestamp":"2026-07-09T10:00:00Z","type":"turn_context","payload":{"cwd":"C:\\repo\\app","model":"gpt-5.5","effort":"high"}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":18446744073709551615,"cached_input_tokens":18446744073709551615,"output_tokens":18446744073709551615},"last_token_usage":{"input_tokens":18446744073709551615,"cached_input_tokens":18446744073709551615,"output_tokens":18446744073709551615}}}}"#,
+        );
+
+        assert_eq!(snapshot.session_total_tokens, Some(u64::MAX));
+        assert_eq!(snapshot.last_turn_tokens, Some(u64::MAX));
+        assert!(snapshot.known_cost_usd.is_some_and(f64::is_finite));
+    }
+
+    #[test]
+    fn activity_targets_do_not_publish_queries_or_command_arguments() {
+        let command = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"secret-command","cwd":"C:\\repo\\app"}}
+{"timestamp":"2026-07-09T10:00:01Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"curl https://user:super-secret@example.com/path?token=abc\"}","call_id":"call_secret"}}"#,
+        );
+        assert_eq!(
+            command.activity.and_then(|activity| activity.target),
+            Some("curl".to_string())
+        );
+
+        let search = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"secret-search","cwd":"C:\\repo\\app"}}
+{"type":"response_item","payload":{"type":"web_search_call","action":{"query":"private acquisition target secret"}}}"#,
+        );
+        assert_eq!(
+            search.activity.and_then(|activity| activity.target),
+            Some("web search".to_string())
+        );
+    }
+
+    #[test]
+    fn unicode_activity_target_truncation_is_utf8_safe() {
+        let long_name = format!("{}secret.png", "😀".repeat(40));
+        let json = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"unicode","cwd":"C:\\repo\\app"}}}}
+{{"timestamp":"2026-07-09T10:00:01Z","type":"response_item","payload":{{"type":"function_call","name":"view_image","arguments":"{{\"path\":\"C:\\\\private\\\\{long_name}\"}}","call_id":"call_unicode"}}}}"#,
+        );
+        let snapshot = parse_one(&json);
+        let target = snapshot
+            .activity
+            .and_then(|activity| activity.target)
+            .expect("target");
+        assert!(target.is_char_boundary(target.len()));
+        assert!(target.len() <= 72);
+        assert!(!target.contains("private"));
+    }
+
+    #[test]
+    fn activity_sanitizers_handle_windows_and_unix_paths_on_every_host() {
+        assert_eq!(sanitize_file_target(r"C:\private\main.rs", 72), "main.rs");
+        assert_eq!(sanitize_file_target("/private/main.rs", 72), "main.rs");
+        assert_eq!(
+            summarize_command_for_presence(r"C:\private\curl.exe https://secret.example", 72),
+            "curl"
+        );
+        assert_eq!(
+            summarize_command_for_presence("/private/curl https://secret.example", 72),
+            "curl"
+        );
     }
 
     #[test]
@@ -1050,6 +1200,7 @@ mod tests {
             source: None,
             model: None,
             reasoning_effort: None,
+            speed: SessionSpeed::default(),
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: None,
@@ -1062,8 +1213,12 @@ mod tests {
             last_cached_input_tokens: None,
             last_output_tokens: None,
             total_cost_usd: 0.0,
+            known_cost_usd: None,
             cost_breakdown: TokenCostBreakdown::default(),
-            pricing_source: PricingSource::Fallback,
+            pricing_source: PricingSource::Unavailable,
+            pricing_status: PricingStatus::Unavailable,
+            cost_attribution: CostAttribution::SingleModel,
+            cost_breakdown_reconciled: false,
             context_window: None,
             limits: RateLimits {
                 primary: Some(UsageWindow {
@@ -1105,6 +1260,7 @@ mod tests {
             source: None,
             model: None,
             reasoning_effort: None,
+            speed: SessionSpeed::default(),
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: None,
@@ -1117,8 +1273,12 @@ mod tests {
             last_cached_input_tokens: None,
             last_output_tokens: None,
             total_cost_usd: 0.0,
+            known_cost_usd: None,
             cost_breakdown: TokenCostBreakdown::default(),
-            pricing_source: PricingSource::Fallback,
+            pricing_source: PricingSource::Unavailable,
+            pricing_status: PricingStatus::Unavailable,
+            cost_attribution: CostAttribution::SingleModel,
+            cost_breakdown_reconciled: false,
             context_window: None,
             limits: RateLimits {
                 primary: Some(UsageWindow {

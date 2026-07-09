@@ -8,8 +8,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crate::config::{PresenceConfig, PresenceSurface};
 use crate::cost::format_presentable_cost;
-use crate::model::{format_model_display, model_requests_fast};
-use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind};
+use crate::model::format_model_display;
+use crate::session::{CodexSessionSnapshot, RateLimits, SessionActivityKind, SpeedMode};
 use crate::telemetry::plan::ResolvedPlan;
 use crate::telemetry::service_tier::ResolvedServiceTier;
 #[cfg(test)]
@@ -549,14 +549,17 @@ fn presence_lines(
     {
         let label = format!(
             "{} | {}",
-            format_model_display(model, session.reasoning_effort, model_requests_fast(model)),
+            format_model_display(
+                model,
+                session.reasoning_effort,
+                session.speed.mode == SpeedMode::Fast,
+            ),
             resolved_plan.label(config.openai_plan.show_price)
         );
         state_parts.push(truncate_for_limit(&label, 68));
     }
     if config.privacy.show_cost
-        && session.total_cost_usd > 0.0
-        && let Some(cost) = format_presentable_cost(session.total_cost_usd, session.pricing_source)
+        && let Some(cost) = format_presentable_cost(session.known_cost_usd, session.pricing_status)
     {
         state_parts.push(cost);
     }
@@ -791,7 +794,8 @@ fn truncate_for_limit(input: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use crate::config::PresenceConfig;
-    use crate::cost::{PricingSource, TokenCostBreakdown};
+    use crate::cost::{CostAttribution, PricingSource, PricingStatus, TokenCostBreakdown};
+    use crate::model::SessionSpeed;
     use crate::session::{ContextWindowSnapshot, ContextWindowSource, RateLimits, UsageWindow};
     use crate::telemetry::plan::{DetectedPlanSource, DetectedPlanTier, ResolvedPlan};
     use crate::telemetry::service_tier::ServiceTier;
@@ -818,6 +822,7 @@ mod tests {
             source: None,
             model: Some("gpt-5.3-codex".to_string()),
             reasoning_effort: None,
+            speed: SessionSpeed::default(),
             approval_policy: None,
             sandbox_policy: None,
             session_total_tokens: Some(30_000),
@@ -830,13 +835,18 @@ mod tests {
             last_cached_input_tokens: Some(900),
             last_output_tokens: Some(200),
             total_cost_usd: 1.234,
+            known_cost_usd: Some(1.234),
             cost_breakdown: TokenCostBreakdown {
                 input_cost_usd: 0.5,
+                cache_write_cost_usd: 0.0,
                 cached_input_cost_usd: 0.2,
                 output_cost_usd: 0.534,
                 cached_input_savings_usd: 0.3,
             },
             pricing_source: PricingSource::Alias,
+            pricing_status: PricingStatus::Exact,
+            cost_attribution: CostAttribution::SingleModel,
+            cost_breakdown_reconciled: true,
             context_window: Some(ContextWindowSnapshot {
                 window_tokens: 258_400,
                 used_tokens: 15_674,
