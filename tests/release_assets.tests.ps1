@@ -76,12 +76,12 @@ try {
 
     $artifactRoot = Join-Path $temporaryRoot "downloaded"
     $outputDirectory = Join-Path $temporaryRoot "release-assets"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/codex-discord-rich-presence-windows-x64.exe" -Content "windows-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "linux-x64/releases/linux/codex-discord-rich-presence-linux-x64" -Content "linux-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "macos-x64/releases/macos/codex-discord-rich-presence-macos-x64" -Content "macos-x64-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "macos-arm64/releases/macos/codex-discord-rich-presence-macos-arm64" -Content "macos-arm64-binary"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/codex-app-logo.png" -Content "logo"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "windows-x64/releases/windows/chatgpt-app-logo.jpg" -Content "chatgpt-logo"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/codex-discord-rich-presence-windows-x64.exe" -Content "windows-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-unknown-linux-gnu/codex-discord-rich-presence-linux-x64" -Content "linux-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-apple-darwin/codex-discord-rich-presence-macos-x64" -Content "macos-x64-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-aarch64-apple-darwin/codex-discord-rich-presence-macos-arm64" -Content "macos-arm64-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/codex-app-logo.png" -Content "logo"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/chatgpt-app-logo.jpg" -Content "chatgpt-logo"
 
     $complete = Invoke-AssetBuild -ArtifactRoot $artifactRoot -OutputDirectory $outputDirectory
     Assert-Equal 0 $complete.ExitCode "A complete artifact set must pass."

@@ -16,13 +16,12 @@ function Find-RequiredArtifact {
         [System.IO.FileInfo[]] $Files,
 
         [Parameter(Mandatory)]
-        [string] $PathSuffix
+        [string] $FileName
     )
 
-    $normalizedSuffix = "/" + $PathSuffix.Replace("\", "/").TrimStart("/")
-    $matches = @($Files | Where-Object { $_.FullName.Replace("\", "/").EndsWith($normalizedSuffix, [System.StringComparison]::Ordinal) })
+    $matches = @($Files | Where-Object { $_.Name -ceq $FileName })
     if ($matches.Count -ne 1) {
-        throw "Expected exactly one artifact ending in '$PathSuffix', found $($matches.Count)."
+        throw "Expected exactly one artifact named '$FileName', found $($matches.Count)."
     }
 
     return $matches[0]
@@ -40,10 +39,10 @@ try {
     }
 
     $sources = [ordered]@{
-        "codex-discord-rich-presence-windows-x64.exe" = Find-RequiredArtifact -Files $files -PathSuffix "windows/codex-discord-rich-presence-windows-x64.exe"
-        "codex-discord-rich-presence-linux-x64" = Find-RequiredArtifact -Files $files -PathSuffix "linux/codex-discord-rich-presence-linux-x64"
-        "codex-discord-rich-presence-macos-x64" = Find-RequiredArtifact -Files $files -PathSuffix "macos/codex-discord-rich-presence-macos-x64"
-        "codex-discord-rich-presence-macos-arm64" = Find-RequiredArtifact -Files $files -PathSuffix "macos/codex-discord-rich-presence-macos-arm64"
+        "codex-discord-rich-presence-windows-x64.exe" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-windows-x64.exe"
+        "codex-discord-rich-presence-linux-x64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-linux-x64"
+        "codex-discord-rich-presence-macos-x64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-macos-x64"
+        "codex-discord-rich-presence-macos-arm64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-macos-arm64"
     }
 
     $logos = @($files | Where-Object { $_.Name -eq "codex-app-logo.png" })
