@@ -11,7 +11,7 @@
 One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, and **quota visibility** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.5.png" alt="Release v1.7.5" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.6.png" alt="Release v1.7.6" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,13 +37,23 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.5</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.6</h2>
+
+- **No polling flashes on Windows** - background Git branch, process-lineage, task-list, takeover, and command probes now run with `CREATE_NO_WINDOW`.
+- **One silent launcher** - every non-interactive Windows child uses the existing `util::silent_command` owner, including the path vendored by Pulse.
+- **Interactive behavior preserved** - Codex wrappers and explicit terminal relaunches still inherit or open the terminal users requested.
+- **Regression locked** - a source contract fails if a background `git`, `powershell`, or `tasklist` call bypasses the silent launcher again.
+
+<details>
+<summary>Previous v1.7.5 highlights</summary>
 
 - **Shared live control** — Pulse and the standalone daemon now read the same persisted config on every poll, so design and all nine privacy fields take effect without restarting either process.
 - **Durable master switch** — press `M`, or use Pulse's Rich Presence toggle, to clear Discord once and enter a truthful `Paused` state while local session monitoring continues.
 - **Reliable resume** — turning presence back on invalidates the prior payload and publishes the current session again through the selected Codex App, ChatGPT App, CLI, or VS Code identity.
 - **Last-good resilience** — an incomplete, invalid, or transiently replaced config is logged and ignored; the running process keeps its last valid settings instead of crashing.
 - **Schema-12 migration** — existing schema-11 users remain enabled by default, and explicit paused state persists across both products.
+
+</details>
 
 **[Download the latest release](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)** &nbsp;·&nbsp; **[Full changelog](CHANGELOG.md)**
 

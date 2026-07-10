@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
-use std::process::Command;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -239,7 +238,7 @@ pub(super) fn parse_utc_timestamp(text: String) -> Option<DateTime<Utc>> {
 }
 
 pub(super) fn fetch_git_branch(project_path: &Path) -> Option<String> {
-    let output = Command::new("git")
+    let output = crate::util::silent_command("git")
         .arg("-C")
         .arg(project_path)
         .arg("rev-parse")
@@ -254,7 +253,7 @@ pub(super) fn fetch_git_branch(project_path: &Path) -> Option<String> {
 
     let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if branch == "HEAD" {
-        let output = Command::new("git")
+        let output = crate::util::silent_command("git")
             .arg("-C")
             .arg(project_path)
             .arg("rev-parse")

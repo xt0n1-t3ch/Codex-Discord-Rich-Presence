@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.6] - 2026-07-10
+
+### Fixed
+
+- Windows background Git branch probes now use the shared `CREATE_NO_WINDOW` launcher, preventing console flashes during session polling.
+- Process-lineage, takeover, task-list, relaunch-wrapper, and command-availability probes use the same silent launcher without changing interactive Codex or terminal children.
+
+### Validated
+
+- Source contract rejects raw background `git`, `powershell`, and `tasklist` launchers
+- Windows runtime child-process trace across repeated polling cycles
+- `cargo --locked fmt --check`
+- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo --locked test --workspace --all-features`
+- `cargo --locked build --workspace --release --all-features`
+- `cargo audit --deny warnings`
+
 ## [1.7.5] - 2026-07-10
 
 ### Added
@@ -337,6 +354,7 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Single-instance lock handling.
 - Open source docs and CI/release workflows.
 
+[1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
 [1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3

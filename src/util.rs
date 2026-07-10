@@ -293,4 +293,24 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(path).expect("read"), "second");
     }
+
+    #[test]
+    fn background_windows_commands_use_silent_launcher() {
+        let app = include_str!("app.rs");
+        let parser = include_str!("session/parser.rs");
+        let process_guard = include_str!("process_guard.rs");
+
+        for (source, forbidden) in [
+            (app, r#"Command::new("powershell")"#),
+            (app, "Command::new(program)"),
+            (parser, r#"Command::new("git")"#),
+            (process_guard, r#"Command::new("powershell")"#),
+            (process_guard, r#"Command::new("tasklist")"#),
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "background command bypasses silent_command: {forbidden}"
+            );
+        }
+    }
 }
