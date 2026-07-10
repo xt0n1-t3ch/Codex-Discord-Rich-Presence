@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.3] - 2026-07-09
+
+### Fixed
+
+- Discord activities now send the selected surface label through the RPC `name` field, so the `ChatGPT App` design overrides the underlying application title instead of changing only the logo. The same owner supplies `Codex App`, `Codex CLI`, and `Codex VS Code Extension` titles.
+- GPT model presentation now keeps the exact Codex App label in the factual catalog while rendering the human-facing line as `GPT-5.6 Sol · Max | Pro 20x ($200/month)`. Reasoning and Fast are separate ` · ` segments in Discord, Ratatui, status output, and OpenCode views.
+- Presence payload equality includes the activity title, forcing an immediate republish when the selected design changes.
+
+### Validated
+
+- `cargo --locked fmt --check`
+- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo --locked test --workspace --all-features`
+- `cargo --locked build --workspace --release --all-features`
+- `cargo audit --deny warnings`
+- Downloaded release assets and `SHA256SUMS.txt`
+
 ## [1.7.2] - 2026-07-09
 
 ### Added
@@ -272,5 +289,6 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Single-instance lock handling.
 - Open source docs and CI/release workflows.
 
+[1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.0...v1.7.1

@@ -45,6 +45,7 @@ const IDLE_STATE: &str = "Idling...";
 struct PresencePayload {
     session_id: Option<String>,
     start_epoch: i64,
+    activity_name: String,
     details: String,
     state: String,
 }
@@ -118,9 +119,11 @@ impl DiscordPresence {
                     config,
                 );
                 let start_epoch = presence_start_epoch(session);
+                let branding = display_branding(self.surface, config);
                 let payload = PresencePayload {
                     session_id: Some(session.session_id.clone()),
                     start_epoch,
+                    activity_name: branding.activity_name.to_string(),
                     details: details.clone(),
                     state: state.clone(),
                 };
@@ -138,7 +141,6 @@ impl DiscordPresence {
                 }
 
                 let (small_image_key, small_text) = small_asset_for_activity(session, config);
-                let branding = display_branding(self.surface, config);
                 let resolved_large_key =
                     resolve_image_key(branding.large_image_key, self.known_asset_keys.as_ref());
                 let resolved_small_key =
@@ -150,15 +152,16 @@ impl DiscordPresence {
                     let _ = client.clear_activity();
                 }
 
-                let activity = build_activity(
-                    &details,
-                    &state,
+                let activity = build_activity(ActivitySpec {
+                    name: branding.activity_name,
+                    details: &details,
+                    state: &state,
                     start_epoch,
-                    large_image_key.as_deref(),
-                    non_empty_trimmed(branding.large_text),
-                    small_image_key.as_deref(),
-                    non_empty_trimmed(&small_text),
-                );
+                    large_image_key: large_image_key.as_deref(),
+                    large_text: non_empty_trimmed(branding.large_text),
+                    small_image_key: small_image_key.as_deref(),
+                    small_text: non_empty_trimmed(&small_text),
+                });
                 let client = self
                     .client
                     .as_mut()
@@ -183,6 +186,7 @@ impl DiscordPresence {
                 let payload = PresencePayload {
                     session_id: None,
                     start_epoch: idle_start,
+                    activity_name: branding.activity_name.to_string(),
                     details: details.clone(),
                     state: state.clone(),
                 };
@@ -205,18 +209,16 @@ impl DiscordPresence {
                     let _ = client.clear_activity();
                 }
 
-                let mut activity = Activity::new()
-                    .details(&details)
-                    .state(&state)
-                    .timestamps(Timestamps::new().start(idle_start));
-
-                if let Some(large_key) = resolved_large_key.as_deref() {
-                    let mut assets = Assets::new().large_image(large_key);
-                    if let Some(text) = non_empty_trimmed(branding.large_text) {
-                        assets = assets.large_text(text);
-                    }
-                    activity = activity.assets(assets);
-                }
+                let activity = build_activity(ActivitySpec {
+                    name: branding.activity_name,
+                    details: &details,
+                    state: &state,
+                    start_epoch: idle_start,
+                    large_image_key: resolved_large_key.as_deref(),
+                    large_text: non_empty_trimmed(branding.large_text),
+                    small_image_key: None,
+                    small_text: None,
+                });
 
                 let client = self
                     .client
@@ -364,6 +366,7 @@ impl DiscordPresence {
 
 #[derive(Clone, Copy)]
 struct SurfaceDisplay<'a> {
+    activity_name: &'a str,
     large_image_key: &'a str,
     large_text: &'a str,
     idle_details: &'a str,
@@ -394,11 +397,13 @@ fn display_branding<'a>(
     match (surface, config.display.desktop_presence_design) {
         (PresenceSurface::Cli | PresenceSurface::VsCode, _)
         | (PresenceSurface::Desktop, DesktopPresenceDesign::ChatGptApp) => SurfaceDisplay {
+            activity_name: label,
             large_image_key: &config.display.large_image_key,
             large_text: label,
             idle_details: label,
         },
         (PresenceSurface::Desktop, DesktopPresenceDesign::CodexApp) => SurfaceDisplay {
+            activity_name: label,
             large_image_key: &config.display.desktop_large_image_key,
             large_text: label,
             idle_details: label,
@@ -428,7 +433,8 @@ fn compact_error(input: &str) -> String {
     truncate_for_limit(input, 96)
 }
 
-fn build_activity<'a>(
+struct ActivitySpec<'a> {
+    name: &'a str,
     details: &'a str,
     state: &'a str,
     start_epoch: i64,
@@ -436,27 +442,30 @@ fn build_activity<'a>(
     large_text: Option<&'a str>,
     small_image_key: Option<&'a str>,
     small_text: Option<&'a str>,
-) -> Activity<'a> {
+}
+
+fn build_activity(spec: ActivitySpec<'_>) -> Activity<'_> {
     let mut activity = Activity::new()
-        .details(details)
-        .state(state)
-        .timestamps(Timestamps::new().start(start_epoch));
+        .name(spec.name)
+        .details(spec.details)
+        .state(spec.state)
+        .timestamps(Timestamps::new().start(spec.start_epoch));
 
     let mut assets = Assets::new();
     let mut has_assets = false;
 
-    if let Some(image_key) = large_image_key {
+    if let Some(image_key) = spec.large_image_key {
         assets = assets.large_image(image_key);
         has_assets = true;
-        if let Some(text) = large_text {
+        if let Some(text) = spec.large_text {
             assets = assets.large_text(text);
         }
     }
 
-    if let Some(image_key) = small_image_key {
+    if let Some(image_key) = spec.small_image_key {
         assets = assets.small_image(image_key);
         has_assets = true;
-        if let Some(text) = small_text {
+        if let Some(text) = spec.small_text {
             assets = assets.small_text(text);
         }
     }
@@ -899,12 +908,14 @@ mod tests {
         let old_payload = PresencePayload {
             session_id: Some("session-1".to_string()),
             start_epoch: 100,
+            activity_name: "Codex CLI".to_string(),
             details: "Editing src/main.rs".to_string(),
             state: "GPT-5.3-Codex".to_string(),
         };
         let new_payload = PresencePayload {
             session_id: Some("session-1".to_string()),
             start_epoch: 120,
+            activity_name: "Codex CLI".to_string(),
             details: "Editing src/main.rs".to_string(),
             state: "GPT-5.3-Codex".to_string(),
         };
@@ -920,6 +931,7 @@ mod tests {
         let payload = PresencePayload {
             session_id: Some("session-1".to_string()),
             start_epoch: 100,
+            activity_name: "Codex CLI".to_string(),
             details: "Editing src/main.rs".to_string(),
             state: "GPT-5.3-Codex".to_string(),
         };
@@ -947,7 +959,7 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("5.3 Codex | Pro 20x ($200/month)"));
+        assert!(state.contains("GPT-5.3 Codex | Pro 20x ($200/month)"));
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K tok"));
         assert!(state.contains("Ctx 6% used"));
@@ -1038,7 +1050,7 @@ mod tests {
         );
         assert!(details.starts_with("Editing"));
         assert!(details.contains("project-alpha"));
-        assert!(state.contains("5.3 Codex"));
+        assert!(state.contains("GPT-5.3 Codex"));
     }
 
     #[test]
@@ -1060,7 +1072,23 @@ mod tests {
             &service_tier,
             &config,
         );
-        assert!(state.contains("5.6 Sol Max · Fast | Pro 20x ($200/month)"));
+        assert!(state.contains("GPT-5.6 Sol · Max · Fast | Pro 20x ($200/month)"));
+    }
+
+    #[test]
+    fn activity_name_overrides_discord_application_title() {
+        let activity = build_activity(ActivitySpec {
+            name: "ChatGPT App",
+            details: "Running command - project-alpha",
+            state: "GPT-5.6 Sol · Max | Pro 20x ($200/month)",
+            start_epoch: 100,
+            large_image_key: Some("chatgpt-logo"),
+            large_text: Some("ChatGPT App"),
+            small_image_key: None,
+            small_text: None,
+        });
+        let serialized = serde_json::to_value(activity).expect("serialize activity");
+        assert_eq!(serialized["name"], "ChatGPT App");
     }
 
     #[test]

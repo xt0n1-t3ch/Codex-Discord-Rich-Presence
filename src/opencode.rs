@@ -546,7 +546,7 @@ mod tests {
                 descriptor.reasoning_effort,
                 descriptor.speed.mode == SpeedMode::Fast,
             ),
-            "5.6 Sol Extra High · Fast"
+            "GPT-5.6 Sol · Extra High · Fast"
         );
     }
 
