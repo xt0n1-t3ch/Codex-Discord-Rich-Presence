@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::util::write_json_pretty_atomic;
 
@@ -15,16 +16,17 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 11;
+const CONFIG_SCHEMA_VERSION: u32 = 12;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
     "29e563eeb755ae71d940c1b11d49dd3282a8886cd8b8cab829b2a14fcedad247";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct PresenceConfig {
     pub schema_version: u32,
+    pub presence_enabled: bool,
     pub discord_client_id: Option<String>,
     pub discord_client_id_desktop: Option<String>,
     pub discord_public_key: Option<String>,
@@ -34,7 +36,7 @@ pub struct PresenceConfig {
     pub openai_plan: OpenAiPlanDisplayConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PrivacyConfig {
     pub enabled: bool,
@@ -134,7 +136,7 @@ impl PrivacyField {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct PricingConfig {
     pub aliases: BTreeMap<String, String>,
@@ -398,7 +400,7 @@ impl DesktopPresenceDesign {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct DisplayConfig {
     pub desktop_presence_design: DesktopPresenceDesign,
@@ -413,7 +415,7 @@ pub struct DisplayConfig {
     pub terminal_logo_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct ActivitySmallImageKeys {
     pub thinking: Option<String>,
@@ -435,6 +437,7 @@ impl Default for PresenceConfig {
     fn default() -> Self {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
+            presence_enabled: true,
             discord_client_id: Some(DEFAULT_DISCORD_CLIENT_ID.to_string()),
             discord_client_id_desktop: Some(DEFAULT_DISCORD_DESKTOP_CLIENT_ID.to_string()),
             discord_public_key: Some(DEFAULT_DISCORD_PUBLIC_KEY.to_string()),
@@ -501,14 +504,7 @@ impl PresenceConfig {
         }
 
         if cfg_path.exists() {
-            let raw = fs::read_to_string(&cfg_path)
-                .with_context(|| format!("failed to read {}", cfg_path.display()))?;
-            let mut parsed: PresenceConfig = serde_json::from_str(&raw)
-                .with_context(|| format!("invalid JSON in {}", cfg_path.display()))?;
-            if parsed.normalize_for_runtime() {
-                parsed.save()?;
-            }
-            Ok(parsed)
+            Self::load_from_path(&cfg_path)
         } else {
             let cfg = PresenceConfig::default();
             cfg.save()?;
@@ -518,7 +514,54 @@ impl PresenceConfig {
 
     pub fn save(&self) -> Result<()> {
         let path = config_path();
-        write_json_pretty_atomic(&path, self)
+        self.save_to_path(&path)
+    }
+
+    pub fn reload_from_disk(&mut self) -> bool {
+        self.reload_from_path(&config_path())
+    }
+
+    pub fn reload_from_path(&mut self, path: &Path) -> bool {
+        match Self::load_from_path(path) {
+            Ok(reloaded) => {
+                let changed = *self != reloaded;
+                *self = reloaded;
+                changed
+            }
+            Err(error) => {
+                warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "presence config reload failed; keeping the last valid configuration"
+                );
+                false
+            }
+        }
+    }
+
+    pub fn toggle_presence(&mut self) -> Result<()> {
+        self.toggle_presence_at_path(&config_path())
+    }
+
+    pub fn toggle_presence_at_path(&mut self, path: &Path) -> Result<()> {
+        self.reload_from_path(path);
+        self.presence_enabled = !self.presence_enabled;
+        self.save_to_path(path)
+    }
+
+    fn load_from_path(path: &Path) -> Result<Self> {
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let mut parsed: PresenceConfig = serde_json::from_str(&raw)
+            .with_context(|| format!("invalid JSON in {}", path.display()))?;
+        if parsed.normalize_for_runtime() {
+            parsed.save_to_path(path)?;
+        }
+        Ok(parsed)
+    }
+
+    fn save_to_path(&self, path: &Path) -> Result<()> {
+        write_json_pretty_atomic(path, self)
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
     }
@@ -1073,6 +1116,7 @@ mod tests {
     fn migration_sets_default_client_id_when_missing() {
         let mut cfg = PresenceConfig {
             schema_version: 2,
+            presence_enabled: true,
             discord_client_id: None,
             discord_client_id_desktop: None,
             discord_public_key: None,
@@ -1085,7 +1129,8 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 11);
+        assert_eq!(cfg.schema_version, 12);
+        assert!(cfg.presence_enabled);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
             Some(DEFAULT_DISCORD_CLIENT_ID)

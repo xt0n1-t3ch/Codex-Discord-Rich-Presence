@@ -31,6 +31,13 @@ pub struct DiscordPresence {
     last_reconnect_attempt: Option<Instant>,
     consecutive_errors: u32,
     idle_start_epoch: Option<i64>,
+    paused: bool,
+    #[cfg(test)]
+    clear_attempts: u32,
+    #[cfg(test)]
+    connect_attempts: u32,
+    #[cfg(test)]
+    suppress_ipc_connect: bool,
 }
 
 const DISCORD_MIN_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
@@ -40,6 +47,7 @@ const DISCORD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 const RECONNECT_MIN_BACKOFF: Duration = Duration::from_secs(5);
 const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(60);
 const IDLE_STATE: &str = "Idling...";
+const PAUSED_STATUS: &str = "Paused";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresencePresentation {
@@ -80,6 +88,13 @@ impl DiscordPresence {
             last_reconnect_attempt: None,
             consecutive_errors: 0,
             idle_start_epoch: None,
+            paused: false,
+            #[cfg(test)]
+            clear_attempts: 0,
+            #[cfg(test)]
+            connect_attempts: 0,
+            #[cfg(test)]
+            suppress_ipc_connect: false,
         }
     }
 
@@ -98,6 +113,9 @@ impl DiscordPresence {
     ) -> Result<()> {
         self.surface = detect_surface(active_session, fallback_surface, self.last_known_surface);
         self.last_known_surface = self.surface;
+        if !self.apply_presence_enabled(config.presence_enabled)? {
+            return Ok(());
+        }
         let desired_client_id = config.effective_client_id_for_surface(self.surface);
         self.switch_client_if_needed(desired_client_id);
 
@@ -261,7 +279,9 @@ impl DiscordPresence {
     }
 
     pub fn shutdown(&mut self) {
-        let _ = self.clear_activity();
+        if !self.paused {
+            let _ = self.clear_activity();
+        }
         if let Some(client) = self.client.as_mut() {
             let _ = client.close();
         }
@@ -274,10 +294,43 @@ impl DiscordPresence {
         self.reconnect_backoff = RECONNECT_MIN_BACKOFF;
         self.last_reconnect_attempt = None;
         self.consecutive_errors = 0;
+        self.paused = false;
         self.last_status = status_for_client_id(self.surface, self.client_id.as_deref());
     }
 
+    fn apply_presence_enabled(&mut self, enabled: bool) -> Result<bool> {
+        if enabled {
+            if self.paused {
+                self.paused = false;
+                self.last_sent = None;
+                self.last_publish_at = None;
+                self.last_heartbeat_at = None;
+                self.idle_start_epoch = None;
+                self.last_reconnect_attempt = None;
+                self.reconnect_backoff = RECONNECT_MIN_BACKOFF;
+                self.consecutive_errors = 0;
+                self.last_status = status_for_client_id(self.surface, self.client_id.as_deref());
+            }
+            return Ok(true);
+        }
+
+        if !self.paused {
+            self.clear_activity()?;
+            self.paused = true;
+            self.last_sent = None;
+            self.last_publish_at = None;
+            self.last_heartbeat_at = None;
+            self.idle_start_epoch = None;
+        }
+        self.last_status = PAUSED_STATUS.to_string();
+        Ok(false)
+    }
+
     fn clear_activity(&mut self) -> Result<()> {
+        #[cfg(test)]
+        {
+            self.clear_attempts += 1;
+        }
         if let Some(client) = self.client.as_mut()
             && let Err(err) = client
                 .clear_activity()
@@ -302,6 +355,14 @@ impl DiscordPresence {
             && last_attempt.elapsed() < self.reconnect_backoff
         {
             return Ok(());
+        }
+
+        #[cfg(test)]
+        {
+            self.connect_attempts += 1;
+            if self.suppress_ipc_connect {
+                return Ok(());
+            }
         }
 
         self.last_reconnect_attempt = Some(Instant::now());
@@ -1012,6 +1073,78 @@ mod tests {
             state: "GPT-5.3-Codex".to_string(),
         };
         assert!(!should_skip_publish(&Some(payload.clone()), &payload, true));
+    }
+
+    #[test]
+    fn master_presence_pause_is_idempotent_and_resume_forces_a_fresh_publish() {
+        let mut presence =
+            DiscordPresence::new(Some(crate::config::DEFAULT_DISCORD_CLIENT_ID.to_string()));
+        let config = PresenceConfig {
+            presence_enabled: false,
+            ..PresenceConfig::default()
+        };
+        let plan = resolved_plan_pro();
+        let service_tier = resolved_service_tier(false);
+        presence.last_sent = Some(PresencePayload {
+            session_id: Some("session-1".to_string()),
+            start_epoch: 100,
+            activity_name: "ChatGPT App".to_string(),
+            details: "Editing".to_string(),
+            state: "GPT-5.6 Sol".to_string(),
+        });
+        presence.last_publish_at = Some(Instant::now());
+        presence.last_heartbeat_at = Some(Instant::now());
+
+        presence
+            .update(
+                None,
+                None,
+                &plan,
+                &service_tier,
+                &config,
+                PresenceSurface::Cli,
+            )
+            .expect("pause through public update");
+        assert_eq!(presence.status(), "Paused");
+        assert_eq!(presence.clear_attempts, 1);
+        assert!(presence.last_sent.is_none());
+        assert!(presence.last_publish_at.is_none());
+        assert!(presence.last_heartbeat_at.is_none());
+
+        presence
+            .update(
+                None,
+                None,
+                &plan,
+                &service_tier,
+                &config,
+                PresenceSurface::Cli,
+            )
+            .expect("pause again through public update");
+        assert_eq!(presence.status(), "Paused");
+        assert_eq!(presence.clear_attempts, 1);
+
+        let mut resumed_config = config;
+        resumed_config.presence_enabled = true;
+        presence.last_reconnect_attempt = Some(Instant::now());
+        presence.reconnect_backoff = Duration::from_secs(60);
+        presence.suppress_ipc_connect = true;
+        presence
+            .update(
+                None,
+                None,
+                &plan,
+                &service_tier,
+                &resumed_config,
+                PresenceSurface::Cli,
+            )
+            .expect("resume through public update");
+        assert!(!presence.paused);
+        assert_eq!(presence.clear_attempts, 1);
+        assert_eq!(presence.connect_attempts, 1);
+        assert_eq!(presence.reconnect_backoff, RECONNECT_MIN_BACKOFF);
+        assert_eq!(presence.status(), "Disconnected");
+        assert!(presence.last_sent.is_none());
     }
 
     #[test]

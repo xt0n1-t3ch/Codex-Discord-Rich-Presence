@@ -1,7 +1,9 @@
 use codex_discord_presence::config::{
     ActivitySmallImageKeys, DEFAULT_DISCORD_CLIENT_ID, DEFAULT_DISCORD_DESKTOP_CLIENT_ID,
-    DisplayConfig, PresenceConfig,
+    DesktopPresenceDesign, DisplayConfig, PresenceConfig, PrivacyField,
 };
+use std::fs;
+use tempfile::tempdir;
 
 #[test]
 fn non_codex_identity_is_rewritten_to_codex_identity() {
@@ -47,4 +49,140 @@ fn non_codex_identity_is_rewritten_to_codex_identity() {
     assert_eq!(config.display.activity_small_image_keys.running, None);
     assert_eq!(config.display.activity_small_image_keys.waiting, None);
     assert_eq!(config.display.activity_small_image_keys.idle, None);
+}
+
+#[test]
+fn schema_11_migrates_to_enabled_shared_presence_without_changing_preferences() {
+    let directory = tempdir().expect("temp directory");
+    let path = directory.path().join("discord-presence-config.json");
+    let mut legacy = serde_json::to_value(PresenceConfig::default()).expect("serialize config");
+    let object = legacy.as_object_mut().expect("config object");
+    object.insert("schema_version".to_string(), serde_json::json!(11));
+    object.remove("presence_enabled");
+    object
+        .get_mut("privacy")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("privacy object")
+        .insert("show_git_branch".to_string(), serde_json::json!(false));
+    object
+        .get_mut("display")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("display object")
+        .insert(
+            "desktop_presence_design".to_string(),
+            serde_json::json!("chat_gpt_app"),
+        );
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&legacy).expect("serialize legacy config"),
+    )
+    .expect("write legacy config");
+
+    let mut runtime = PresenceConfig {
+        presence_enabled: false,
+        ..PresenceConfig::default()
+    };
+
+    assert!(runtime.reload_from_path(&path));
+    assert_eq!(runtime.schema_version, 12);
+    assert!(runtime.presence_enabled);
+    assert!(!runtime.privacy.show_git_branch);
+    assert_eq!(
+        runtime.display.desktop_presence_design,
+        DesktopPresenceDesign::ChatGptApp
+    );
+
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&fs::read(path).expect("read migrated config"))
+            .expect("parse migrated config");
+    assert_eq!(persisted["schema_version"], 12);
+    assert_eq!(persisted["presence_enabled"], true);
+}
+
+#[test]
+fn runtime_reload_applies_external_controls_and_keeps_last_good_on_invalid_replacement() {
+    let directory = tempdir().expect("temp directory");
+    let path = directory.path().join("discord-presence-config.json");
+    let mut runtime = PresenceConfig::default();
+
+    let mut external = PresenceConfig {
+        presence_enabled: false,
+        ..PresenceConfig::default()
+    };
+    external.privacy.enabled = true;
+    external.privacy.show_activity_target = false;
+    for field in PrivacyField::ALL {
+        field.toggle(&mut external.privacy);
+    }
+    external.display.desktop_presence_design = DesktopPresenceDesign::ChatGptApp;
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&external).expect("serialize external config"),
+    )
+    .expect("write external config");
+
+    assert!(runtime.reload_from_path(&path));
+    assert!(!runtime.presence_enabled);
+    assert!(runtime.privacy.enabled);
+    assert!(!runtime.privacy.show_activity_target);
+    for field in PrivacyField::ALL {
+        assert!(!field.is_enabled(&runtime.privacy), "{}", field.label());
+    }
+    assert_eq!(
+        runtime.display.desktop_presence_design,
+        DesktopPresenceDesign::ChatGptApp
+    );
+
+    fs::write(&path, b"{ replaced while incomplete").expect("replace with invalid config");
+
+    assert!(!runtime.reload_from_path(&path));
+    assert!(!runtime.presence_enabled);
+    assert!(runtime.privacy.enabled);
+    assert!(!runtime.privacy.show_activity_target);
+    for field in PrivacyField::ALL {
+        assert!(!field.is_enabled(&runtime.privacy), "{}", field.label());
+    }
+    assert_eq!(
+        runtime.display.desktop_presence_design,
+        DesktopPresenceDesign::ChatGptApp
+    );
+
+    fs::remove_file(&path).expect("remove replaced config");
+
+    assert!(!runtime.reload_from_path(&path));
+    assert!(!runtime.presence_enabled);
+    assert_eq!(
+        runtime.display.desktop_presence_design,
+        DesktopPresenceDesign::ChatGptApp
+    );
+}
+
+#[test]
+fn master_presence_toggle_persists_through_the_shared_config_boundary() {
+    let directory = tempdir().expect("temp directory");
+    let path = directory.path().join("discord-presence-config.json");
+    let mut runtime = PresenceConfig::default();
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&runtime).expect("serialize config"),
+    )
+    .expect("write config");
+
+    runtime
+        .toggle_presence_at_path(&path)
+        .expect("persist pause");
+    assert!(!runtime.presence_enabled);
+    let paused: PresenceConfig =
+        serde_json::from_slice(&fs::read(&path).expect("read paused config"))
+            .expect("parse paused config");
+    assert!(!paused.presence_enabled);
+
+    runtime
+        .toggle_presence_at_path(&path)
+        .expect("persist resume");
+    assert!(runtime.presence_enabled);
+    let resumed: PresenceConfig =
+        serde_json::from_slice(&fs::read(path).expect("read resumed config"))
+            .expect("parse resumed config");
+    assert!(resumed.presence_enabled);
 }

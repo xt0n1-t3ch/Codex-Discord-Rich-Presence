@@ -122,6 +122,7 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         println!("pid: {pid}");
     }
     println!("config: {}", config::config_path().display());
+    println!("presence_enabled: {}", config.presence_enabled);
     print_session_roots("sessions_dirs", &session_roots);
     println!(
         "runtime_surface: {}",
@@ -276,6 +277,12 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
             }
 
             if last_tick.elapsed() >= runtime.poll_interval {
+                if reload_runtime_config(&mut config) {
+                    force_redraw = true;
+                    if !plan_picker_open {
+                        plan_picker_selected = plan_preset_index(&config.openai_plan);
+                    }
+                }
                 snapshot = collect_runtime_snapshot(
                     &sessions_roots,
                     &runtime,
@@ -322,6 +329,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     stale_secs: runtime.stale_threshold.as_secs(),
                     show_activity: config.privacy.show_activity,
                     show_activity_target: config.privacy.show_activity_target,
+                    presence_enabled: config.presence_enabled,
                     privacy: &config.privacy,
                     plan_display_label: plan_display_label.as_str(),
                     plan_status_label: plan_status_label.as_str(),
@@ -375,6 +383,16 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                             continue;
                         }
 
+                        if is_master_presence_toggle_key(&key) {
+                            config.toggle_presence()?;
+                            request_redraw(
+                                &mut force_redraw,
+                                &mut last_tick,
+                                runtime.poll_interval,
+                            );
+                            continue;
+                        }
+
                         if plan_picker_open {
                             if is_plan_picker_toggle_key(&key)
                                 || (key.code == KeyCode::Esc && key.modifiers.is_empty())
@@ -424,6 +442,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                         }
                                     }
                                     KeyCode::Enter => {
+                                        config.reload_from_disk();
                                         apply_plan_preset(
                                             &mut config.openai_plan,
                                             plan_picker_selected,
@@ -475,6 +494,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                         let target = (digit as u8 - b'1') as usize;
                                         if let Some(field) = PrivacyField::ALL.get(target).copied()
                                         {
+                                            config.reload_from_disk();
                                             privacy_picker_selected = target;
                                             field.toggle(&mut config.privacy);
                                             config.save()?;
@@ -486,6 +506,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                         }
                                     }
                                     KeyCode::Char(' ') | KeyCode::Enter => {
+                                        config.reload_from_disk();
                                         PrivacyField::ALL[privacy_picker_selected]
                                             .toggle(&mut config.privacy);
                                         config.save()?;
@@ -516,6 +537,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                 runtime.poll_interval,
                             );
                         } else if is_desktop_design_toggle_key(&key) {
+                            config.reload_from_disk();
                             config.display.desktop_presence_design =
                                 config.display.desktop_presence_design.toggled();
                             config.save()?;
@@ -548,7 +570,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
 }
 
 fn run_headless_foreground(
-    config: PresenceConfig,
+    mut config: PresenceConfig,
     runtime: RuntimeSettings,
     stop: Arc<AtomicBool>,
 ) -> Result<()> {
@@ -563,6 +585,7 @@ fn run_headless_foreground(
     println!("Press Ctrl+C to stop.");
 
     while !stop.load(Ordering::Relaxed) {
+        reload_runtime_config(&mut config);
         let snapshot = collect_runtime_snapshot(
             &sessions_roots,
             &runtime,
@@ -728,7 +751,7 @@ fn escape_powershell_single_quoted(input: &str) -> String {
 }
 
 fn run_codex_wrapper(
-    config: PresenceConfig,
+    mut config: PresenceConfig,
     runtime: RuntimeSettings,
     args: Vec<String>,
 ) -> Result<()> {
@@ -750,6 +773,7 @@ fn run_codex_wrapper(
             break;
         }
 
+        reload_runtime_config(&mut config);
         let snapshot = collect_runtime_snapshot(
             &sessions_roots,
             &runtime,
@@ -836,6 +860,10 @@ fn publish_runtime_snapshot(
     ) {
         debug!(error = %err, "discord presence update failed");
     }
+}
+
+fn reload_runtime_config(config: &mut PresenceConfig) -> bool {
+    config.reload_from_disk()
 }
 
 fn runtime_surface_hint() -> PresenceSurface {
@@ -1206,6 +1234,17 @@ fn is_privacy_picker_toggle_key(key: &KeyEvent) -> bool {
         && !key.modifiers.contains(KeyModifiers::SUPER)
 }
 
+fn is_master_presence_toggle_key(key: &KeyEvent) -> bool {
+    if !matches!(key.kind, KeyEventKind::Press) {
+        return false;
+    }
+
+    matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'))
+        && !key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+        && !key.modifiers.contains(KeyModifiers::SUPER)
+}
+
 fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interval: Duration) {
     *force_redraw = true;
     *last_tick = Instant::now() - poll_interval;
@@ -1304,6 +1343,26 @@ explorer.exe"#;
         assert!(is_privacy_picker_toggle_key(&key));
         let modified = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
         assert!(!is_privacy_picker_toggle_key(&modified));
+    }
+
+    #[test]
+    fn master_presence_key_toggles_without_modifiers() {
+        let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE);
+        assert!(is_master_presence_toggle_key(&key));
+        let modified = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL);
+        assert!(!is_master_presence_toggle_key(&modified));
+    }
+
+    #[test]
+    fn every_long_running_mode_reloads_the_shared_config_each_poll() {
+        let source = include_str!("app.rs");
+        let reload_call = ["reload_runtime_config", "(&mut config)"].concat();
+
+        assert_eq!(
+            source.matches(&reload_call).count(),
+            3,
+            "TUI, headless, and wrapper loops must reload through the same boundary"
+        );
     }
 
     #[test]

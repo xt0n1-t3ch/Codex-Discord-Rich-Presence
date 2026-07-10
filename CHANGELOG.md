@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.5] - 2026-07-10
+
+### Added
+
+- Schema 12 adds the durable `presence_enabled` master switch, defaulting to enabled for every existing schema-11 installation.
+- Ratatui exposes `M` as a direct pause/resume shortcut and shows both the persisted switch state and truthful Discord `Paused` status.
+
+### Fixed
+
+- Foreground TUI, headless, and Codex-wrapper loops reload the shared persisted config on every poll, so Pulse changes to design and all nine privacy fields apply without restarting or terminating either process.
+- Disabling presence clears Discord activity once per transition while local session monitoring continues; re-enabling invalidates the prior payload and republishes current state.
+- Invalid, incomplete, missing, or transiently replaced config reads now log the failure and preserve the last valid runtime config instead of crashing a running loop.
+
+### Validated
+
+- Schema 11 to 12 migration and persisted enabled default
+- External config reload plus invalid-replacement last-good behavior
+- TUI, headless, and wrapper shared reload boundary
+- Idempotent pause and resume-to-fresh-publish state transition
+- Ratatui master shortcut, paused copy, and responsive footer
+- `cargo --locked fmt --check`
+- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo --locked test --workspace --all-features`
+- `cargo --locked build --workspace --release --all-features`
+- `cargo audit --deny warnings`
+
 ## [1.7.4] - 2026-07-10
 
 ### Added
@@ -311,6 +337,7 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Single-instance lock handling.
 - Open source docs and CI/release workflows.
 
+[1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.1...v1.7.2

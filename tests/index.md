@@ -27,13 +27,14 @@
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
 | Surface identity | `src/session.rs`, `src/app.rs`, and `src/discord.rs` distinguish CLI, VS Code extension-host, VS Code terminal, desktop, OpenCode, sticky idle, launcher lineage, and selected desktop client ids |
 | Discord branding | `src/discord.rs` verifies RPC activity-title overrides, exact surface labels, separated reasoning/speed display, and Codex App / ChatGPT App design assets |
-| Terminal layout | `src/ui.rs` covers layout, monochrome wordmark, plan picker, persisted design toggle copy, footer, spinner, and reserved rows |
+| Terminal layout | `src/ui.rs` covers layout, monochrome wordmark, plan picker, persisted design/master toggle copy, paused state, footer, spinner, and reserved rows |
 | Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
-| Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 11, desktop design/privacy round-trip, and identity normalization |
+| Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 12, enabled-by-default migration, external design/privacy/master reload, invalid-file last-good fallback, and identity normalization |
 | Session parsing | `src/session.rs` and `src/session/*` cover JSONL, activity, latest model/effort changes, session-scoped speed, context provenance, cache bounds, and ranking |
 | OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
 | Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
 | Release integrity | `tests/release_*.tests.ps1` drives metadata, local approval, repository state, workflow, portable artifact, digest, and immutable publication contracts |
 | Privacy controls | `src/config.rs`, `src/discord.rs`, `src/ui.rs`, and `src/app.rs` cover all nine fields, final-payload enforcement, persisted toggles, and Ratatui interaction |
+| Shared control | `tests/integration/config_migration.rs`, `src/app.rs`, and `src/discord.rs` cover Pulse-compatible config reload in TUI/headless/wrapper loops plus idempotent pause and fresh resume publication |
 
 Rule: bugs that cross module seams get an integration regression; module-local bugs can stay beside the Rust module.
