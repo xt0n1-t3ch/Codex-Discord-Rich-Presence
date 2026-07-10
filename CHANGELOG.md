@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.4] - 2026-07-10
+
+### Added
+
+- Ratatui now has a persistent `V` privacy editor for project name, Git branch, model, activity, token count, cost, session limits, context usage, and system signals. Each option updates the live Discord payload immediately.
+- `discord::active_presence_presentation` and `idle_presence_presentation` expose one public presentation contract for the daemon and immutable downstream consumers such as Pulse.
+
+### Fixed
+
+- Context visibility is independent from token visibility, and disabling Systems removes the Discord small activity icon and tooltip instead of leaving a hidden data path active.
+- Discord activity construction now consumes the same public presentation object used by previews, preventing app title, branch, model/reasoning, asset, and privacy drift.
+
+### Validated
+
+- Privacy-field matrix against the final public payload
+- Ratatui privacy editor render and keyboard contract
+- `cargo --locked fmt --check`
+- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo --locked test --workspace --all-features`
+- `cargo --locked build --workspace --release --all-features`
+- `cargo audit --deny warnings`
+
 ## [1.7.3] - 2026-07-09
 
 ### Fixed
@@ -289,6 +311,7 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Single-instance lock handling.
 - Open source docs and CI/release workflows.
 
+[1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.0...v1.7.1

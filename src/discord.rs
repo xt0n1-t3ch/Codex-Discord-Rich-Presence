@@ -42,6 +42,17 @@ const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(60);
 const IDLE_STATE: &str = "Idling...";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresencePresentation {
+    pub app_name: String,
+    pub details: String,
+    pub state: String,
+    pub large_image_key: String,
+    pub large_text: String,
+    pub small_image_key: Option<String>,
+    pub small_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PresencePayload {
     session_id: Option<String>,
     start_epoch: i64,
@@ -111,7 +122,8 @@ impl DiscordPresence {
         match active_session {
             Some(session) => {
                 self.idle_start_epoch = None;
-                let (details, state) = presence_lines(
+                let presentation = active_presence_presentation(
+                    self.surface,
                     session,
                     effective_limits,
                     resolved_plan,
@@ -119,13 +131,12 @@ impl DiscordPresence {
                     config,
                 );
                 let start_epoch = presence_start_epoch(session);
-                let branding = display_branding(self.surface, config);
                 let payload = PresencePayload {
                     session_id: Some(session.session_id.clone()),
                     start_epoch,
-                    activity_name: branding.activity_name.to_string(),
-                    details: details.clone(),
-                    state: state.clone(),
+                    activity_name: presentation.app_name.clone(),
+                    details: presentation.details.clone(),
+                    state: presentation.state.clone(),
                 };
                 let payload_changed = self.last_sent.as_ref() != Some(&payload);
 
@@ -140,11 +151,14 @@ impl DiscordPresence {
                     return Ok(());
                 }
 
-                let (small_image_key, small_text) = small_asset_for_activity(session, config);
-                let resolved_large_key =
-                    resolve_image_key(branding.large_image_key, self.known_asset_keys.as_ref());
-                let resolved_small_key =
-                    resolve_image_key(&small_image_key, self.known_asset_keys.as_ref());
+                let resolved_large_key = resolve_image_key(
+                    &presentation.large_image_key,
+                    self.known_asset_keys.as_ref(),
+                );
+                let resolved_small_key = presentation
+                    .small_image_key
+                    .as_deref()
+                    .and_then(|key| resolve_image_key(key, self.known_asset_keys.as_ref()));
                 let (large_image_key, small_image_key) =
                     normalize_asset_pair(resolved_large_key, resolved_small_key);
 
@@ -153,14 +167,17 @@ impl DiscordPresence {
                 }
 
                 let activity = build_activity(ActivitySpec {
-                    name: branding.activity_name,
-                    details: &details,
-                    state: &state,
+                    name: &presentation.app_name,
+                    details: &presentation.details,
+                    state: &presentation.state,
                     start_epoch,
                     large_image_key: large_image_key.as_deref(),
-                    large_text: non_empty_trimmed(branding.large_text),
+                    large_text: non_empty_trimmed(&presentation.large_text),
                     small_image_key: small_image_key.as_deref(),
-                    small_text: non_empty_trimmed(&small_text),
+                    small_text: presentation
+                        .small_text
+                        .as_deref()
+                        .and_then(non_empty_trimmed),
                 });
                 let client = self
                     .client
@@ -181,14 +198,13 @@ impl DiscordPresence {
             }
             None => {
                 let idle_start = idle_start_epoch(&mut self.idle_start_epoch);
-                let (details, state) = idle_presence_lines(self.surface, config);
-                let branding = display_branding(self.surface, config);
+                let presentation = idle_presence_presentation(self.surface, config);
                 let payload = PresencePayload {
                     session_id: None,
                     start_epoch: idle_start,
-                    activity_name: branding.activity_name.to_string(),
-                    details: details.clone(),
-                    state: state.clone(),
+                    activity_name: presentation.app_name.clone(),
+                    details: presentation.details.clone(),
+                    state: presentation.state.clone(),
                 };
                 let payload_changed = self.last_sent.as_ref() != Some(&payload);
 
@@ -203,19 +219,21 @@ impl DiscordPresence {
                     return Ok(());
                 }
 
-                let resolved_large_key =
-                    resolve_image_key(branding.large_image_key, self.known_asset_keys.as_ref());
+                let resolved_large_key = resolve_image_key(
+                    &presentation.large_image_key,
+                    self.known_asset_keys.as_ref(),
+                );
                 if payload_changed && let Some(client) = self.client.as_mut() {
                     let _ = client.clear_activity();
                 }
 
                 let activity = build_activity(ActivitySpec {
-                    name: branding.activity_name,
-                    details: &details,
-                    state: &state,
+                    name: &presentation.app_name,
+                    details: &presentation.details,
+                    state: &presentation.state,
                     start_epoch: idle_start,
                     large_image_key: resolved_large_key.as_deref(),
-                    large_text: non_empty_trimmed(branding.large_text),
+                    large_text: non_empty_trimmed(&presentation.large_text),
                     small_image_key: None,
                     small_text: None,
                 });
@@ -416,6 +434,56 @@ fn idle_presence_lines(surface: PresenceSurface, config: &PresenceConfig) -> (St
     (branding.idle_details.to_string(), IDLE_STATE.to_string())
 }
 
+pub fn active_presence_presentation(
+    surface: PresenceSurface,
+    session: &CodexSessionSnapshot,
+    effective_limits: Option<&RateLimits>,
+    resolved_plan: &ResolvedPlan,
+    resolved_service_tier: &ResolvedServiceTier,
+    config: &PresenceConfig,
+) -> PresencePresentation {
+    let branding = display_branding(surface, config);
+    let (details, state) = presence_lines(
+        session,
+        effective_limits,
+        resolved_plan,
+        resolved_service_tier,
+        config,
+    );
+    let (small_image_key, small_text) = if config.privacy.enabled || !config.privacy.show_systems {
+        (None, None)
+    } else {
+        let (key, text) = small_asset_for_activity(session, config);
+        (Some(key), Some(text))
+    };
+    PresencePresentation {
+        app_name: branding.activity_name.to_string(),
+        details,
+        state,
+        large_image_key: branding.large_image_key.to_string(),
+        large_text: branding.large_text.to_string(),
+        small_image_key,
+        small_text,
+    }
+}
+
+pub fn idle_presence_presentation(
+    surface: PresenceSurface,
+    config: &PresenceConfig,
+) -> PresencePresentation {
+    let branding = display_branding(surface, config);
+    let (details, state) = idle_presence_lines(surface, config);
+    PresencePresentation {
+        app_name: branding.activity_name.to_string(),
+        details,
+        state,
+        large_image_key: branding.large_image_key.to_string(),
+        large_text: branding.large_text.to_string(),
+        small_image_key: None,
+        small_text: None,
+    }
+}
+
 fn status_for_client_id(surface: PresenceSurface, client_id: Option<&str>) -> String {
     if client_id.is_some() {
         "Disconnected".to_string()
@@ -565,7 +633,11 @@ fn presence_lines(
     {
         state_parts.push(cost);
     }
-    if let Some(usage) = usage_state_part(session, config.privacy.show_tokens) {
+    if let Some(usage) = usage_state_part(
+        session,
+        config.privacy.show_tokens,
+        config.privacy.show_context,
+    ) {
         state_parts.push(usage);
     }
     if config.privacy.show_limits
@@ -610,12 +682,16 @@ fn context_state_part(session: &CodexSessionSnapshot) -> Option<String> {
     ))
 }
 
-fn usage_state_part(session: &CodexSessionSnapshot, show_tokens: bool) -> Option<String> {
+fn usage_state_part(
+    session: &CodexSessionSnapshot,
+    show_tokens: bool,
+    show_context: bool,
+) -> Option<String> {
     let mut parts = Vec::new();
     if show_tokens && let Some(tokens) = token_state_part(session) {
         parts.push(tokens);
     }
-    if let Some(context) = context_state_part(session) {
+    if show_context && let Some(context) = context_state_part(session) {
         parts.push(context);
     }
     if parts.is_empty() {
@@ -1089,6 +1165,78 @@ mod tests {
         });
         let serialized = serde_json::to_value(activity).expect("serialize activity");
         assert_eq!(serialized["name"], "ChatGPT App");
+    }
+
+    #[test]
+    fn public_active_presentation_matches_chatgpt_discord_payload() {
+        let mut session = sample_session();
+        session.model = Some("gpt-5.6-sol".to_string());
+        session.reasoning_effort = Some(crate::model::ReasoningEffort::Max);
+        let mut config = PresenceConfig::default();
+        config.display.desktop_presence_design = crate::config::DesktopPresenceDesign::ChatGptApp;
+
+        let presentation = active_presence_presentation(
+            PresenceSurface::Desktop,
+            &session,
+            Some(&session.limits),
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+
+        assert_eq!(presentation.app_name, "ChatGPT App");
+        assert_eq!(presentation.large_text, "ChatGPT App");
+        assert!(presentation.details.contains("project-alpha"));
+        assert!(
+            presentation
+                .state
+                .starts_with("GPT-5.6 Sol · Max | Pro 20x ($200/month)")
+        );
+    }
+
+    #[test]
+    fn public_presentation_applies_every_privacy_field_to_the_final_payload() {
+        let mut session = sample_session();
+        session.activity = Some(crate::session::SessionActivitySnapshot {
+            kind: crate::session::SessionActivityKind::RunningCommand,
+            target: Some("cargo test".to_string()),
+            observed_at: None,
+            last_active_at: None,
+            last_effective_signal_at: None,
+            idle_candidate_at: None,
+            pending_calls: 0,
+        });
+        let mut config = PresenceConfig::default();
+        config.privacy.show_git_branch = false;
+        config.privacy.show_context = false;
+        config.privacy.show_systems = false;
+
+        let presentation = active_presence_presentation(
+            PresenceSurface::Desktop,
+            &session,
+            Some(&session.limits),
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+
+        assert!(!presentation.details.contains("feature/main"));
+        assert!(presentation.state.contains("30.0K tok"));
+        assert!(!presentation.state.contains("Ctx"));
+        assert_eq!(presentation.small_image_key, None);
+        assert_eq!(presentation.small_text, None);
+    }
+
+    #[test]
+    fn public_idle_presentation_keeps_app_name_out_of_state() {
+        let mut config = PresenceConfig::default();
+        config.display.desktop_presence_design = crate::config::DesktopPresenceDesign::ChatGptApp;
+
+        let presentation = idle_presence_presentation(PresenceSurface::Desktop, &config);
+
+        assert_eq!(presentation.app_name, "ChatGPT App");
+        assert_eq!(presentation.details, "ChatGPT App");
+        assert_eq!(presentation.state, "Idling...");
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use tracing::debug;
 
 use crate::config::{
-    self, OpenAiPlanDisplayConfig, PresenceConfig, PresenceSurface, RuntimeSettings,
+    self, OpenAiPlanDisplayConfig, PresenceConfig, PresenceSurface, PrivacyField, RuntimeSettings,
     apply_plan_preset, plan_preset_index, plan_presets,
 };
 use crate::cost::format_presentable_cost;
@@ -264,6 +264,8 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
     let mut force_redraw = true;
     let mut plan_picker_open = false;
     let mut plan_picker_selected = plan_preset_index(&config.openai_plan);
+    let mut privacy_picker_open = false;
+    let mut privacy_picker_selected = 0;
 
     ui::enter_terminal()?;
 
@@ -320,6 +322,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     stale_secs: runtime.stale_threshold.as_secs(),
                     show_activity: config.privacy.show_activity,
                     show_activity_target: config.privacy.show_activity_target,
+                    privacy: &config.privacy,
                     plan_display_label: plan_display_label.as_str(),
                     plan_status_label: plan_status_label.as_str(),
                     fast_mode_label,
@@ -338,6 +341,9 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     plan_picker: plan_picker_open.then_some(ui::PlanPickerView {
                         selected_index: plan_picker_selected,
                         current_index: plan_preset_index(&config.openai_plan),
+                    }),
+                    privacy_picker: privacy_picker_open.then_some(ui::PrivacyPickerView {
+                        selected_index: privacy_picker_selected,
                     }),
                 };
                 let signature = ui::frame_signature(&render);
@@ -433,9 +439,77 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                     _ => {}
                                 }
                             }
+                        } else if privacy_picker_open {
+                            if is_privacy_picker_toggle_key(&key)
+                                || (key.code == KeyCode::Esc && key.modifiers.is_empty())
+                            {
+                                privacy_picker_open = false;
+                                request_redraw(
+                                    &mut force_redraw,
+                                    &mut last_tick,
+                                    runtime.poll_interval,
+                                );
+                            } else {
+                                match key.code {
+                                    KeyCode::Up | KeyCode::Left => {
+                                        let field_count = PrivacyField::ALL.len();
+                                        privacy_picker_selected =
+                                            (privacy_picker_selected + field_count - 1)
+                                                % field_count;
+                                        request_redraw(
+                                            &mut force_redraw,
+                                            &mut last_tick,
+                                            runtime.poll_interval,
+                                        );
+                                    }
+                                    KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                                        privacy_picker_selected =
+                                            (privacy_picker_selected + 1) % PrivacyField::ALL.len();
+                                        request_redraw(
+                                            &mut force_redraw,
+                                            &mut last_tick,
+                                            runtime.poll_interval,
+                                        );
+                                    }
+                                    KeyCode::Char(digit @ '1'..='9') => {
+                                        let target = (digit as u8 - b'1') as usize;
+                                        if let Some(field) = PrivacyField::ALL.get(target).copied()
+                                        {
+                                            privacy_picker_selected = target;
+                                            field.toggle(&mut config.privacy);
+                                            config.save()?;
+                                            request_redraw(
+                                                &mut force_redraw,
+                                                &mut last_tick,
+                                                runtime.poll_interval,
+                                            );
+                                        }
+                                    }
+                                    KeyCode::Char(' ') | KeyCode::Enter => {
+                                        PrivacyField::ALL[privacy_picker_selected]
+                                            .toggle(&mut config.privacy);
+                                        config.save()?;
+                                        request_redraw(
+                                            &mut force_redraw,
+                                            &mut last_tick,
+                                            runtime.poll_interval,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                            }
                         } else if is_plan_picker_toggle_key(&key) {
                             plan_picker_selected = plan_preset_index(&config.openai_plan);
+                            privacy_picker_open = false;
                             plan_picker_open = true;
+                            request_redraw(
+                                &mut force_redraw,
+                                &mut last_tick,
+                                runtime.poll_interval,
+                            );
+                        } else if is_privacy_picker_toggle_key(&key) {
+                            plan_picker_open = false;
+                            privacy_picker_open = true;
                             request_redraw(
                                 &mut force_redraw,
                                 &mut last_tick,
@@ -1121,6 +1195,17 @@ fn is_desktop_design_toggle_key(key: &KeyEvent) -> bool {
         && !key.modifiers.contains(KeyModifiers::SUPER)
 }
 
+fn is_privacy_picker_toggle_key(key: &KeyEvent) -> bool {
+    if !matches!(key.kind, KeyEventKind::Press) {
+        return false;
+    }
+
+    matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+        && !key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+        && !key.modifiers.contains(KeyModifiers::SUPER)
+}
+
 fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interval: Duration) {
     *force_redraw = true;
     *last_tick = Instant::now() - poll_interval;
@@ -1211,6 +1296,14 @@ explorer.exe"#;
         assert!(is_desktop_design_toggle_key(&key));
         let modified = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
         assert!(!is_desktop_design_toggle_key(&modified));
+    }
+
+    #[test]
+    fn privacy_picker_key_toggles_without_modifiers() {
+        let key = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE);
+        assert!(is_privacy_picker_toggle_key(&key));
+        let modified = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert!(!is_privacy_picker_toggle_key(&modified));
     }
 
     #[test]

@@ -11,7 +11,7 @@ This folder contains project visuals for Codex Discord Rich Presence (`codex-dis
 - `codex-readme-hero.png`: README hero image in the soft Codex App visual language.
 - `codex-feature-strip.png`: README feature strip for Discord, privacy, Rust runtime, cache, context, and dashboard concepts.
 - `../readme/badges/*.png`: cropped README badge capsules for release, CI, OpenAI Codex, Discord RPC, Rust, Ratatui, local-first, and platform support.
-- `../readme/badges/release-v1.7.3.png`: versioned release capsule; README and preflight version checks advance together.
+- `../readme/badges/release-v1.7.4.png`: versioned release capsule; README and preflight version checks advance together.
 - `../readme/icons/*.png`: cropped README heading icons styled as soft Codex gradient tiles.
 
 ## Badge Policy

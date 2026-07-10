@@ -11,7 +11,7 @@
 One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, and **quota visibility** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.3.png" alt="Release v1.7.3" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.4.png" alt="Release v1.7.4" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,14 +37,14 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.3</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.4</h2>
 
-- **Factual GPT-5.6 family** — Sol, Terra, and Luna labels, aliases, efforts, API rates, Codex credits, Fast capability, and 372K raw / 353.4K usable context now come from one machine-readable catalog with source metadata.
-- **Polished model and reasoning** — Discord and Ratatui render `GPT-5.6 Sol · Max` and `GPT-5.6 Sol · Max · Fast`, with a clear separator between the factual App label and the selected effort.
-- **Exact activity titles** — CLI, VS Code Extension, and desktop metadata are classified separately. Press `D` to switch between `Codex App` and `ChatGPT App`; the selected label now overrides the Discord activity title as well as its logo.
-- **Honest cost completeness** — totals are `exact`, `partial`, or `unavailable`; partial subtotals use `>=`, unobserved GPT-5.6 cache writes and unpublished Fast economics stay explicit, and unknown models never inherit GPT-5.1 pricing.
-- **Current App inventory** — 5.5/5.4/5.4 Mini and Spark use the current Codex 0.144.0 raw/usable windows; 5.4 Mini and Spark no longer claim unsupported Fast, stale prices, or inherited Spark pricing.
-- **Release hardening** — Rust 1.96.1, locked builds, immutable exact-SHA publication, portable artifacts, SHA-256 manifests, pinned Actions, least privilege, CodeQL, and three-platform CI gate every release.
+- **Full TUI privacy editor** — press `V` to control project, branch, model, activity, tokens, cost, limits, context, and system signals. Changes persist and republish to Discord immediately.
+- **One presentation contract** — the daemon and downstream Pulse preview now consume the same public app title, details, state, and asset model, eliminating duplicated formatting rules.
+- **Toggle correctness** — branch-off removes `(main)` from the real Discord payload, Context is independent from tokens, and Systems controls the small activity icon and tooltip.
+- **Exact activity identity** — `Codex App`, `ChatGPT App`, CLI, and VS Code Extension remain separately classified; reasoning and Fast stay clean ` · ` segments after the GPT-5.6 model label.
+- **Factual GPT-5.6 family** — Sol, Terra, and Luna labels, efforts, pricing status, Codex credits, Fast capability, and 372K raw / 353.4K usable context come from one sourced catalog.
+- **Immutable releases** — Rust 1.96.1, locked builds, exact-SHA publication, portable artifacts, SHA-256 manifests, pinned Actions, CodeQL, and three-platform CI gate every release.
 
 **[Download the latest release](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)** &nbsp;·&nbsp; **[Full changelog](CHANGELOG.md)**
 

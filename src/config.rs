@@ -15,7 +15,7 @@ const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 10;
+const CONFIG_SCHEMA_VERSION: u32 = 11;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -44,8 +44,94 @@ pub struct PrivacyConfig {
     pub show_tokens: bool,
     pub show_cost: bool,
     pub show_limits: bool,
+    pub show_context: bool,
     pub show_activity: bool,
     pub show_activity_target: bool,
+    pub show_systems: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivacyField {
+    ProjectName,
+    GitBranch,
+    Model,
+    Activity,
+    TokenCount,
+    Cost,
+    SessionLimits,
+    ContextUsage,
+    Systems,
+}
+
+impl PrivacyField {
+    pub const ALL: [Self; 9] = [
+        Self::ProjectName,
+        Self::GitBranch,
+        Self::Model,
+        Self::Activity,
+        Self::TokenCount,
+        Self::Cost,
+        Self::SessionLimits,
+        Self::ContextUsage,
+        Self::Systems,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ProjectName => "Project name",
+            Self::GitBranch => "Git branch",
+            Self::Model => "Model",
+            Self::Activity => "Activity",
+            Self::TokenCount => "Token count",
+            Self::Cost => "Cost",
+            Self::SessionLimits => "Session limits",
+            Self::ContextUsage => "Context usage",
+            Self::Systems => "Systems",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::ProjectName => "Repository or folder name",
+            Self::GitBranch => "Current checked-out ref",
+            Self::Model => "Model, reasoning, speed, and plan",
+            Self::Activity => "Current Codex activity",
+            Self::TokenCount => "Cumulative session tokens",
+            Self::Cost => "Known session subtotal",
+            Self::SessionLimits => "5-hour and weekly remaining",
+            Self::ContextUsage => "Current context-window percentage",
+            Self::Systems => "Activity icon and workflow signal",
+        }
+    }
+
+    pub const fn is_enabled(self, privacy: &PrivacyConfig) -> bool {
+        match self {
+            Self::ProjectName => privacy.show_project_name,
+            Self::GitBranch => privacy.show_git_branch,
+            Self::Model => privacy.show_model,
+            Self::Activity => privacy.show_activity,
+            Self::TokenCount => privacy.show_tokens,
+            Self::Cost => privacy.show_cost,
+            Self::SessionLimits => privacy.show_limits,
+            Self::ContextUsage => privacy.show_context,
+            Self::Systems => privacy.show_systems,
+        }
+    }
+
+    pub fn toggle(self, privacy: &mut PrivacyConfig) {
+        let value = !self.is_enabled(privacy);
+        match self {
+            Self::ProjectName => privacy.show_project_name = value,
+            Self::GitBranch => privacy.show_git_branch = value,
+            Self::Model => privacy.show_model = value,
+            Self::Activity => privacy.show_activity = value,
+            Self::TokenCount => privacy.show_tokens = value,
+            Self::Cost => privacy.show_cost = value,
+            Self::SessionLimits => privacy.show_limits = value,
+            Self::ContextUsage => privacy.show_context = value,
+            Self::Systems => privacy.show_systems = value,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -370,8 +456,10 @@ impl Default for PrivacyConfig {
             show_tokens: true,
             show_cost: true,
             show_limits: true,
+            show_context: true,
             show_activity: true,
             show_activity_target: true,
+            show_systems: true,
         }
     }
 }
@@ -997,7 +1085,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 10);
+        assert_eq!(cfg.schema_version, 11);
         assert_eq!(
             cfg.discord_client_id.as_deref(),
             Some(DEFAULT_DISCORD_CLIENT_ID)
@@ -1013,6 +1101,40 @@ mod tests {
         assert_eq!(cfg.openai_plan.mode, OpenAiPlanMode::Auto);
         assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro20x);
         assert!(cfg.openai_plan.show_price);
+    }
+
+    #[test]
+    fn privacy_defaults_cover_every_user_visible_presence_field() {
+        let privacy = PrivacyConfig::default();
+
+        assert!(privacy.show_project_name);
+        assert!(privacy.show_git_branch);
+        assert!(privacy.show_model);
+        assert!(privacy.show_activity);
+        assert!(privacy.show_tokens);
+        assert!(privacy.show_cost);
+        assert!(privacy.show_limits);
+        assert!(privacy.show_context);
+        assert!(privacy.show_systems);
+    }
+
+    #[test]
+    fn privacy_fields_toggle_through_one_canonical_contract() {
+        let mut privacy = PrivacyConfig::default();
+
+        for field in PrivacyField::ALL {
+            assert!(
+                field.is_enabled(&privacy),
+                "{} should default on",
+                field.label()
+            );
+            field.toggle(&mut privacy);
+            assert!(
+                !field.is_enabled(&privacy),
+                "{} should toggle off",
+                field.label()
+            );
+        }
     }
 
     #[test]
