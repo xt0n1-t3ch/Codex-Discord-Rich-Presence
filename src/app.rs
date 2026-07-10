@@ -29,7 +29,9 @@ use crate::session::{
 use crate::telemetry::plan::{PlanDetector, ResolvedPlan, is_model_allowed_for_plan};
 use crate::telemetry::service_tier::{ResolvedServiceTier, ServiceTier, resolve_service_tier};
 use crate::ui::{self, RenderData};
-use crate::util::{format_model_display, format_since, format_time_until, format_token_triplet};
+use crate::util::{
+    format_model_display, format_since, format_time_until, format_token_triplet, silent_command,
+};
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
 
@@ -647,7 +649,7 @@ fn relaunch_windows(exe: &str, args: &[String]) -> Result<bool> {
     let command = format!(
         "$env:{RELAUNCH_GUARD_ENV}='1'; Start-Process -FilePath '{escaped_exe}' -ArgumentList {argument_list}"
     );
-    let status = Command::new("powershell")
+    let status = silent_command("powershell")
         .arg("-NoProfile")
         .arg("-ExecutionPolicy")
         .arg("Bypass")
@@ -954,7 +956,7 @@ for ($depth = 0; $depth -lt 8; $depth++) {{
 }}
 $lines -join "`n""#
     );
-    let output = Command::new("powershell")
+    let output = silent_command("powershell")
         .arg("-NoProfile")
         .arg("-ExecutionPolicy")
         .arg("Bypass")
@@ -1141,7 +1143,7 @@ fn print_active_summary(
 }
 
 fn command_available(program: &str) -> bool {
-    Command::new(program)
+    silent_command(program)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

@@ -33,6 +33,7 @@
 | Session parsing | `src/session.rs` and `src/session/*` cover JSONL, activity, latest model/effort changes, session-scoped speed, context provenance, cache bounds, and ranking |
 | OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
 | Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
+| Windows console safety | `src/util.rs::background_windows_commands_use_silent_launcher` rejects raw background Git, PowerShell, task-list, and dynamic command probes that bypass `CREATE_NO_WINDOW` |
 | Release integrity | `tests/release_*.tests.ps1` drives metadata, local approval, repository state, workflow, portable artifact, digest, and immutable publication contracts |
 | Privacy controls | `src/config.rs`, `src/discord.rs`, `src/ui.rs`, and `src/app.rs` cover all nine fields, final-payload enforcement, persisted toggles, and Ratatui interaction |
 | Shared control | `tests/integration/config_migration.rs`, `src/app.rs`, and `src/discord.rs` cover Pulse-compatible config reload in TUI/headless/wrapper loops plus idempotent pause and fresh resume publication |

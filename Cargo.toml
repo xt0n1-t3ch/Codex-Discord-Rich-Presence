@@ -1,6 +1,6 @@
 [package]
 name = "codex-discord-presence"
-version = "1.7.5"
+version = "1.7.6"
 edition = "2024"
 description = "Discord Rich Presence for Codex CLI, Codex VS Code Extension, Codex App, and ChatGPT App sessions"
 license = "MIT"

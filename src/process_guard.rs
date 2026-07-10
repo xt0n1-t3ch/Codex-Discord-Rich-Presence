@@ -2,7 +2,9 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+#[cfg(not(windows))]
+use std::process::Command;
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -185,7 +187,7 @@ fn terminate_process(pid: u32, force: bool) -> Result<()> {
             )
         };
 
-        let status = Command::new("powershell")
+        let status = crate::util::silent_command("powershell")
             .arg("-NoProfile")
             .arg("-ExecutionPolicy")
             .arg("Bypass")
@@ -220,7 +222,7 @@ fn terminate_process(pid: u32, force: bool) -> Result<()> {
 
 #[cfg(windows)]
 fn process_exists(pid: u32) -> bool {
-    let output = Command::new("tasklist")
+    let output = crate::util::silent_command("tasklist")
         .arg("/FI")
         .arg(format!("PID eq {pid}"))
         .arg("/FO")
