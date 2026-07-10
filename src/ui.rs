@@ -72,6 +72,7 @@ pub struct RenderData<'a> {
     pub stale_secs: u64,
     pub show_activity: bool,
     pub show_activity_target: bool,
+    pub presence_enabled: bool,
     pub privacy: &'a PrivacyConfig,
     pub plan_display_label: &'a str,
     pub plan_status_label: &'a str,
@@ -149,7 +150,13 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
 
     let layout = select_layout_mode(area.width, area.height);
     if let Some(plan_picker) = data.plan_picker {
-        render_plan_picker(frame, area, plan_picker, data.desktop_design_label);
+        render_plan_picker(
+            frame,
+            area,
+            plan_picker,
+            data.desktop_design_label,
+            data.presence_enabled,
+        );
         return;
     }
     if let Some(privacy_picker) = data.privacy_picker {
@@ -159,6 +166,7 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
             privacy_picker,
             data.privacy,
             data.desktop_design_label,
+            data.presence_enabled,
         );
         return;
     }
@@ -210,6 +218,7 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
         root[1],
         FooterMode::Normal,
         data.desktop_design_label,
+        data.presence_enabled,
     );
 }
 
@@ -280,14 +289,22 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, layout: UiLayoutMode, data: 
 
 fn header_subtitle(layout: UiLayoutMode) -> &'static str {
     match layout {
-        UiLayoutMode::Full => "local-first Discord Rich Presence for Codex App, CLI, and VS Code",
-        UiLayoutMode::Compact => "Discord Rich Presence · Codex App · CLI · VS Code",
+        UiLayoutMode::Full => {
+            "local-first Discord Rich Presence for Codex App, ChatGPT App, CLI, and VS Code"
+        }
+        UiLayoutMode::Compact => "Discord Rich Presence · Codex/ChatGPT App · CLI · VS Code",
         UiLayoutMode::Minimal => "Discord Rich Presence",
     }
 }
 
 fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
     let mut lines = Vec::new();
+    if !data.presence_enabled {
+        lines.push(Line::from(Span::styled(
+            "Discord presence paused; local session monitoring remains active.",
+            Style::default().fg(theme::TEXT).bold(),
+        )));
+    }
     if let Some(session) = data.active {
         lines.push(Line::from(vec![
             Span::styled(
@@ -542,8 +559,19 @@ fn presentable_cost(session: &CodexSessionSnapshot) -> String {
         .unwrap_or_else(|| "cost unavailable".to_string())
 }
 
-fn render_footer(frame: &mut Frame<'_>, area: Rect, mode: FooterMode, desktop_design_label: &str) {
-    let (left, right) = footer_parts(area.width as usize, mode, desktop_design_label);
+fn render_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    mode: FooterMode,
+    desktop_design_label: &str,
+    presence_enabled: bool,
+) {
+    let (left, right) = footer_parts(
+        area.width as usize,
+        mode,
+        desktop_design_label,
+        presence_enabled,
+    );
     let mut spans = vec![Span::styled(left, theme::muted())];
     if !right.is_empty() {
         spans.push(Span::raw(" "));
@@ -558,6 +586,7 @@ fn render_plan_picker(
     area: Rect,
     view: PlanPickerView,
     desktop_design_label: &str,
+    presence_enabled: bool,
 ) {
     let presets = plan_presets();
     let width = area.width.min(96);
@@ -595,7 +624,13 @@ fn render_plan_picker(
         width: panel_area.width,
         height: 1,
     };
-    render_footer(frame, footer, FooterMode::PlanPicker, desktop_design_label);
+    render_footer(
+        frame,
+        footer,
+        FooterMode::PlanPicker,
+        desktop_design_label,
+        presence_enabled,
+    );
 }
 
 fn render_privacy_picker(
@@ -604,6 +639,7 @@ fn render_privacy_picker(
     view: PrivacyPickerView,
     privacy: &PrivacyConfig,
     desktop_design_label: &str,
+    presence_enabled: bool,
 ) {
     let width = area.width.min(108);
     let height = area
@@ -654,6 +690,7 @@ fn render_privacy_picker(
         footer,
         FooterMode::PrivacyPicker,
         desktop_design_label,
+        presence_enabled,
     );
 }
 
@@ -680,10 +717,11 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
     let mut signature = String::with_capacity(768);
     let _ = write!(
         signature,
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
         data.mode_label,
         data.discord_status,
         data.client_id_configured,
+        data.presence_enabled,
         data.show_activity,
         data.show_activity_target,
         data.plan_display_label,
@@ -848,12 +886,20 @@ fn sparkline_samples(metrics: &MetricsSnapshot) -> Vec<u64> {
     values
 }
 
-fn footer_parts(width: usize, mode: FooterMode, desktop_design_label: &str) -> (String, String) {
+fn footer_parts(
+    width: usize,
+    mode: FooterMode,
+    desktop_design_label: &str,
+    presence_enabled: bool,
+) -> (String, String) {
     let left = match mode {
         FooterMode::PlanPicker => "Plan selector: ↑/↓ choose · Enter apply · Esc close".to_string(),
         FooterMode::PrivacyPicker => "Privacy: ↑/↓ choose · Space toggle · Esc close".to_string(),
         FooterMode::Normal => {
-            format!("Press V privacy · P plan · D design: {desktop_design_label} · Ctrl+C quit")
+            let presence_state = if presence_enabled { "On" } else { "Paused" };
+            format!(
+                "M presence: {presence_state} · V privacy · P plan · D design: {desktop_design_label} · Ctrl+C quit"
+            )
         }
     };
     let right = author_credit(width);
@@ -931,6 +977,7 @@ mod tests {
             stale_secs: 90,
             show_activity: true,
             show_activity_target: true,
+            presence_enabled: true,
             privacy: &TEST_PRIVACY,
             plan_display_label: "Pro 20x ($200/month)",
             plan_status_label: "Pro 20x (manual)",
@@ -1037,6 +1084,18 @@ mod tests {
     }
 
     #[test]
+    fn rendered_runtime_explains_that_pause_keeps_local_monitoring_active() {
+        let mut data = sample_render_data(None);
+        data.presence_enabled = false;
+        data.discord_status = "Paused";
+
+        let rendered = render_test_text(120, 32, &data);
+
+        assert!(rendered.contains("Paused"));
+        assert!(rendered.contains("local session monitoring remains active"));
+    }
+
+    #[test]
     fn author_credit_is_responsive() {
         assert!(author_credit(120).contains("ID 211189703641268224"));
         assert_eq!(author_credit(60), "XT0N1.T3CH | @XT0N1.T3CH");
@@ -1059,13 +1118,13 @@ mod tests {
 
     #[test]
     fn footer_parts_never_overlap() {
-        let (left, right) = footer_parts(84, FooterMode::Normal, "Codex App");
+        let (left, right) = footer_parts(84, FooterMode::Normal, "Codex App", true);
         assert!(left.len() + 1 + right.len() <= 84);
         assert!(left.contains("D design"));
 
-        let (left_small, right_small) = footer_parts(20, FooterMode::Normal, "Codex App");
+        let (left_small, right_small) = footer_parts(20, FooterMode::Normal, "Codex App", true);
         assert_eq!(right_small, "");
-        assert_eq!(left_small, "Press V privacy ...");
+        assert_eq!(left_small, "M presence: On ·...");
     }
 
     #[test]
@@ -1118,14 +1177,23 @@ mod tests {
 
     #[test]
     fn footer_parts_change_when_plan_picker_is_open() {
-        let (left, _right) = footer_parts(80, FooterMode::PlanPicker, "Codex App");
+        let (left, _right) = footer_parts(80, FooterMode::PlanPicker, "Codex App", true);
         assert!(left.contains("Plan selector"));
     }
 
     #[test]
     fn footer_names_the_selected_desktop_design() {
-        let (left, _right) = footer_parts(120, FooterMode::Normal, "ChatGPT App");
+        let (left, _right) = footer_parts(120, FooterMode::Normal, "ChatGPT App", true);
         assert!(left.contains("D design: ChatGPT App"));
+    }
+
+    #[test]
+    fn footer_exposes_master_presence_state_and_shortcut() {
+        let (running, _right) = footer_parts(140, FooterMode::Normal, "ChatGPT App", true);
+        assert!(running.contains("M presence: On"));
+
+        let (paused, _right) = footer_parts(140, FooterMode::Normal, "ChatGPT App", false);
+        assert!(paused.contains("M presence: Paused"));
     }
 
     #[test]

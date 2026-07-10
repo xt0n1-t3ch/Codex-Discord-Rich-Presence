@@ -6,16 +6,18 @@ All data stays on the user's machine. The daemon reads Codex/OpenCode local stat
 
 Path: `~/.codex/discord-presence-config.json`
 
-Current schema version: `11`.
+Current schema version: `12`.
 
 | Owner | Fields |
 |:---|:---|
 | Identity | Shared CLI/VS Code client id, Codex App desktop client id, and asset keys |
-| Runtime | Poll interval, stale cutoff, active sticky window |
+| Runtime | `presence_enabled`, poll interval, stale cutoff, active sticky window |
 | Display | `desktop_presence_design` (`codex_app` or `chat_gpt_app`), terminal logo mode/path, and large/small image text |
 | Pricing | Model aliases and overrides |
 | Plan | Local plan override and preset selection. Manual tiers include `Pro 5x ($100/month)` and `Pro 20x ($200/month)`; legacy `pro` maps to Pro 20x. |
 | Privacy | Project, branch, model, activity, tokens, cost, limits, context, systems, activity target, and global private-mode flags. |
+
+Schema 11 migrates with `presence_enabled=true`, preserving existing publication behavior. Pulse and every standalone runtime mode write and reload this same atomic file; no secondary control file or process-takeover state exists. Failed reloads preserve the last valid in-memory value.
 
 ## Session Snapshot
 

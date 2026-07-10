@@ -6,12 +6,12 @@
   <img src="assets/branding/codex-readme-hero.png" alt="Codex Discord Rich Presence hero with Codex App-inspired gradient and Discord Rich Presence preview" width="100%">
 </picture>
 
-### Local-first activity for Codex App, CLI, VS Code, and OpenCode.
+### Local-first activity for Codex App, ChatGPT App, CLI, VS Code, and OpenCode.
 
 One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, and **quota visibility** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.4.png" alt="Release v1.7.4" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.5.png" alt="Release v1.7.5" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,14 +37,13 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.4</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.5</h2>
 
-- **Full TUI privacy editor** — press `V` to control project, branch, model, activity, tokens, cost, limits, context, and system signals. Changes persist and republish to Discord immediately.
-- **One presentation contract** — the daemon and downstream Pulse preview now consume the same public app title, details, state, and asset model, eliminating duplicated formatting rules.
-- **Toggle correctness** — branch-off removes `(main)` from the real Discord payload, Context is independent from tokens, and Systems controls the small activity icon and tooltip.
-- **Exact activity identity** — `Codex App`, `ChatGPT App`, CLI, and VS Code Extension remain separately classified; reasoning and Fast stay clean ` · ` segments after the GPT-5.6 model label.
-- **Factual GPT-5.6 family** — Sol, Terra, and Luna labels, efforts, pricing status, Codex credits, Fast capability, and 372K raw / 353.4K usable context come from one sourced catalog.
-- **Immutable releases** — Rust 1.96.1, locked builds, exact-SHA publication, portable artifacts, SHA-256 manifests, pinned Actions, CodeQL, and three-platform CI gate every release.
+- **Shared live control** — Pulse and the standalone daemon now read the same persisted config on every poll, so design and all nine privacy fields take effect without restarting either process.
+- **Durable master switch** — press `M`, or use Pulse's Rich Presence toggle, to clear Discord once and enter a truthful `Paused` state while local session monitoring continues.
+- **Reliable resume** — turning presence back on invalidates the prior payload and publishes the current session again through the selected Codex App, ChatGPT App, CLI, or VS Code identity.
+- **Last-good resilience** — an incomplete, invalid, or transiently replaced config is logged and ignored; the running process keeps its last valid settings instead of crashing.
+- **Schema-12 migration** — existing schema-11 users remain enabled by default, and explicit paused state persists across both products.
 
 **[Download the latest release](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)** &nbsp;·&nbsp; **[Full changelog](CHANGELOG.md)**
 
@@ -123,6 +122,7 @@ cargo build --release
 | **Responsive layouts** | Full, compact, and minimal views keep terminal output readable across Windows Terminal, macOS Terminal, Linux terminals, and small panes. |
 | **Plan picker** | Press `P` to choose Auto Detect, Free, Go, Plus, Pro 5x, Pro 20x, Business, or Enterprise. |
 | **Desktop design toggle** | Press `D` to switch and persist `Codex App` or `ChatGPT App`; Discord reconnects to the matching application identity. |
+| **Master presence toggle** | Press `M` to persistently pause or resume Discord publication without stopping local session monitoring. |
 | **Usage snapshot** | Cost, cache hit ratio, savings, uptime, spend trend, limits, and recent sessions share the same runtime snapshot as Discord. |
 | **No forced image protocol** | The repo owns both Codex App and ChatGPT App source art; the terminal uses text-first rendering so it stays portable. |
 
@@ -168,7 +168,9 @@ GPT-5.6 Sol · Max · Fast | Pro 20x ($200/month) · >=$7.37 · 38.9M tok · Ctx
 
 **Change plan display** → press `P` in the terminal → choose Auto Detect or a manual tier. `Pro 5x ($100/month)` and `Pro 20x ($200/month)` are separate options.
 
-**Change desktop design** → press `D` in the terminal → the persisted schema-10 setting alternates between `Codex App` and `ChatGPT App`.
+**Change desktop design** → press `D` in the terminal → the persisted schema-12 setting alternates between `Codex App` and `ChatGPT App`.
+
+**Pause or resume Discord** → press `M` in the terminal → schema 12 persists the same `presence_enabled` switch used by Pulse. Pausing clears the current card but keeps local monitoring active.
 
 **Hide sensitive fields** → edit `~/.codex/discord-presence-config.json` and toggle privacy fields such as project, branch, activity, tokens, cost, and limits.
 

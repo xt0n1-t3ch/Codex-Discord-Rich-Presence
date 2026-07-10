@@ -10,7 +10,8 @@ This document owns the local runtime contract exported by the daemon modules.
 | `src/session.rs` | Produces `CodexSessionSnapshot` from Codex JSONL and local OpenCode data |
 | `src/cost.rs` | Applies local overrides and computes exact, partial, or unavailable token costs |
 | `src/metrics.rs` | Aggregates session snapshots into a unified cost/cache/context report |
-| `src/discord.rs` | Converts runtime state into Discord IPC activities and Codex asset identities |
+| `src/config.rs` | Owns schema-12 persistence, last-good runtime reload, the master presence switch, design, privacy, plan, and pricing overrides |
+| `src/discord.rs` | Converts runtime state into Discord IPC activities and Codex asset identities, including idempotent pause/resume transitions |
 | `src/ui.rs` | Renders the Ratatui terminal view from `RenderData` |
 
 `src/model_catalog.json` is the single machine-readable owner for bundled model facts. It includes source URLs and a verification date. Consumers must use the exported model API instead of rebuilding model names, capabilities, or rates.
@@ -45,7 +46,7 @@ Fast is session-scoped and stored independently from the canonical model id. JSO
 
 Session metadata is authoritative. `Codex Desktop` and OpenCode map to desktop, `codex_vscode` maps to `Codex VS Code Extension`, and `codex-tui` maps to `Codex CLI`. When metadata is absent, the runtime requires an extension-host process, an OpenCode marker, or the explicit `CODEX_PRESENCE_SURFACE=cli|vscode|desktop` override; generic VS Code terminal variables and unrelated open apps never change the identity.
 
-Config schema 11 stores `display.desktop_presence_design`:
+Config schema 12 stores the shared `presence_enabled` master switch and `display.desktop_presence_design`:
 
 | Value | Desktop label | Discord client id |
 |:---|:---|:---|
@@ -53,6 +54,10 @@ Config schema 11 stores `display.desktop_presence_design`:
 | `chat_gpt_app` | `ChatGPT App` | `1470480085453770854` |
 
 CLI and VS Code always use the shared `1470480085453770854` identity. Pressing `D` in Ratatui toggles and saves the desktop value; Discord reconnects when the selected client id changes.
+
+Foreground TUI, headless, and Codex-wrapper loops reload `~/.codex/discord-presence-config.json` before every poll. Valid external edits from Pulse replace the complete runtime config together. Invalid, missing, or transiently replaced files are logged and ignored so the process keeps its last valid configuration.
+
+`presence_enabled` defaults to `true` during schema-11 migration. Pressing `M` in Ratatui or changing the same field in Pulse clears Discord activity once and reports `Paused`; session parsing, metrics, and the terminal dashboard continue locally. Re-enabling forces a fresh publish from the current session.
 
 ## Privacy Fields
 
