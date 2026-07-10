@@ -29,10 +29,11 @@
 | Discord branding | `src/discord.rs` verifies RPC activity-title overrides, exact surface labels, separated reasoning/speed display, and Codex App / ChatGPT App design assets |
 | Terminal layout | `src/ui.rs` covers layout, monochrome wordmark, plan picker, persisted design toggle copy, footer, spinner, and reserved rows |
 | Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
-| Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 10, desktop design round-trip, and identity normalization |
+| Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 11, desktop design/privacy round-trip, and identity normalization |
 | Session parsing | `src/session.rs` and `src/session/*` cover JSONL, activity, latest model/effort changes, session-scoped speed, context provenance, cache bounds, and ranking |
 | OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
 | Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
 | Release integrity | `tests/release_*.tests.ps1` drives metadata, local approval, repository state, workflow, portable artifact, digest, and immutable publication contracts |
+| Privacy controls | `src/config.rs`, `src/discord.rs`, `src/ui.rs`, and `src/app.rs` cover all nine fields, final-payload enforcement, persisted toggles, and Ratatui interaction |
 
 Rule: bugs that cross module seams get an integration regression; module-local bugs can stay beside the Rust module.

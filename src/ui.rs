@@ -6,7 +6,7 @@ use anyhow::Result;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkline, Wrap};
 
-use crate::config::{PlanPreset, TerminalLogoMode, plan_presets};
+use crate::config::{PlanPreset, PrivacyConfig, PrivacyField, TerminalLogoMode, plan_presets};
 use crate::cost::format_presentable_cost;
 use crate::metrics::{MetricsSnapshot, format_metrics_cost};
 use crate::model::format_model_display;
@@ -72,6 +72,7 @@ pub struct RenderData<'a> {
     pub stale_secs: u64,
     pub show_activity: bool,
     pub show_activity_target: bool,
+    pub privacy: &'a PrivacyConfig,
     pub plan_display_label: &'a str,
     pub plan_status_label: &'a str,
     pub fast_mode_label: &'a str,
@@ -88,12 +89,25 @@ pub struct RenderData<'a> {
     pub metrics: Option<&'a MetricsSnapshot>,
     pub sessions: &'a [CodexSessionSnapshot],
     pub plan_picker: Option<PlanPickerView>,
+    pub privacy_picker: Option<PrivacyPickerView>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlanPickerView {
     pub selected_index: usize,
     pub current_index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrivacyPickerView {
+    pub selected_index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FooterMode {
+    Normal,
+    PlanPicker,
+    PrivacyPicker,
 }
 
 type UiTerminal = ratatui::DefaultTerminal;
@@ -136,6 +150,16 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
     let layout = select_layout_mode(area.width, area.height);
     if let Some(plan_picker) = data.plan_picker {
         render_plan_picker(frame, area, plan_picker, data.desktop_design_label);
+        return;
+    }
+    if let Some(privacy_picker) = data.privacy_picker {
+        render_privacy_picker(
+            frame,
+            area,
+            privacy_picker,
+            data.privacy,
+            data.desktop_design_label,
+        );
         return;
     }
 
@@ -181,7 +205,12 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
         }
     }
 
-    render_footer(frame, root[1], false, data.desktop_design_label);
+    render_footer(
+        frame,
+        root[1],
+        FooterMode::Normal,
+        data.desktop_design_label,
+    );
 }
 
 fn body_layout(layout: UiLayoutMode, area: Rect) -> std::rc::Rc<[Rect]> {
@@ -513,8 +542,8 @@ fn presentable_cost(session: &CodexSessionSnapshot) -> String {
         .unwrap_or_else(|| "cost unavailable".to_string())
 }
 
-fn render_footer(frame: &mut Frame<'_>, area: Rect, plan_picker: bool, desktop_design_label: &str) {
-    let (left, right) = footer_parts(area.width as usize, plan_picker, desktop_design_label);
+fn render_footer(frame: &mut Frame<'_>, area: Rect, mode: FooterMode, desktop_design_label: &str) {
+    let (left, right) = footer_parts(area.width as usize, mode, desktop_design_label);
     let mut spans = vec![Span::styled(left, theme::muted())];
     if !right.is_empty() {
         spans.push(Span::raw(" "));
@@ -566,7 +595,66 @@ fn render_plan_picker(
         width: panel_area.width,
         height: 1,
     };
-    render_footer(frame, footer, true, desktop_design_label);
+    render_footer(frame, footer, FooterMode::PlanPicker, desktop_design_label);
+}
+
+fn render_privacy_picker(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    view: PrivacyPickerView,
+    privacy: &PrivacyConfig,
+    desktop_design_label: &str,
+) {
+    let width = area.width.min(108);
+    let height = area
+        .height
+        .min((PrivacyField::ALL.len() as u16 + 5).max(13));
+    let panel_area = centered_rect(width, height, area);
+    let items: Vec<ListItem<'_>> = PrivacyField::ALL
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, field)| {
+            let marker = if index == view.selected_index {
+                "›"
+            } else {
+                " "
+            };
+            let enabled = field.is_enabled(privacy);
+            let status = if enabled { "ON " } else { "OFF" };
+            let status_style = if enabled {
+                Style::default().fg(theme::TEXT).bold()
+            } else {
+                theme::muted()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(marker, Style::default().fg(theme::TEXT).bold()),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{:<15}", field.label()),
+                    Style::default().fg(theme::TEXT),
+                ),
+                Span::styled(format!(" [{status}] "), status_style),
+                Span::styled(field.description(), theme::muted()),
+            ]))
+        })
+        .collect();
+    frame.render_widget(
+        List::new(items).block(panel("Discord privacy", Some(theme::TEXT))),
+        panel_area,
+    );
+    let footer = Rect {
+        x: panel_area.x,
+        y: panel_area.y + panel_area.height.saturating_sub(1),
+        width: panel_area.width,
+        height: 1,
+    };
+    render_footer(
+        frame,
+        footer,
+        FooterMode::PrivacyPicker,
+        desktop_design_label,
+    );
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -609,6 +697,20 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
             .map(|value| value.selected_index)
             .unwrap_or(usize::MAX),
     );
+    let _ = write!(
+        signature,
+        "privacy-picker:{}|",
+        data.privacy_picker
+            .map(|value| value.selected_index)
+            .unwrap_or(usize::MAX)
+    );
+    for field in PrivacyField::ALL {
+        let _ = write!(
+            signature,
+            "privacy:{field:?}:{}|",
+            field.is_enabled(data.privacy)
+        );
+    }
     if let Some(active) = data.active {
         let _ = write!(
             signature,
@@ -746,11 +848,13 @@ fn sparkline_samples(metrics: &MetricsSnapshot) -> Vec<u64> {
     values
 }
 
-fn footer_parts(width: usize, plan_picker: bool, desktop_design_label: &str) -> (String, String) {
-    let left = if plan_picker {
-        "Plan selector: ↑/↓ choose · Enter apply · Esc close".to_string()
-    } else {
-        format!("Press P to change plan · D design: {desktop_design_label} · Ctrl+C quit")
+fn footer_parts(width: usize, mode: FooterMode, desktop_design_label: &str) -> (String, String) {
+    let left = match mode {
+        FooterMode::PlanPicker => "Plan selector: ↑/↓ choose · Enter apply · Esc close".to_string(),
+        FooterMode::PrivacyPicker => "Privacy: ↑/↓ choose · Space toggle · Esc close".to_string(),
+        FooterMode::Normal => {
+            format!("Press V privacy · P plan · D design: {desktop_design_label} · Ctrl+C quit")
+        }
     };
     let right = author_credit(width);
     if width <= 32 {
@@ -813,6 +917,9 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::sync::LazyLock;
+
+    static TEST_PRIVACY: LazyLock<PrivacyConfig> = LazyLock::new(PrivacyConfig::default);
 
     fn sample_render_data(plan_picker: Option<PlanPickerView>) -> RenderData<'static> {
         RenderData {
@@ -824,6 +931,7 @@ mod tests {
             stale_secs: 90,
             show_activity: true,
             show_activity_target: true,
+            privacy: &TEST_PRIVACY,
             plan_display_label: "Pro 20x ($200/month)",
             plan_status_label: "Pro 20x (manual)",
             fast_mode_label: "Fast off",
@@ -840,6 +948,7 @@ mod tests {
             metrics: None,
             sessions: &[],
             plan_picker,
+            privacy_picker: None,
         }
     }
 
@@ -908,6 +1017,26 @@ mod tests {
     }
 
     #[test]
+    fn rendered_privacy_picker_lists_every_presence_field_and_state() {
+        let privacy = Box::leak(Box::new(crate::config::PrivacyConfig {
+            show_git_branch: false,
+            ..crate::config::PrivacyConfig::default()
+        }));
+        let mut data = sample_render_data(None);
+        data.privacy = privacy;
+        data.privacy_picker = Some(PrivacyPickerView { selected_index: 1 });
+
+        let rendered = render_test_text(120, 32, &data);
+
+        assert!(rendered.contains("Discord privacy"));
+        assert!(rendered.contains("Project name"));
+        assert!(rendered.contains("Git branch"));
+        assert!(rendered.contains("Context usage"));
+        assert!(rendered.contains("Systems"));
+        assert!(rendered.contains("OFF"));
+    }
+
+    #[test]
     fn author_credit_is_responsive() {
         assert!(author_credit(120).contains("ID 211189703641268224"));
         assert_eq!(author_credit(60), "XT0N1.T3CH | @XT0N1.T3CH");
@@ -930,13 +1059,13 @@ mod tests {
 
     #[test]
     fn footer_parts_never_overlap() {
-        let (left, right) = footer_parts(84, false, "Codex App");
+        let (left, right) = footer_parts(84, FooterMode::Normal, "Codex App");
         assert!(left.len() + 1 + right.len() <= 84);
         assert!(left.contains("D design"));
 
-        let (left_small, right_small) = footer_parts(20, false, "Codex App");
+        let (left_small, right_small) = footer_parts(20, FooterMode::Normal, "Codex App");
         assert_eq!(right_small, "");
-        assert_eq!(left_small, "Press P to change...");
+        assert_eq!(left_small, "Press V privacy ...");
     }
 
     #[test]
@@ -989,13 +1118,13 @@ mod tests {
 
     #[test]
     fn footer_parts_change_when_plan_picker_is_open() {
-        let (left, _right) = footer_parts(80, true, "Codex App");
+        let (left, _right) = footer_parts(80, FooterMode::PlanPicker, "Codex App");
         assert!(left.contains("Plan selector"));
     }
 
     #[test]
     fn footer_names_the_selected_desktop_design() {
-        let (left, _right) = footer_parts(120, false, "ChatGPT App");
+        let (left, _right) = footer_parts(120, FooterMode::Normal, "ChatGPT App");
         assert!(left.contains("D design: ChatGPT App"));
     }
 
