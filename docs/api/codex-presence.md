@@ -33,9 +33,9 @@ No public GPT-5.6 API context, max-output, long-context surcharge threshold, cac
 
 Fast is session-scoped and stored independently from the canonical model id. JSONL `thread_settings_applied.thread_settings.service_tier=priority` sets `SessionSpeed::Fast` only when that model declares Fast support. Later turn-context records without a speed signal do not overwrite it. Presentation examples:
 
-- `5.6 Sol Max`
-- `5.6 Sol Max · Fast`
-- `5.6 Terra Light`
+- `GPT-5.6 Sol · Max`
+- `GPT-5.6 Sol · Max · Fast`
+- `GPT-5.6 Terra · Light`
 
 `gpt-5.6` is an alias of Sol. No `gpt-5.6-pro` model is invented; Pro remains a plan/reasoning concept outside the model family.
 

@@ -274,7 +274,7 @@ mod tests {
     fn model_display_includes_fast_icon_and_effort() {
         assert_eq!(
             format_model_display("gpt-5.4", Some(ReasoningEffort::XHigh), true),
-            "5.4 Extra High · Fast"
+            "GPT-5.4 · Extra High · Fast"
         );
     }
 

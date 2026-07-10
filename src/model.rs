@@ -319,9 +319,15 @@ pub fn format_model_display(
         .map(|model| model.resolve_speed(fast_active || model_requests_fast(model_id)))
         .unwrap_or_default();
 
-    let mut label = base;
+    let mut label = if resolution.is_some_and(|model| model.canonical_id().starts_with("gpt-"))
+        && !base.starts_with("GPT-")
+    {
+        format!("GPT-{base}")
+    } else {
+        base
+    };
     if let Some(effort) = effort {
-        label.push(' ');
+        label.push_str(" · ");
         label.push_str(effort.label());
     }
     if speed == SpeedMode::Fast {
