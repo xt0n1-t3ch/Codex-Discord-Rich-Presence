@@ -1,0 +1,73 @@
+name: Bug report
+description: Report incorrect telemetry, terminal UI, or Discord presence behavior.
+labels: [bug, triage]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Use the exact output from `codex-discord-presence --version`.
+      placeholder: "1.8.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Discord Rich Presence
+        - Terminal UI
+        - Headless daemon
+        - status / doctor
+        - Configuration migration
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Include the exact label, quota window, or state that is wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Paste relevant `status` or `doctor` output. Remove project names, paths, prompts, and secrets.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Preflight
+      options:
+        - label: I reproduced this on the latest published release.
+          required: true
+        - label: I removed private session content and credentials.
+          required: true

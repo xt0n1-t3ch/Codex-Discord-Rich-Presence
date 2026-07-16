@@ -63,6 +63,8 @@ try {
     Assert-True ($localBuild -match 'codex-app-logo\.png') "Local release build must package the portable Codex App logo."
     Assert-True ($localBuild -match 'chatgpt-app-logo\.jpg') "Local release build must package the portable ChatGPT App logo."
     Assert-True ($localBuild -match 'SHA256SUMS\.txt') "Local release build must emit a checksum manifest."
+    Assert-True ($localBuild -match 'new-windows-sbom\.ps1') "Local release build must generate a Windows SPDX SBOM."
+    Assert-True ($localBuild -match 'check-windows-sbom\.ps1') "Local release build must validate the Windows SPDX SBOM."
 
     New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 
@@ -77,6 +79,7 @@ try {
     $artifactRoot = Join-Path $temporaryRoot "downloaded"
     $outputDirectory = Join-Path $temporaryRoot "release-assets"
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/codex-discord-rich-presence-windows-x64.exe" -Content "windows-binary"
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/codex-discord-rich-presence-windows-x64.spdx.json" -Content '{"spdxVersion":"SPDX-2.3"}'
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-unknown-linux-gnu/codex-discord-rich-presence-linux-x64" -Content "linux-binary"
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-apple-darwin/codex-discord-rich-presence-macos-x64" -Content "macos-x64-binary"
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-aarch64-apple-darwin/codex-discord-rich-presence-macos-arm64" -Content "macos-arm64-binary"
@@ -88,6 +91,7 @@ try {
 
     $expectedNames = @(
         "codex-discord-rich-presence-windows-x64.exe"
+        "codex-discord-rich-presence-windows-x64.spdx.json"
         "codex-discord-rich-presence-linux-x64"
         "codex-discord-rich-presence-macos-x64"
         "codex-discord-rich-presence-macos-arm64"
@@ -98,11 +102,11 @@ try {
     $actualNames = @(Get-ChildItem -LiteralPath $outputDirectory -File | Sort-Object Name | ForEach-Object Name)
     Assert-Equal (($expectedNames | Sort-Object) -join "|") ($actualNames -join "|") "Published asset names are incomplete."
     foreach ($name in $expectedNames | Where-Object { $_ -ne "SHA256SUMS.txt" }) {
-        Assert-True ($name -cmatch '^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+)?$') "Release asset '$name' is not portable."
+        Assert-True ($name -cmatch '^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+)*$') "Release asset '$name' is not portable."
     }
 
     $manifestLines = @(Get-Content -LiteralPath (Join-Path $outputDirectory "SHA256SUMS.txt"))
-    Assert-Equal 6 $manifestLines.Count "Checksum manifest must cover each published payload."
+    Assert-Equal 7 $manifestLines.Count "Checksum manifest must cover each published payload."
     foreach ($name in $expectedNames | Where-Object { $_ -ne "SHA256SUMS.txt" }) {
         $path = Join-Path $outputDirectory $name
         $expectedHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()

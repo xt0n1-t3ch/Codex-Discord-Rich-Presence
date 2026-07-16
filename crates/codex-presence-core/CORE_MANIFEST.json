@@ -1,0 +1,10 @@
+{
+  "manifest_schema": 1,
+  "core_version": "1.0.0",
+  "runtime_version": "1.8.0",
+  "config_schema": 13,
+  "telemetry_schema": 1,
+  "release_tag": null,
+  "source_commit": null,
+  "publication_status": "local_candidate"
+}

@@ -10,13 +10,15 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
+use codex_presence_core::{PresenceFieldId, PresenceLayoutConfig};
+
 use crate::util::write_json_pretty_atomic;
 
 const DEFAULT_STALE_SECONDS: u64 = 90;
 const DEFAULT_POLL_SECONDS: u64 = 2;
 const DEFAULT_ACTIVE_STICKY_SECONDS: u64 = 3600;
 const MIN_ACTIVE_STICKY_SECONDS: u64 = 60;
-const CONFIG_SCHEMA_VERSION: u32 = 12;
+const CONFIG_SCHEMA_VERSION: u32 = 13;
 pub const DEFAULT_DISCORD_CLIENT_ID: &str = "1470480085453770854";
 pub const DEFAULT_DISCORD_DESKTOP_CLIENT_ID: &str = "1478395304624652345";
 pub const DEFAULT_DISCORD_PUBLIC_KEY: &str =
@@ -46,6 +48,7 @@ pub struct PrivacyConfig {
     pub show_tokens: bool,
     pub show_cost: bool,
     pub show_limits: bool,
+    pub show_credits: bool,
     pub show_context: bool,
     pub show_activity: bool,
     pub show_activity_target: bool,
@@ -61,12 +64,13 @@ pub enum PrivacyField {
     TokenCount,
     Cost,
     SessionLimits,
+    Credits,
     ContextUsage,
     Systems,
 }
 
 impl PrivacyField {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::ProjectName,
         Self::GitBranch,
         Self::Model,
@@ -74,6 +78,7 @@ impl PrivacyField {
         Self::TokenCount,
         Self::Cost,
         Self::SessionLimits,
+        Self::Credits,
         Self::ContextUsage,
         Self::Systems,
     ];
@@ -87,8 +92,39 @@ impl PrivacyField {
             Self::TokenCount => "Token count",
             Self::Cost => "Cost",
             Self::SessionLimits => "Session limits",
+            Self::Credits => "Credits available",
             Self::ContextUsage => "Context usage",
             Self::Systems => "Systems",
+        }
+    }
+
+    pub const fn presence_field(self) -> PresenceFieldId {
+        match self {
+            Self::ProjectName => PresenceFieldId::Project,
+            Self::GitBranch => PresenceFieldId::Branch,
+            Self::Model => PresenceFieldId::Model,
+            Self::Activity => PresenceFieldId::Activity,
+            Self::TokenCount => PresenceFieldId::Tokens,
+            Self::Cost => PresenceFieldId::Cost,
+            Self::SessionLimits => PresenceFieldId::Quotas,
+            Self::Credits => PresenceFieldId::Credits,
+            Self::ContextUsage => PresenceFieldId::Context,
+            Self::Systems => PresenceFieldId::Systems,
+        }
+    }
+
+    pub const fn from_presence_field(field: PresenceFieldId) -> Self {
+        match field {
+            PresenceFieldId::Project => Self::ProjectName,
+            PresenceFieldId::Branch => Self::GitBranch,
+            PresenceFieldId::Model => Self::Model,
+            PresenceFieldId::Activity => Self::Activity,
+            PresenceFieldId::Tokens => Self::TokenCount,
+            PresenceFieldId::Cost => Self::Cost,
+            PresenceFieldId::Quotas => Self::SessionLimits,
+            PresenceFieldId::Credits => Self::Credits,
+            PresenceFieldId::Context => Self::ContextUsage,
+            PresenceFieldId::Systems => Self::Systems,
         }
     }
 
@@ -100,7 +136,8 @@ impl PrivacyField {
             Self::Activity => "Current Codex activity",
             Self::TokenCount => "Cumulative session tokens",
             Self::Cost => "Known session subtotal",
-            Self::SessionLimits => "5-hour and weekly remaining",
+            Self::SessionLimits => "Available quota windows",
+            Self::Credits => "Current Codex credit balance",
             Self::ContextUsage => "Current context-window percentage",
             Self::Systems => "Activity icon and workflow signal",
         }
@@ -115,6 +152,7 @@ impl PrivacyField {
             Self::TokenCount => privacy.show_tokens,
             Self::Cost => privacy.show_cost,
             Self::SessionLimits => privacy.show_limits,
+            Self::Credits => privacy.show_credits,
             Self::ContextUsage => privacy.show_context,
             Self::Systems => privacy.show_systems,
         }
@@ -130,6 +168,7 @@ impl PrivacyField {
             Self::TokenCount => privacy.show_tokens = value,
             Self::Cost => privacy.show_cost = value,
             Self::SessionLimits => privacy.show_limits = value,
+            Self::Credits => privacy.show_credits = value,
             Self::ContextUsage => privacy.show_context = value,
             Self::Systems => privacy.show_systems = value,
         }
@@ -413,6 +452,7 @@ pub struct DisplayConfig {
     pub activity_small_image_keys: ActivitySmallImageKeys,
     pub terminal_logo_mode: TerminalLogoMode,
     pub terminal_logo_path: Option<String>,
+    pub presence_layout: PresenceLayoutConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -459,6 +499,7 @@ impl Default for PrivacyConfig {
             show_tokens: true,
             show_cost: true,
             show_limits: true,
+            show_credits: true,
             show_context: true,
             show_activity: true,
             show_activity_target: true,
@@ -490,6 +531,7 @@ impl Default for DisplayConfig {
             activity_small_image_keys: ActivitySmallImageKeys::default(),
             terminal_logo_mode: TerminalLogoMode::Auto,
             terminal_logo_path: None,
+            presence_layout: PresenceLayoutConfig::default(),
         }
     }
 }
@@ -601,6 +643,28 @@ impl PresenceConfig {
         }
         if normalize_codex_display(&mut self.display, &default_display) {
             changed = true;
+        }
+        if self.display.presence_layout.normalize() {
+            changed = true;
+        }
+
+        for item in &mut self.display.presence_layout.fields {
+            let enabled = match item.field {
+                PresenceFieldId::Project => self.privacy.show_project_name,
+                PresenceFieldId::Branch => self.privacy.show_git_branch,
+                PresenceFieldId::Model => self.privacy.show_model,
+                PresenceFieldId::Activity => self.privacy.show_activity,
+                PresenceFieldId::Tokens => self.privacy.show_tokens,
+                PresenceFieldId::Cost => self.privacy.show_cost,
+                PresenceFieldId::Quotas => self.privacy.show_limits,
+                PresenceFieldId::Credits => self.privacy.show_credits,
+                PresenceFieldId::Context => self.privacy.show_context,
+                PresenceFieldId::Systems => self.privacy.show_systems,
+            };
+            if item.enabled != enabled {
+                item.enabled = enabled;
+                changed = true;
+            }
         }
 
         if self.display.large_image_key.trim().is_empty() {
@@ -1129,7 +1193,7 @@ mod tests {
         let changed = cfg.normalize_and_migrate();
 
         assert!(changed);
-        assert_eq!(cfg.schema_version, 12);
+        assert_eq!(cfg.schema_version, 13);
         assert!(cfg.presence_enabled);
         assert_eq!(
             cfg.discord_client_id.as_deref(),

@@ -331,7 +331,7 @@ pub fn format_model_display(
         label.push_str(effort.label());
     }
     if speed == SpeedMode::Fast {
-        label.push_str(" · Fast");
+        label.push_str(" · ⚡ Fast");
     }
     label
 }

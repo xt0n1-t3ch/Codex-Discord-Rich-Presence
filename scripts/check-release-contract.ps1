@@ -95,6 +95,39 @@ function Assert-ReleaseVersionSurfaces {
     }
 }
 
+function Assert-RepositoryReleaseContract {
+    param(
+        [Parameter(Mandatory)] [string] $Root,
+        [Parameter(Mandatory)] [string] $Version
+    )
+
+    $contractPath = Join-Path $Root "scripts/release-contract.json"
+    if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) { return }
+    try { $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json }
+    catch { throw "scripts/release-contract.json is not valid JSON: $($_.Exception.Message)" }
+    if ([int]$contract.schema_version -ne 1) { throw "scripts/release-contract.json schema_version must be 1." }
+    if ([string]$contract.product.version -ne $Version) {
+        throw "Release contract product version '$($contract.product.version)' does not match '$Version'."
+    }
+
+    $metadataJson = & cargo --locked metadata --no-deps --format-version 1 --manifest-path (Join-Path $Root "Cargo.toml") | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed: $($metadataJson.Trim())" }
+    $metadata = $metadataJson | ConvertFrom-Json
+    $corePackages = @($metadata.packages | Where-Object name -eq ([string]$contract.core.package))
+    if ($corePackages.Count -ne 1 -or [string]$corePackages[0].version -ne [string]$contract.core.version) {
+        throw "Canonical core must resolve exactly once as $($contract.core.package)@$($contract.core.version)."
+    }
+
+    $configSource = Get-Content -Raw -LiteralPath (Join-Path $Root ([string]$contract.configuration.source))
+    $schemaPattern = '(?:CONFIG_)?SCHEMA_VERSION\s*:\s*u32\s*=\s*' + [regex]::Escape([string]$contract.configuration.schema_version) + '\s*;'
+    if ($configSource -notmatch $schemaPattern) {
+        throw "Config source does not declare schema $($contract.configuration.schema_version)."
+    }
+    if ([string]$contract.release.windows_sbom -notmatch '\.spdx\.json$' -or [string]$contract.release.checksum_manifest -ne 'SHA256SUMS.txt') {
+        throw "Release integrity contract must require an SPDX JSON SBOM and SHA256SUMS.txt."
+    }
+}
+
 function Write-ReleaseNotes {
     param(
         [Parameter(Mandatory)]
@@ -147,6 +180,7 @@ function Write-ReleaseNotes {
         "## Release Assets"
         ""
         "- codex-discord-rich-presence-windows-x64.exe"
+        "- codex-discord-rich-presence-windows-x64.spdx.json"
         "- codex-discord-rich-presence-linux-x64"
         "- codex-discord-rich-presence-macos-x64"
         "- codex-discord-rich-presence-macos-arm64"
@@ -194,6 +228,7 @@ try {
         throw "Tag version '$version' does not match Cargo package version '$cargoVersion'."
     }
     Assert-ReleaseVersionSurfaces -Root $root -Version $version
+    Assert-RepositoryReleaseContract -Root $root -Version $version
 
     $changelogSection = Get-ChangelogSection -Root $root -Version $version
 

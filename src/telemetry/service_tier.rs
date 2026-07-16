@@ -59,7 +59,16 @@ impl ResolvedServiceTier {
 }
 
 pub fn resolve_service_tier() -> ResolvedServiceTier {
-    resolve_service_tier_from_paths(&config::global_state_paths())
+    let config_path = config::codex_home().join("config.toml");
+    resolve_service_tier_from_sources(&config_path, &config::global_state_paths())
+}
+
+fn resolve_service_tier_from_sources(
+    config_path: &Path,
+    global_state_paths: &[PathBuf],
+) -> ResolvedServiceTier {
+    load_service_tier_from_toml(config_path)
+        .unwrap_or_else(|| resolve_service_tier_from_paths(global_state_paths))
 }
 
 fn resolve_service_tier_from_paths(paths: &[PathBuf]) -> ResolvedServiceTier {
@@ -101,6 +110,31 @@ fn load_service_tier_from_path(path: &Path) -> Option<ResolvedServiceTier> {
     })
 }
 
+fn load_service_tier_from_toml(path: &Path) -> Option<ResolvedServiceTier> {
+    let modified = fs::metadata(path).ok()?.modified().ok();
+    let raw = fs::read_to_string(path).ok()?;
+    let raw_tier = raw.lines().find_map(|line| {
+        let line = line.split('#').next()?.trim();
+        let (key, value) = line.split_once('=')?;
+        if key.trim() != "service_tier" {
+            return None;
+        }
+        let value = value.trim().trim_matches(['\'', '"']).to_ascii_lowercase();
+        (!value.is_empty()).then_some(value)
+    })?;
+    let tier = match raw_tier.as_str() {
+        "priority" | "fast" => ServiceTier::Fast,
+        "default" | "standard" | "auto" => ServiceTier::Standard,
+        _ => return None,
+    };
+    Some(ResolvedServiceTier {
+        tier,
+        raw_tier: Some(raw_tier),
+        observed_at: modified.map(DateTime::<Utc>::from),
+        source_path: Some(path.to_path_buf()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +145,22 @@ mod tests {
         let resolved = resolve_service_tier_from_paths(&[]);
         assert_eq!(resolved.tier, ServiceTier::Standard);
         assert!(!resolved.is_fast());
+    }
+
+    #[test]
+    fn config_toml_priority_precedes_legacy_global_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = dir.path().join("config.toml");
+        let state = dir.path().join("state.json");
+        fs::write(&config, "service_tier = \"priority\"\n").expect("config");
+        fs::write(
+            &state,
+            r#"{"electron-persisted-atom-state":{"default-service-tier":"standard"}}"#,
+        )
+        .expect("state");
+        let resolved = resolve_service_tier_from_sources(&config, &[state]);
+        assert_eq!(resolved.tier, ServiceTier::Fast);
+        assert_eq!(resolved.raw_tier.as_deref(), Some("priority"));
     }
 
     #[test]

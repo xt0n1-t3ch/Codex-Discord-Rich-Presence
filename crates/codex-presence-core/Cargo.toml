@@ -1,0 +1,11 @@
+[package]
+name = "codex-presence-core"
+version = "1.0.0"
+edition = "2024"
+description = "Shared Codex session telemetry and Discord presence contracts"
+license = "MIT"
+
+[dependencies]
+chrono = { version = "0.4.42", features = ["clock", "serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"

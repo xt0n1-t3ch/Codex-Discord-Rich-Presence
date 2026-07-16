@@ -44,7 +44,17 @@ foreach ($entry in $payloads.GetEnumerator()) {
     Copy-Item -LiteralPath $entry.Value -Destination (Join-Path $releaseDir $entry.Key)
 }
 
-$checksumLines = foreach ($name in $payloads.Keys | Sort-Object) {
+$version = (& $cargoCmd metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages |
+    Where-Object name -eq "codex-discord-presence" |
+    Select-Object -ExpandProperty version -First 1
+$windowsArtifact = Join-Path $releaseDir "codex-discord-rich-presence-windows-x64.exe"
+$sbomName = "codex-discord-rich-presence-windows-x64.spdx.json"
+$sbomPath = Join-Path $releaseDir $sbomName
+& (Join-Path $scriptRoot "new-windows-sbom.ps1") -ArtifactPath $windowsArtifact -OutputPath $sbomPath -PackageName codex-discord-presence -PackageVersion $version
+& (Join-Path $scriptRoot "check-windows-sbom.ps1") -ArtifactPath $windowsArtifact -SbomPath $sbomPath -PackageName codex-discord-presence -PackageVersion $version
+$payloadNames = @($payloads.Keys) + $sbomName
+
+$checksumLines = foreach ($name in $payloadNames | Sort-Object) {
     $path = Join-Path $releaseDir $name
     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $name"
@@ -57,7 +67,7 @@ $checksumPath = Join-Path $releaseDir "SHA256SUMS.txt"
 )
 
 Write-Host "Ready:"
-foreach ($name in $payloads.Keys) {
+foreach ($name in $payloadNames) {
     Write-Host " - $(Join-Path $releaseDir $name)"
 }
 Write-Host " - $checksumPath"

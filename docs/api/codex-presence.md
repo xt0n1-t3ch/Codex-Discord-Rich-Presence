@@ -10,7 +10,8 @@ This document owns the local runtime contract exported by the daemon modules.
 | `src/session.rs` | Produces `CodexSessionSnapshot` from Codex JSONL and local OpenCode data |
 | `src/cost.rs` | Applies local overrides and computes exact, partial, or unavailable token costs |
 | `src/metrics.rs` | Aggregates session snapshots into a unified cost/cache/context report |
-| `src/config.rs` | Owns schema-12 persistence, last-good runtime reload, the master presence switch, design, privacy, plan, and pricing overrides |
+| `src/config.rs` | Owns schema-13 persistence, last-good runtime reload, the master presence switch, ordered composer, design, privacy, plan, and pricing overrides |
+| `crates/codex-presence-core` | Owns semantic quota/credit telemetry plus deterministic two-line Discord composition without UI dependencies |
 | `src/discord.rs` | Converts runtime state into Discord IPC activities and Codex asset identities, including idempotent pause/resume transitions |
 | `src/ui.rs` | Renders the Ratatui terminal view from `RenderData` |
 
@@ -37,7 +38,7 @@ No public GPT-5.6 API context, max-output, long-context surcharge threshold, cac
 Fast is session-scoped and stored independently from the canonical model id. JSONL `thread_settings_applied.thread_settings.service_tier=priority` sets `SessionSpeed::Fast` only when that model declares Fast support. Later turn-context records without a speed signal do not overwrite it. Presentation examples:
 
 - `GPT-5.6 Sol · Max`
-- `GPT-5.6 Sol · Max · Fast`
+- `GPT-5.6 Sol · Max · ⚡ Fast`
 - `GPT-5.6 Terra · Light`
 
 `gpt-5.6` is an alias of Sol. No `gpt-5.6-pro` model is invented; Pro remains a plan/reasoning concept outside the model family.
@@ -46,7 +47,7 @@ Fast is session-scoped and stored independently from the canonical model id. JSO
 
 Session metadata is authoritative. `Codex Desktop` and OpenCode map to desktop, `codex_vscode` maps to `Codex VS Code Extension`, and `codex-tui` maps to `Codex CLI`. When metadata is absent, the runtime requires an extension-host process, an OpenCode marker, or the explicit `CODEX_PRESENCE_SURFACE=cli|vscode|desktop` override; generic VS Code terminal variables and unrelated open apps never change the identity.
 
-Config schema 12 stores the shared `presence_enabled` master switch and `display.desktop_presence_design`:
+Config schema 13 stores the shared `presence_enabled` master switch, `display.desktop_presence_design`, and the ordered ten-field composer:
 
 | Value | Desktop label | Discord client id |
 |:---|:---|:---|
@@ -61,7 +62,9 @@ Foreground TUI, headless, and Codex-wrapper loops reload `~/.codex/discord-prese
 
 ## Privacy Fields
 
-Press `V` in Ratatui to edit the nine persisted Discord fields: project name, Git branch, model, activity, token count, cost, session limits, context usage, and systems. Context is independent from token count. Systems controls the small activity asset and its tooltip. Every edit is saved and triggers a fresh public presentation before Discord publication.
+Press `V` in Ratatui to edit the ten persisted Discord fields: project name, Git branch, model, activity, token count, cost, semantic quotas, Credits, context usage, and systems. `Shift+↑/↓` reorders the selected field. Context is independent from token count. Systems controls the small activity asset and its tooltip. Every edit is saved atomically and triggers a fresh public presentation before Discord publication.
+
+Quota labels come only from `window_minutes`: 300 minutes is `5h`, 1,440 is `24h`, and 10,080 is `7d`. An absent window is omitted. Credits preserve the received decimal text; explicit zero and unlimited are displayable, while an absent or malformed object remains unavailable.
 
 ## Pricing
 

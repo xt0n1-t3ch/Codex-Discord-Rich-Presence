@@ -6,6 +6,8 @@ use anyhow::Result;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkline, Wrap};
 
+use codex_presence_core::{CreditBalance, PresenceLayoutConfig, format_window_label};
+
 use crate::config::{PlanPreset, PrivacyConfig, PrivacyField, TerminalLogoMode, plan_presets};
 use crate::cost::format_presentable_cost;
 use crate::metrics::{MetricsSnapshot, format_metrics_cost};
@@ -74,6 +76,7 @@ pub struct RenderData<'a> {
     pub show_activity_target: bool,
     pub presence_enabled: bool,
     pub privacy: &'a PrivacyConfig,
+    pub presence_layout: &'a PresenceLayoutConfig,
     pub plan_display_label: &'a str,
     pub plan_status_label: &'a str,
     pub fast_mode_label: &'a str,
@@ -87,6 +90,7 @@ pub struct RenderData<'a> {
     pub banner_phase: u8,
     pub active: Option<&'a CodexSessionSnapshot>,
     pub effective_limits: Option<&'a RateLimits>,
+    pub effective_credits: Option<&'a CreditBalance>,
     pub metrics: Option<&'a MetricsSnapshot>,
     pub sessions: &'a [CodexSessionSnapshot],
     pub plan_picker: Option<PlanPickerView>,
@@ -165,6 +169,7 @@ fn render_frame(frame: &mut Frame<'_>, data: &RenderData<'_>) {
             area,
             privacy_picker,
             data.privacy,
+            data.presence_layout,
             data.desktop_design_label,
             data.presence_enabled,
         );
@@ -395,18 +400,16 @@ fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
     ])
     .split(area);
     let limits = data.effective_limits;
-    render_usage_gauge(
-        frame,
-        rows[0],
-        "primary",
-        limits.and_then(|value| value.primary.as_ref()),
-    );
-    render_usage_gauge(
-        frame,
-        rows[1],
-        "secondary",
-        limits.and_then(|value| value.secondary.as_ref()),
-    );
+    let primary = limits.and_then(|value| value.primary.as_ref());
+    let primary_label = primary
+        .map(|value| format_window_label(value.window_minutes))
+        .unwrap_or_else(|| "quota unavailable".to_string());
+    render_usage_gauge(frame, rows[0], &primary_label, primary);
+    let secondary = limits.and_then(|value| value.secondary.as_ref());
+    let secondary_label = secondary
+        .map(|value| format_window_label(value.window_minutes))
+        .unwrap_or_else(|| "additional quota unavailable".to_string());
+    render_usage_gauge(frame, rows[1], &secondary_label, secondary);
     let warning = data
         .spark_plan_warning
         .unwrap_or("Context: observed JSONL, then local model cache, then bundled catalog.");
@@ -425,6 +428,15 @@ fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
             ),
             theme::muted(),
         )),
+        Line::from(vec![
+            Span::styled("credits ", theme::muted()),
+            Span::styled(
+                data.effective_credits
+                    .and_then(CreditBalance::display_value)
+                    .unwrap_or("unavailable"),
+                Style::default().fg(theme::GREEN),
+            ),
+        ]),
     ];
     frame.render_widget(
         Paragraph::new(line)
@@ -638,6 +650,7 @@ fn render_privacy_picker(
     area: Rect,
     view: PrivacyPickerView,
     privacy: &PrivacyConfig,
+    presence_layout: &PresenceLayoutConfig,
     desktop_design_label: &str,
     presence_enabled: bool,
 ) {
@@ -646,11 +659,12 @@ fn render_privacy_picker(
         .height
         .min((PrivacyField::ALL.len() as u16 + 5).max(13));
     let panel_area = centered_rect(width, height, area);
-    let items: Vec<ListItem<'_>> = PrivacyField::ALL
+    let items: Vec<ListItem<'_>> = presence_layout
+        .fields
         .iter()
-        .copied()
         .enumerate()
-        .map(|(index, field)| {
+        .map(|(index, item)| {
+            let field = PrivacyField::from_presence_field(item.field);
             let marker = if index == view.selected_index {
                 "›"
             } else {
@@ -894,7 +908,9 @@ fn footer_parts(
 ) -> (String, String) {
     let left = match mode {
         FooterMode::PlanPicker => "Plan selector: ↑/↓ choose · Enter apply · Esc close".to_string(),
-        FooterMode::PrivacyPicker => "Privacy: ↑/↓ choose · Space toggle · Esc close".to_string(),
+        FooterMode::PrivacyPicker => {
+            "Composer: ↑/↓ choose · Shift+↑/↓ move · Space toggle · Esc close".to_string()
+        }
         FooterMode::Normal => {
             let presence_state = if presence_enabled { "On" } else { "Paused" };
             format!(
@@ -966,6 +982,8 @@ mod tests {
     use std::sync::LazyLock;
 
     static TEST_PRIVACY: LazyLock<PrivacyConfig> = LazyLock::new(PrivacyConfig::default);
+    static TEST_PRESENCE_LAYOUT: LazyLock<PresenceLayoutConfig> =
+        LazyLock::new(PresenceLayoutConfig::default);
 
     fn sample_render_data(plan_picker: Option<PlanPickerView>) -> RenderData<'static> {
         RenderData {
@@ -979,6 +997,7 @@ mod tests {
             show_activity_target: true,
             presence_enabled: true,
             privacy: &TEST_PRIVACY,
+            presence_layout: &TEST_PRESENCE_LAYOUT,
             plan_display_label: "Pro 20x ($200/month)",
             plan_status_label: "Pro 20x (manual)",
             fast_mode_label: "Fast off",
@@ -992,6 +1011,7 @@ mod tests {
             banner_phase: 0,
             active: None,
             effective_limits: None,
+            effective_credits: None,
             metrics: None,
             sessions: &[],
             plan_picker,

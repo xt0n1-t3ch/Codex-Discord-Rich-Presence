@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a focused capability for Codex Rich Presence.
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the operator problem before the proposed UI or implementation.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Primary surface
+      options:
+        - Discord Rich Presence
+        - Terminal UI
+        - Headless daemon
+        - Telemetry core
+        - Configuration
+        - Release / distribution
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: State what a user can observe when the feature works.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility or privacy impact
+      description: Note config-schema, platform, Discord payload, or data-exposure implications.

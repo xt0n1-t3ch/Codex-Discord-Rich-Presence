@@ -8,10 +8,10 @@
 
 ### Local-first activity for Codex App, ChatGPT App, CLI, VS Code, and OpenCode.
 
-One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, and **quota visibility** — with no cloud telemetry.
+One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, semantic **quota visibility**, and **Credits** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release-v1.7.6.png" alt="Release v1.7.6" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.8.0" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,17 +37,17 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.7.6</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.8.0</h2>
 
-- **No polling flashes on Windows** - background Git branch, process-lineage, task-list, takeover, and command probes now run with `CREATE_NO_WINDOW`.
-- **One silent launcher** - every non-interactive Windows child uses the existing `util::silent_command` owner, including the path vendored by Pulse.
-- **Interactive behavior preserved** - Codex wrappers and explicit terminal relaunches still inherit or open the terminal users requested.
-- **Regression locked** - a source contract fails if a background `git`, `powershell`, or `tasklist` call bypasses the silent launcher again.
+- **Truthful usage** - quota names come from their actual window duration, all global/model scopes survive normalization, and missing five-hour windows stay missing.
+- **Real Credits** - account Credits support exact balances, explicit zero, unlimited, absence, and individual privacy control.
+- **Fast without inheritance bugs** - explicit session speed wins; only unknown sessions fall back to `config.toml`, then legacy global state, and Fast renders as `⚡ Fast`.
+- **One composer** - `codex-presence-core` 1.0.0 owns deterministic field order, details/state zones, compact/descriptive labels, presets, and Discord's 128-character boundary.
 
 <details>
 <summary>Previous v1.7.5 highlights</summary>
 
-- **Shared live control** — Pulse and the standalone daemon now read the same persisted config on every poll, so design and all nine privacy fields take effect without restarting either process.
+- **Shared live control** — Pulse and the standalone daemon now read the same persisted config on every poll, so design and all ten privacy fields take effect without restarting either process.
 - **Durable master switch** — press `M`, or use Pulse's Rich Presence toggle, to clear Discord once and enter a truthful `Paused` state while local session monitoring continues.
 - **Reliable resume** — turning presence back on invalidates the prior payload and publishes the current session again through the selected Codex App, ChatGPT App, CLI, or VS Code identity.
 - **Last-good resilience** — an incomplete, invalid, or transiently replaced config is logged and ignored; the running process keeps its last valid settings instead of crashing.
@@ -169,7 +169,7 @@ cargo build --release
 Example Discord state line:
 
 ```text
-GPT-5.6 Sol · Max · Fast | Pro 20x ($200/month) · >=$7.37 · 38.9M tok · Ctx 1% used · 5h 41% · 7d 47%
+GPT-5.6 Sol · Max · ⚡ Fast | Pro 20x ($200/month) · >=$7.37 · 38.9M tok · Ctx 1% used · 5h 41% · 7d 47%
 ```
 
 <h2 id="usage"><img src="assets/readme/icons/play.png" alt="" width="28" align="center"> &nbsp;Usage</h2>
@@ -178,9 +178,9 @@ GPT-5.6 Sol · Max · Fast | Pro 20x ($200/month) · >=$7.37 · 38.9M tok · Ctx
 
 **Change plan display** → press `P` in the terminal → choose Auto Detect or a manual tier. `Pro 5x ($100/month)` and `Pro 20x ($200/month)` are separate options.
 
-**Change desktop design** → press `D` in the terminal → the persisted schema-12 setting alternates between `Codex App` and `ChatGPT App`.
+**Change desktop design** → press `D` in the terminal → the persisted schema-13 setting alternates between `Codex App` and `ChatGPT App`.
 
-**Pause or resume Discord** → press `M` in the terminal → schema 12 persists the same `presence_enabled` switch used by Pulse. Pausing clears the current card but keeps local monitoring active.
+**Pause or resume Discord** → press `M` in the terminal → schema 13 persists the same `presence_enabled` switch used by Pulse. Pausing clears the current card but keeps local monitoring active.
 
 **Hide sensitive fields** → edit `~/.codex/discord-presence-config.json` and toggle privacy fields such as project, branch, activity, tokens, cost, and limits.
 

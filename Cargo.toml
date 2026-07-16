@@ -1,11 +1,14 @@
 [package]
 name = "codex-discord-presence"
-version = "1.7.6"
+version = "1.8.0"
 edition = "2024"
 description = "Discord Rich Presence for Codex CLI, Codex VS Code Extension, Codex App, and ChatGPT App sessions"
 license = "MIT"
 keywords = ["codex", "discord", "rich-presence", "cli", "tui"]
 categories = ["command-line-utilities"]
+
+[workspace]
+members = ["crates/codex-presence-core"]
 
 [profile.release]
 codegen-units = 1
@@ -16,6 +19,7 @@ strip = true
 [dependencies]
 anyhow = "1.0.103"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
+codex-presence-core = { path = "crates/codex-presence-core", version = "1.0.0" }
 clap = { version = "4.5.51", features = ["derive"] }
 crossterm = "0.29.0"
 ratatui = { version = "0.30.2", features = ["crossterm"] }
