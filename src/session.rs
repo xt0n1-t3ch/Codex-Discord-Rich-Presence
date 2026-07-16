@@ -164,6 +164,24 @@ pub struct SessionParseCache {
     entries: HashMap<PathBuf, CachedSessionEntry>,
 }
 
+impl SessionParseCache {
+    pub fn rate_limit_envelopes(&self) -> Vec<RateLimitEnvelope> {
+        self.entries
+            .values()
+            .filter_map(|entry| entry.snapshot.as_ref())
+            .flat_map(|snapshot| snapshot.rate_limit_envelopes.iter().cloned())
+            .collect()
+    }
+
+    pub fn latest_limits_source(&self) -> Option<EffectiveLimitSelection> {
+        latest_limits_source_from(
+            self.entries
+                .values()
+                .filter_map(|entry| entry.snapshot.as_ref()),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SessionCollectionDiagnostics {
     pub session_files_seen: usize,
@@ -373,6 +391,12 @@ fn dedupe_sessions_by_id(sessions: Vec<CodexSessionSnapshot>) -> Vec<CodexSessio
 }
 
 pub fn latest_limits_source(sessions: &[CodexSessionSnapshot]) -> Option<EffectiveLimitSelection> {
+    latest_limits_source_from(sessions.iter())
+}
+
+fn latest_limits_source_from<'a>(
+    sessions: impl IntoIterator<Item = &'a CodexSessionSnapshot>,
+) -> Option<EffectiveLimitSelection> {
     let mut candidates: Vec<SessionLimitCandidate> = Vec::new();
     for session in sessions {
         if session.rate_limit_envelopes.is_empty() {
@@ -387,6 +411,7 @@ pub fn latest_limits_source(sessions: &[CodexSessionSnapshot]) -> Option<Effecti
                         observed_at: session.last_token_event_at,
                         scope: RateLimitScope::Other,
                         limits: session.limits.clone(),
+                        credits: None,
                     },
                 });
             }
@@ -658,6 +683,50 @@ mod tests {
                 .expect("secondary")
                 .remaining_percent,
             16.0
+        );
+    }
+
+    #[test]
+    fn parse_cache_keeps_account_usage_when_session_is_not_active() {
+        let tmp = TempDir::new().expect("temp dir");
+        let session_dir = tmp.path().join("2026").join("07").join("16");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+        std::fs::write(
+            session_dir.join("stale.jsonl"),
+            r#"{"timestamp":"2026-07-16T06:00:00Z","type":"session_meta","payload":{"id":"stale-usage","cwd":"C:\\repo\\app"}}
+{"timestamp":"2026-07-16T06:01:00Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":11.0,"window_minutes":10080},"credits":{"has_credits":true,"unlimited":false,"balance":"2500"}}}}"#,
+        )
+        .expect("write session");
+
+        let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
+        let mut parse_cache = SessionParseCache::default();
+        let sessions = collect_active_sessions_multi(
+            &[tmp.path().to_path_buf()],
+            Duration::ZERO,
+            Duration::ZERO,
+            &mut git_cache,
+            &mut parse_cache,
+            &PricingConfig::default(),
+        )
+        .expect("collect sessions");
+
+        assert!(sessions.is_empty());
+        let usage = parse_cache.rate_limit_envelopes();
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].scope, RateLimitScope::GlobalCodex);
+        assert_eq!(
+            usage[0]
+                .credits
+                .as_ref()
+                .and_then(|credits| credits.balance.as_deref()),
+            Some("2500")
+        );
+        assert_eq!(
+            parse_cache
+                .latest_limits_source()
+                .and_then(|selected| selected.limits.primary)
+                .map(|window| window.window_minutes),
+            Some(10_080)
         );
     }
 
@@ -1275,6 +1344,7 @@ mod tests {
                     }),
                     secondary: None,
                 },
+                credits: None,
             }],
             activity: None,
             started_at: None,
@@ -1335,6 +1405,7 @@ mod tests {
                     }),
                     secondary: None,
                 },
+                credits: None,
             }],
             activity: None,
             started_at: None,

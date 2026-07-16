@@ -160,6 +160,15 @@ jobs:
           Copy-Item "assets/branding/codex-app.png" "$outputDirectory/codex-app-logo.png"
           Copy-Item "assets/branding/chatgpt-app.jpg" "$outputDirectory/chatgpt-app-logo.jpg"
 
+      - name: Generate and verify Windows SPDX SBOM
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifact = "releases/windows/codex-discord-rich-presence-windows-x64.exe"
+          $sbom = "releases/windows/codex-discord-rich-presence-windows-x64.spdx.json"
+          ./scripts/new-windows-sbom.ps1 -ArtifactPath $artifact -OutputPath $sbom -PackageName codex-discord-presence -PackageVersion "${{ needs.preflight.outputs.version }}"
+          ./scripts/check-windows-sbom.ps1 -ArtifactPath $artifact -SbomPath $sbom -PackageName codex-discord-presence -PackageVersion "${{ needs.preflight.outputs.version }}"
+
       - name: Upload target artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -206,7 +215,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s release-assets/SHA256SUMS.txt
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 7
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 8
           cd release-assets
           sha256sum --check SHA256SUMS.txt
 
@@ -262,7 +271,7 @@ jobs:
           test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')" = "true"
           mapfile -t actual_assets < <(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate --jq '.[].name' | sort)
           mapfile -t expected_assets < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
-          test "${#actual_assets[@]}" -eq 7
+          test "${#actual_assets[@]}" -eq 8
           diff <(printf '%s\n' "${expected_assets[@]}") <(printf '%s\n' "${actual_assets[@]}")
 
           gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate \

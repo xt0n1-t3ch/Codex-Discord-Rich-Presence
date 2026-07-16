@@ -190,7 +190,14 @@ pub(super) fn build_context_window_snapshot(
     last_turn_tokens: Option<u64>,
     session_total_tokens: Option<u64>,
 ) -> Option<ContextWindowSnapshot> {
+    #[cfg(not(test))]
     let resolved = model::resolve_context_window(model_id.unwrap_or(""), event_window_tokens)?;
+    #[cfg(test)]
+    let resolved = model::resolve_context_window_from_cache_path(
+        model_id.unwrap_or(""),
+        event_window_tokens,
+        std::path::Path::new("__codex_presence_no_models_cache__.json"),
+    )?;
     let window_tokens = resolved.effective_tokens;
     if window_tokens == 0 {
         return None;

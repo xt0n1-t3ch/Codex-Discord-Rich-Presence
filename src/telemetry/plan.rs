@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::config;
 use crate::config::{OpenAiPlanDisplayConfig, OpenAiPlanMode, OpenAiPlanTier};
 use crate::session::CodexSessionSnapshot;
-use crate::telemetry::limits::RateLimitScope;
+use crate::telemetry::limits::{RateLimitEnvelope, RateLimitScope};
 use crate::util::write_json_pretty_atomic;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -194,8 +194,32 @@ impl PlanDetector {
         auto_resolved
     }
 
+    pub fn resolve_from_envelopes(
+        &mut self,
+        envelopes: &[RateLimitEnvelope],
+        plan_config: &OpenAiPlanDisplayConfig,
+    ) -> ResolvedPlan {
+        let auto_resolved = self.resolve_auto(select_plan_signal_from_envelopes(envelopes));
+
+        if matches!(plan_config.mode, OpenAiPlanMode::Manual) {
+            let raw_plan_type = plan_config.tier.title().to_ascii_lowercase();
+            return ResolvedPlan {
+                tier: plan_config.tier.into(),
+                source: DetectedPlanSource::Manual,
+                observed_at: None,
+                raw_plan_type: Some(raw_plan_type),
+            };
+        }
+
+        auto_resolved
+    }
+
     fn resolve_auto_from_sessions(&mut self, sessions: &[CodexSessionSnapshot]) -> ResolvedPlan {
-        if let Some(signal) = select_plan_signal(sessions) {
+        self.resolve_auto(select_plan_signal(sessions))
+    }
+
+    fn resolve_auto(&mut self, signal: Option<PlanSignal>) -> ResolvedPlan {
+        if let Some(signal) = signal {
             let resolved = ResolvedPlan {
                 tier: parse_plan_type(signal.raw_plan_type.as_deref()),
                 source: DetectedPlanSource::Telemetry,
@@ -297,38 +321,51 @@ struct PlanSignal {
 }
 
 fn select_plan_signal(sessions: &[CodexSessionSnapshot]) -> Option<PlanSignal> {
-    let mut global_candidates: Vec<PlanSignal> = Vec::new();
-    let mut fallback_candidates: Vec<PlanSignal> = Vec::new();
-
-    for session in sessions {
+    select_plan_signal_from(sessions.iter().flat_map(|session| {
         let session_last_activity = session
             .last_activity
             .duration_since(SystemTime::UNIX_EPOCH)
             .ok()
             .and_then(|duration| i64::try_from(duration.as_secs()).ok())
             .unwrap_or(i64::MIN);
-        for envelope in &session.rate_limit_envelopes {
-            let Some(raw_plan_type) = envelope
-                .plan_type
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-            else {
-                continue;
-            };
+        session
+            .rate_limit_envelopes
+            .iter()
+            .map(move |envelope| (envelope, session_last_activity))
+    }))
+}
 
-            let signal = PlanSignal {
-                raw_plan_type: Some(raw_plan_type),
-                observed_at: envelope.observed_at,
-                scope_priority: envelope.scope.preference(),
-                session_last_activity,
-            };
-            if envelope.scope == RateLimitScope::GlobalCodex {
-                global_candidates.push(signal);
-            } else {
-                fallback_candidates.push(signal);
-            }
+fn select_plan_signal_from_envelopes(envelopes: &[RateLimitEnvelope]) -> Option<PlanSignal> {
+    select_plan_signal_from(envelopes.iter().map(|envelope| (envelope, i64::MIN)))
+}
+
+fn select_plan_signal_from<'a>(
+    envelopes: impl IntoIterator<Item = (&'a RateLimitEnvelope, i64)>,
+) -> Option<PlanSignal> {
+    let mut global_candidates: Vec<PlanSignal> = Vec::new();
+    let mut fallback_candidates: Vec<PlanSignal> = Vec::new();
+
+    for (envelope, session_last_activity) in envelopes {
+        let Some(raw_plan_type) = envelope
+            .plan_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+        else {
+            continue;
+        };
+
+        let signal = PlanSignal {
+            raw_plan_type: Some(raw_plan_type),
+            observed_at: envelope.observed_at,
+            scope_priority: envelope.scope.preference(),
+            session_last_activity,
+        };
+        if envelope.scope == RateLimitScope::GlobalCodex {
+            global_candidates.push(signal);
+        } else {
+            fallback_candidates.push(signal);
         }
     }
 
@@ -412,6 +449,7 @@ mod tests {
                 plan_type: plan_type.map(ToString::to_string),
                 observed_at: Some(Utc::now()),
                 scope,
+                credits: None,
                 limits: RateLimits {
                     primary: Some(UsageWindow {
                         used_percent: 1.0,
@@ -463,6 +501,22 @@ mod tests {
         ];
         let resolved =
             detector.resolve_from_sessions(&sessions, &OpenAiPlanDisplayConfig::default());
+        assert_eq!(resolved.tier, DetectedPlanTier::Pro20x);
+        assert_eq!(resolved.source, DetectedPlanSource::Telemetry);
+    }
+
+    #[test]
+    fn detector_resolves_plan_from_cached_envelopes_without_active_sessions() {
+        let envelopes =
+            sample_session(Some("pro"), RateLimitScope::GlobalCodex).rate_limit_envelopes;
+        let mut detector = PlanDetector {
+            last_telemetry: None,
+            cached: None,
+        };
+
+        let resolved =
+            detector.resolve_from_envelopes(&envelopes, &OpenAiPlanDisplayConfig::default());
+
         assert_eq!(resolved.tier, DetectedPlanTier::Pro20x);
         assert_eq!(resolved.source, DetectedPlanSource::Telemetry);
     }

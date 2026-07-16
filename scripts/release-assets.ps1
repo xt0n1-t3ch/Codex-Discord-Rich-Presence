@@ -40,6 +40,7 @@ try {
 
     $sources = [ordered]@{
         "codex-discord-rich-presence-windows-x64.exe" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-windows-x64.exe"
+        "codex-discord-rich-presence-windows-x64.spdx.json" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-windows-x64.spdx.json"
         "codex-discord-rich-presence-linux-x64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-linux-x64"
         "codex-discord-rich-presence-macos-x64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-macos-x64"
         "codex-discord-rich-presence-macos-arm64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-macos-arm64"

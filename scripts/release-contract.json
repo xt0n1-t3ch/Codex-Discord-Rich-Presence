@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "product": {
+    "name": "codex-discord-presence",
+    "version": "1.8.0"
+  },
+  "core": {
+    "package": "codex-presence-core",
+    "version": "1.0.0",
+    "manifest": "crates/codex-presence-core/Cargo.toml"
+  },
+  "configuration": {
+    "schema_version": 13,
+    "source": "src/config.rs"
+  },
+  "release": {
+    "tag_prefix": "v",
+    "annotated_tag": true,
+    "immutable": true,
+    "windows_sbom": "codex-discord-rich-presence-windows-x64.spdx.json",
+    "checksum_manifest": "SHA256SUMS.txt"
+  }
+}

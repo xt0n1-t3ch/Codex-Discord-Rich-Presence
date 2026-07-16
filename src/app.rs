@@ -22,9 +22,9 @@ use crate::metrics::MetricsTracker;
 use crate::opencode::collect_opencode_sessions;
 use crate::process_guard::{self, RunningState};
 use crate::session::{
-    CodexSessionSnapshot, EffectiveLimitSelection, GitBranchCache, RateLimits, SessionParseCache,
-    SpeedMode, collect_active_sessions_multi, collect_active_sessions_multi_with_diagnostics,
-    latest_limits_source, preferred_active_session,
+    CodexSessionSnapshot, EffectiveLimitSelection, GitBranchCache, RateLimitEnvelope, RateLimits,
+    SessionParseCache, SpeedMode, collect_active_sessions_multi,
+    collect_active_sessions_multi_with_diagnostics, latest_limits_source, preferred_active_session,
 };
 use crate::telemetry::plan::{PlanDetector, ResolvedPlan, is_model_allowed_for_plan};
 use crate::telemetry::service_tier::{ResolvedServiceTier, ServiceTier, resolve_service_tier};
@@ -52,11 +52,17 @@ struct RuntimeSnapshot {
 impl RuntimeSnapshot {
     fn from_sessions(
         sessions: Vec<CodexSessionSnapshot>,
+        cached_limits: Option<EffectiveLimitSelection>,
+        cached_envelopes: &[RateLimitEnvelope],
         plan_detector: &mut PlanDetector,
         plan_config: &OpenAiPlanDisplayConfig,
     ) -> Self {
-        let limits_source = latest_limits_source(&sessions);
-        let resolved_plan = plan_detector.resolve_from_sessions(&sessions, plan_config);
+        let limits_source = cached_limits.or_else(|| latest_limits_source(&sessions));
+        let resolved_plan = if cached_envelopes.is_empty() {
+            plan_detector.resolve_from_sessions(&sessions, plan_config)
+        } else {
+            plan_detector.resolve_from_envelopes(cached_envelopes, plan_config)
+        };
         let mut resolved_service_tier = resolve_service_tier();
         if let Some(session) = preferred_active_session(&sessions)
             && session.speed.known
@@ -84,6 +90,12 @@ impl RuntimeSnapshot {
 
     fn effective_limits(&self) -> Option<&RateLimits> {
         self.limits_source.as_ref().map(|source| &source.limits)
+    }
+
+    fn effective_credits(&self) -> Option<&codex_presence_core::CreditBalance> {
+        self.limits_source
+            .as_ref()
+            .and_then(|source| source.credits.as_ref())
     }
 }
 
@@ -156,8 +168,15 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
         diagnostics.dropped_outside_sticky
     );
     let mut plan_detector = PlanDetector::new();
-    let snapshot =
-        RuntimeSnapshot::from_sessions(sessions, &mut plan_detector, &config.openai_plan);
+    let cached_limits = parse_cache.latest_limits_source();
+    let cached_envelopes = parse_cache.rate_limit_envelopes();
+    let snapshot = RuntimeSnapshot::from_sessions(
+        sessions,
+        cached_limits,
+        &cached_envelopes,
+        &mut plan_detector,
+        &config.openai_plan,
+    );
     if let Some(active) = snapshot.active_session() {
         if let Some(source) = &snapshot.limits_source {
             println!("limits_source_session: {}", source.source_session_id);
@@ -333,6 +352,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     show_activity_target: config.privacy.show_activity_target,
                     presence_enabled: config.presence_enabled,
                     privacy: &config.privacy,
+                    presence_layout: &config.display.presence_layout,
                     plan_display_label: plan_display_label.as_str(),
                     plan_status_label: plan_status_label.as_str(),
                     fast_mode_label,
@@ -346,6 +366,7 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     banner_phase: ((started.elapsed().as_millis() / 450) % 8) as u8,
                     active,
                     effective_limits: snapshot.effective_limits(),
+                    effective_credits: snapshot.effective_credits(),
                     metrics: metrics_tracker.snapshot(),
                     sessions: &snapshot.sessions,
                     plan_picker: plan_picker_open.then_some(ui::PlanPickerView {
@@ -407,6 +428,42 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                 );
                             } else {
                                 match key.code {
+                                    KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                        if privacy_picker_selected > 0 {
+                                            config.reload_from_disk();
+                                            config.display.presence_layout.fields.swap(
+                                                privacy_picker_selected,
+                                                privacy_picker_selected - 1,
+                                            );
+                                            privacy_picker_selected -= 1;
+                                            config.save()?;
+                                        }
+                                        request_redraw(
+                                            &mut force_redraw,
+                                            &mut last_tick,
+                                            runtime.poll_interval,
+                                        );
+                                    }
+                                    KeyCode::Down
+                                        if key.modifiers.contains(KeyModifiers::SHIFT) =>
+                                    {
+                                        let field_count =
+                                            config.display.presence_layout.fields.len();
+                                        if privacy_picker_selected + 1 < field_count {
+                                            config.reload_from_disk();
+                                            config.display.presence_layout.fields.swap(
+                                                privacy_picker_selected,
+                                                privacy_picker_selected + 1,
+                                            );
+                                            privacy_picker_selected += 1;
+                                            config.save()?;
+                                        }
+                                        request_redraw(
+                                            &mut force_redraw,
+                                            &mut last_tick,
+                                            runtime.poll_interval,
+                                        );
+                                    }
                                     KeyCode::Up | KeyCode::Left => {
                                         let preset_count = plan_presets().len();
                                         if preset_count > 0 {
@@ -494,7 +551,12 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                     }
                                     KeyCode::Char(digit @ '1'..='9') => {
                                         let target = (digit as u8 - b'1') as usize;
-                                        if let Some(field) = PrivacyField::ALL.get(target).copied()
+                                        if let Some(field) =
+                                            config.display.presence_layout.fields.get(target).map(
+                                                |item| {
+                                                    PrivacyField::from_presence_field(item.field)
+                                                },
+                                            )
                                         {
                                             config.reload_from_disk();
                                             privacy_picker_selected = target;
@@ -509,7 +571,10 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                                     }
                                     KeyCode::Char(' ') | KeyCode::Enter => {
                                         config.reload_from_disk();
-                                        PrivacyField::ALL[privacy_picker_selected]
+                                        let field = config.display.presence_layout.fields
+                                            [privacy_picker_selected]
+                                            .field;
+                                        PrivacyField::from_presence_field(field)
                                             .toggle(&mut config.privacy);
                                         config.save()?;
                                         request_redraw(
@@ -839,8 +904,12 @@ fn collect_runtime_snapshot(
     ));
     metrics_tracker.update(&sessions);
     metrics_tracker.persist_if_due();
+    let cached_limits = parse_cache.latest_limits_source();
+    let cached_envelopes = parse_cache.rate_limit_envelopes();
     Ok(RuntimeSnapshot::from_sessions(
         sessions,
+        cached_limits,
+        &cached_envelopes,
         plan_detector,
         &config.openai_plan,
     ))
@@ -854,7 +923,7 @@ fn publish_runtime_snapshot(
 ) {
     if let Err(err) = discord.update(
         snapshot.active_session(),
-        snapshot.effective_limits(),
+        snapshot.limits_source.as_ref(),
         &snapshot.resolved_plan,
         &snapshot.resolved_service_tier,
         config,
@@ -1123,14 +1192,16 @@ fn print_active_summary(
     let limits = effective_limits.unwrap_or(&active.limits);
     if let Some(primary) = &limits.primary {
         println!(
-            "  5h remaining: {:.0}% (reset {})",
+            "  {} remaining: {:.0}% (reset {})",
+            codex_presence_core::format_window_label(primary.window_minutes),
             primary.remaining_percent,
             format_time_until(primary.resets_at)
         );
     }
     if let Some(secondary) = &limits.secondary {
         println!(
-            "  7d remaining: {:.0}% (reset {})",
+            "  {} remaining: {:.0}% (reset {})",
+            codex_presence_core::format_window_label(secondary.window_minutes),
             secondary.remaining_percent,
             format_time_until(secondary.resets_at)
         );

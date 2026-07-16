@@ -2,6 +2,41 @@
 
 All notable changes to this project are documented in this file.
 
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses [Semantic Versioning](https://semver.org/).
+
+## [1.8.0]
+
+Unreleased local candidate. No tag, GitHub release, or published core crate exists yet.
+
+### Added
+
+- `codex-presence-core` 1.0.0 as the UI-free owner of semantic quota scopes/windows, credits, service tier, session selection, and deterministic two-line Discord composition.
+- Schema 13 field layout for project, branch, model, activity, tokens, cost, quotas, credits, context, and systems, including visibility, zone, order, and compact/descriptive presentation.
+- Credits support with explicit zero, unlimited, absent, and malformed input behavior; Credits is enabled in Standard and Full presets and remains individually private.
+- Operational TUI usage and privacy surfaces for semantic quota windows, scoped limits, Credits, and `⚡ Fast` presentation.
+
+### Changed
+
+- Usage windows are named from `window_minutes`; a 10,080-minute weekly window renders as `7d` and never fabricates a `5h` window when none exists.
+- Service-tier authority is active-session evidence first, `config.toml` fallback second, legacy global state third, then explicit unknown/standard behavior.
+- Rich Presence composition preserves all observed global/model quota envelopes, omits unavailable values, and enforces Discord's 128-character line boundary deterministically.
+- Repository governance now uses YAML issue forms, Conventional Commits, runtime-proof PRs, synchronized SemVer/core/schema release gates, Dependabot, and a Windows SPDX SBOM contract.
+
+### Fixed
+
+- Parser tests no longer depend on a developer's real `models_cache.json`.
+- Explicit Standard sessions no longer inherit stale global Fast state.
+
+### Security
+
+- Release artifacts retain immutable tag/SHA approval and checksum verification; the Windows binary additionally receives a validated SPDX 2.3 SBOM.
+
+### Validation pending before promotion
+
+- Full Rust workspace fmt, clippy, test, and release build gates on Windows.
+- Linux/macOS compile and test gates.
+- Real Codex Fast, weekly-only quota, Credits, TUI persistence, and Discord publication proof.
+
 ## [1.7.6] - 2026-07-10
 
 ### Fixed
@@ -355,6 +390,7 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Open source docs and CI/release workflows.
 
 [1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
+[1.8.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...HEAD
 [1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3
