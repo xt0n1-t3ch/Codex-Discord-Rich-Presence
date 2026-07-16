@@ -41,11 +41,6 @@ jobs:
           toolchain: 1.96.1
           components: rustfmt, clippy
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          shared-key: codex-discord-presence-ci
-
       - name: Install cargo-audit
         if: runner.os == 'Linux'
         run: cargo install cargo-audit --version 0.22.2 --locked
