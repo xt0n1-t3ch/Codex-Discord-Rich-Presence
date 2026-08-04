@@ -4,20 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses [Semantic Versioning](https://semver.org/).
 
-## [1.8.0]
-
-Unreleased local candidate. No tag, GitHub release, or published core crate exists yet.
+## [1.9.0] - 2026-08-04
 
 ### Added
 
-- `codex-presence-core` 1.0.0 as the UI-free owner of semantic quota scopes/windows, credits, service tier, session selection, and deterministic two-line Discord composition.
+- `codex-presence-core` 2.0.0 as the UI-free owner of adaptive provider-neutral usage lanes, stream isolation, semantic quota scopes/windows, credits, service tier, session selection, and deterministic two-line Discord composition.
+- Canonical parsing for authenticated `account/rateLimits/read` responses, preserving `rateLimitResetCredits` count/details separately from quota windows and keeping protocol `null` versus empty detail states intact.
+- Explicit provider usage signals and `UsageSnapshotCollection` preserve Codex, OpenAI API, Claude, and Anthropic streams without cross-lane or cross-account merging; the upstream runtime remains Codex-local.
 - Schema 13 field layout for project, branch, model, activity, tokens, cost, quotas, credits, context, and systems, including visibility, zone, order, and compact/descriptive presentation.
 - Credits support with explicit zero, unlimited, absent, and malformed input behavior; Credits is enabled in Standard and Full presets and remains individually private.
 - Operational TUI usage and privacy surfaces for semantic quota windows, scoped limits, Credits, and `⚡ Fast` presentation.
 
 ### Changed
 
-- Usage windows are named from `window_minutes`; a 10,080-minute weekly window renders as `7d` and never fabricates a `5h` window when none exists.
+- Usage windows are dynamic and named from each `window_minutes`; arbitrary and weekly-only windows render truthfully without positional `primary`/`secondary` assumptions or fabricated `5h` windows.
+- Global-account Credits take precedence within a stream; ambiguous/equal-rank envelopes and unknown lanes fail closed.
 - Service-tier authority is active-session evidence first, `config.toml` fallback second, legacy global state third, then explicit unknown/standard behavior.
 - Rich Presence composition preserves all observed global/model quota envelopes, omits unavailable values, and enforces Discord's 128-character line boundary deterministically.
 - Repository governance now uses YAML issue forms, Conventional Commits, runtime-proof PRs, synchronized SemVer/core/schema release gates, Dependabot, and a Windows SPDX SBOM contract.
@@ -26,16 +27,20 @@ Unreleased local candidate. No tag, GitHub release, or published core crate exis
 
 - Parser tests no longer depend on a developer's real `models_cache.json`.
 - Explicit Standard sessions no longer inherit stale global Fast state.
+- Active OpenCode sessions no longer inherit Codex subscription quota or plan evidence from an unrelated session lane.
+- Usage-window deserialization rejects missing percentages and non-positive durations instead of fabricating `100% remaining`; provider-reported remaining percentages and individual-account scope are preserved.
+- `discord-proof` correlates both SET and CLEAR acknowledgements by nonce, redacts local session identity and hidden costs, and prevents shell setup statements or command arguments from entering the public activity.
 
 ### Security
 
 - Release artifacts retain immutable tag/SHA approval and checksum verification; the Windows binary additionally receives a validated SPDX 2.3 SBOM.
 
-### Validation pending before promotion
+### Validated
 
-- Full Rust workspace fmt, clippy, test, and release build gates on Windows.
-- Linux/macOS compile and test gates.
-- Real Codex Fast, weekly-only quota, Credits, TUI persistence, and Discord publication proof.
+- Windows release-contract suites, locked workspace fmt/clippy/tests/release build, and RustSec audit.
+- Schema migration, adaptive quota, Credits, service-tier, privacy, and provider-lane regression coverage.
+- Real Discord IPC SET/CLEAR proof with exact nonce correlation, sanitized DTO output, partial-cost omission, and activity cleanup.
+- Linux, macOS, and Windows compile/test gates remain enforced by the protected CI and tag-only release workflow.
 
 ## [1.7.6] - 2026-07-10
 
@@ -131,7 +136,7 @@ Unreleased local candidate. No tag, GitHub release, or published core crate exis
 
 - Discord and Ratatui now show the chosen reasoning level and independent speed, including `5.6 Sol Max` and `5.6 Sol Max · Fast`.
 - CLI, VS Code Extension, desktop, and OpenCode surfaces use exact labels. Active-session metadata wins; fallback detection now requires an extension-host or explicit environment marker instead of inferring VS Code/OpenCode from generic process names, terminal variables, or `PATH` entries.
-- Cost output carries known subtotal, cache-write component, provenance, reconciliation, attribution, and `exact` / `partial` / `unavailable` status. Unknown models never inherit an older model's price.
+- Cost output carries known subtotal, cache-write component, provenance, reconciliation, attribution, and `exact` / `partial` / `unavailable` status. Partial subtotals remain diagnostic and are omitted from public presence; unknown models never inherit an older model's price.
 - Context resolution is `observed JSONL > local models_cache.json > bundled catalog`; snapshots retain usable and raw windows plus the source of each, and UI copy no longer substitutes blanket 400K/1.05M assumptions for GPT-5.6.
 - The carried-forward App inventory now matches Codex 0.144.0: 5.5/5.4/5.4 Mini use 272K raw at 95%, Spark uses 128K raw at 95%, and Fast is unavailable for 5.4 Mini and Spark. GPT-5.4 Mini uses current `$0.75 / $0.075 / $4.50` API rates; Spark remains unpriced while its credit rates are marked research preview.
 
@@ -390,7 +395,7 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Open source docs and CI/release workflows.
 
 [1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
-[1.8.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...HEAD
+[1.9.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...HEAD
 [1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3

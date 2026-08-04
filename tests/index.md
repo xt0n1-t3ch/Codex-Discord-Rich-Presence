@@ -22,11 +22,12 @@
 | Area | Module/Test seam |
 |:---|:---|
 | Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, GPT-5.6 capabilities, usable/raw context provenance, prices, credits, and cache policy |
-| Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, unknown-model fail-closed behavior, and cache clamping |
+| Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, omit partial public costs, fail closed for unknown models, and clamp cache accounting |
 | Fast mode | `src/session.rs` parses per-session service tier; `tests/integration/model_display.rs` validates Codex App labels and capability gating |
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
 | Surface identity | `src/session.rs`, `src/app.rs`, and `src/discord.rs` distinguish CLI, VS Code extension-host, VS Code terminal, desktop, OpenCode, sticky idle, launcher lineage, and selected desktop client ids |
 | Discord branding | `src/discord.rs` verifies RPC activity-title overrides, exact surface labels, separated reasoning/speed display, and Codex App / ChatGPT App design assets |
+| Discord live proof | `src/discord.rs` verifies exact-cost emission, partial/unavailable omission, and the no-`>=` fail-closed contract used by the opt-in `discord-proof` wire seam |
 | Terminal layout | `src/ui.rs` covers layout, monochrome wordmark, plan picker, persisted design/master toggle copy, paused state, footer, spinner, and reserved rows |
 | Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
 | Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 13, ordered ten-field composition, Credits defaults, enabled-by-default migration, external design/privacy/master reload, invalid-file last-good fallback, and identity normalization |
@@ -37,5 +38,7 @@
 | Release integrity | `tests/release_*.tests.ps1` drives metadata, local approval, repository state, workflow, portable artifact, digest, and immutable publication contracts |
 | Privacy controls | `src/config.rs`, `src/discord.rs`, `src/ui.rs`, and `src/app.rs` cover all ten fields, final-payload enforcement, persisted toggles/order, and Ratatui interaction |
 | Shared control | `tests/integration/config_migration.rs`, `src/app.rs`, and `src/discord.rs` cover Pulse-compatible config reload in TUI/headless/wrapper loops plus idempotent pause and fresh resume publication |
+
+| Adaptive usage contract | `crates/codex-presence-core/src/usage.rs` covers explicit provider-lane classification, stable stream isolation, dynamic/arbitrary windows, Codex used/remaining complements, canonical `account/rateLimits/read` parsing, separate reset-credit count/details with null-versus-empty preservation, missing-percentage and unknown-duration omission, malformed duration and credits-only payloads, global-account credit precedence, deterministic serde, and equal-rank fail-closed selection |
 
 Rule: bugs that cross module seams get an integration regression; module-local bugs can stay beside the Rust module.

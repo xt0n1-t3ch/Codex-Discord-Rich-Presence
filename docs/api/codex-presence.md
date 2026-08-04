@@ -19,6 +19,69 @@ This document owns the local runtime contract exported by the daemon modules.
 
 `discord::active_presence_presentation` and `idle_presence_presentation` own the public activity title, details, state, large asset, and optional small system signal. Discord IPC, previews, and vendored consumers must use this contract instead of rebuilding presentation strings.
 
+## Opt-in live Discord proof
+
+`discord-proof` is a diagnostic-only backend command. With Discord desktop
+already running, it publishes one activity through the same surface selection,
+asset resolution, and `DiscordIpcClient` path as the daemon, waits for the
+`SET_ACTIVITY` acknowledgement, clears the activity, waits for the clear
+acknowledgement, then emits a sanitized JSON artifact:
+
+```text
+codex-discord-presence discord-proof --output proof.json
+```
+
+The artifact records the exact outbound `SET_ACTIVITY` DTO, both accepted
+replies, the selected public surface, and cost assertions. Exact pricing is
+emitted only when `PricingStatus::Exact`; partial or unavailable subtotals are
+omitted. The proof fails closed if the public state contains `>=`, if an exact
+cost label is missing, or if a partial/unavailable subtotal leaks into state.
+The command does not acquire the daemon single-instance lock and does not stop
+Discord, Pulse, or any existing presence process.
+
+## Adaptive Usage Contract
+
+`codex-presence-core::usage` is the single owner for provider-neutral usage
+data. `UsageLane` is one of `codex_subscription`, `open_ai_api`,
+`claude_subscription`, `anthropic_api`, or `unknown`. A lane is selected only
+from explicit `UsageSignal` evidence: a session JSONL marker by itself stays
+`unknown`, and evidence from more than one provider lane is ambiguous and
+stays fail-closed.
+
+`UsageSource` carries the selected lane, a stable non-secret `stream_id`, and
+the sorted/deduplicated signals. `UsageStream` keeps that source with its
+envelopes, while `UsageSnapshotCollection` keeps each stream's snapshot
+separate. Selection matches the requested `lane + stream_id` exactly; it never
+falls back to another provider, account, or stream. The upstream runtime
+continues to collect only local Codex session JSONL; no Claude or Anthropic
+collector is enabled by this contract.
+
+`RateLimits.windows` is an ordered dynamic list. The legacy primary/secondary
+wire shape is accepted on read and normalized to this list, but new JSON emits
+only `windows`. Labels are derived from each window's duration, so a missing
+window is never fabricated. Within one stream, `GlobalAccount` credits take
+precedence over individual/model credits. Equal-rank conflicting envelopes,
+unknown lanes, and ambiguous sources return no effective selection.
+
+The authenticated Codex app-server `account/rateLimits/read` response is parsed
+by `parse_account_rate_limits_response` in the same core crate. The
+`rateLimits` snapshot (including `rateLimitsByLimitId`) becomes `envelopes`,
+while `result.rateLimitResetCredits` remains a separate
+`RateLimitResetCreditsSummary`. Its `available_count` is authoritative; the
+optional `credits` list preserves the protocol distinction between `null`
+(only the count is known) and an empty list (details were fetched and none are
+available). A Discord consumer may show only the count when it is positive and
+must omit the field for a missing or zero summary; it must not infer access from
+expiry, title, description, or reset type.
+
+The wire contract is tracked against the official
+[`RateLimitResetCreditsSummary`](https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/typescript/v2/RateLimitResetCreditsSummary.ts),
+[`RateLimitResetCredit`](https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/typescript/v2/RateLimitResetCredit.ts),
+[`RateLimitResetType`](https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/typescript/v2/RateLimitResetType.ts),
+and
+[`RateLimitResetCreditStatus`](https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/typescript/v2/RateLimitResetCreditStatus.ts)
+definitions (verified 2026-08-02).
+
 ## GPT-5.6 Contract
 
 | ID | Codex App label | Effective context | Ultra | Fast |
@@ -64,7 +127,7 @@ Foreground TUI, headless, and Codex-wrapper loops reload `~/.codex/discord-prese
 
 Press `V` in Ratatui to edit the ten persisted Discord fields: project name, Git branch, model, activity, token count, cost, semantic quotas, Credits, context usage, and systems. `Shift+↑/↓` reorders the selected field. Context is independent from token count. Systems controls the small activity asset and its tooltip. Every edit is saved atomically and triggers a fresh public presentation before Discord publication.
 
-Quota labels come only from `window_minutes`: 300 minutes is `5h`, 1,440 is `24h`, and 10,080 is `7d`. An absent window is omitted. Credits preserve the received decimal text; explicit zero and unlimited are displayable, while an absent or malformed object remains unavailable.
+Quota labels come only from each dynamic window's `window_minutes` value; an absent or malformed duration is omitted and no positional window is fabricated. Credits preserve the received decimal text; explicit zero and unlimited are displayable, while an absent or malformed object remains unavailable.
 
 ## Pricing
 
@@ -84,9 +147,9 @@ API rates per one million tokens, verified 2026-07-09:
 | `partial` | The known subtotal excludes a published component absent from telemetry, currently GPT-5.6 cache writes in Codex JSONL |
 | `unavailable` | No verified pricing or valid user override exists |
 
-Unknown models never inherit a fallback rate. Discord and the terminal render partial subtotals with a `>=` prefix and hide unavailable costs. OpenCode can produce an exact GPT-5.6 total because its database reports cache-write tokens separately.
+Unknown models never inherit a fallback rate. Discord and the terminal omit partial subtotals and hide unavailable costs. OpenCode can produce an exact GPT-5.6 total because its database reports cache-write tokens separately.
 
-Because Codex JSONL exposes cumulative session totals rather than the size of every billed prompt, a GPT-5.5 or GPT-5.4 session whose cumulative input exceeds the published 272K long-context threshold is reported as a partial lower bound. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
+Because Codex JSONL exposes cumulative session totals rather than the size of every billed prompt, a GPT-5.5 or GPT-5.4 session whose cumulative input exceeds the published 272K long-context threshold keeps a partial lower-bound subtotal internally, but that subtotal is omitted from public presence. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
 
 ## Prompt Cache Policy
 
@@ -101,6 +164,7 @@ The bundled policy records a 1,024-token eligibility minimum and a 30-minute min
 | Current model rates and API windows | <https://developers.openai.com/api/docs/models> | 2026-07-09 |
 | Prompt caching | <https://developers.openai.com/api/docs/guides/prompt-caching> | 2026-07-09 |
 | Codex credit rates | <https://help.openai.com/en/articles/20001106-codex-rate-card-2> | 2026-07-09 |
+| App-server reset-credit shape | <https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/typescript/v2/RateLimitResetCreditsSummary.ts> and related v2 types | 2026-08-02 |
 | App capabilities/context | Local Codex 0.144.0 `models_cache.json` | 2026-07-09 |
 
 ## Local Files

@@ -400,12 +400,12 @@ fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
     ])
     .split(area);
     let limits = data.effective_limits;
-    let primary = limits.and_then(|value| value.primary.as_ref());
+    let primary = limits.and_then(|value| value.primary());
     let primary_label = primary
         .map(|value| format_window_label(value.window_minutes))
         .unwrap_or_else(|| "quota unavailable".to_string());
     render_usage_gauge(frame, rows[0], &primary_label, primary);
-    let secondary = limits.and_then(|value| value.secondary.as_ref());
+    let secondary = limits.and_then(|value| value.secondary());
     let secondary_label = secondary
         .map(|value| format_window_label(value.window_minutes))
         .unwrap_or_else(|| "additional quota unavailable".to_string());
@@ -795,8 +795,8 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
         );
     }
     if let Some(limits) = data.effective_limits {
-        write_window_signature(&mut signature, "primary", limits.primary.as_ref());
-        write_window_signature(&mut signature, "secondary", limits.secondary.as_ref());
+        write_window_signature(&mut signature, "primary", limits.primary());
+        write_window_signature(&mut signature, "secondary", limits.secondary());
     }
     signature
 }

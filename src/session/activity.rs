@@ -741,6 +741,39 @@ pub(crate) fn summarize_command_for_presence(command: &str, max_len: usize) -> S
     }
 
     let first = command_verb(&tokens[0]);
+    if !matches!(
+        first.as_str(),
+        "bash"
+            | "bun"
+            | "cargo"
+            | "cat"
+            | "cmd"
+            | "cmake"
+            | "curl"
+            | "docker"
+            | "dotnet"
+            | "gh"
+            | "git"
+            | "grep"
+            | "kubectl"
+            | "make"
+            | "node"
+            | "npm"
+            | "pnpm"
+            | "powershell"
+            | "pwsh"
+            | "pytest"
+            | "python"
+            | "python3"
+            | "rg"
+            | "rustc"
+            | "sed"
+            | "sh"
+            | "type"
+            | "yarn"
+    ) {
+        return "command".to_string();
+    }
     let second = tokens.get(1).cloned();
     let summary = match (first.as_str(), second.as_deref()) {
         ("rg", Some("--files")) => "rg --files".to_string(),

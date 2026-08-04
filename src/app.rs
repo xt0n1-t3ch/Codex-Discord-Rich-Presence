@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 use std::{io, io::IsTerminal};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use tracing::debug;
@@ -31,6 +31,7 @@ use crate::telemetry::service_tier::{ResolvedServiceTier, ServiceTier, resolve_s
 use crate::ui::{self, RenderData};
 use crate::util::{
     format_model_display, format_since, format_time_until, format_token_triplet, silent_command,
+    write_json_pretty_atomic,
 };
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
@@ -57,8 +58,22 @@ impl RuntimeSnapshot {
         plan_detector: &mut PlanDetector,
         plan_config: &OpenAiPlanDisplayConfig,
     ) -> Self {
-        let limits_source = cached_limits.or_else(|| latest_limits_source(&sessions));
-        let resolved_plan = if cached_envelopes.is_empty() {
+        let active_session = preferred_active_session(&sessions);
+        let active_is_opencode = active_session.is_some_and(|session| {
+            session.session_id.starts_with("opencode:")
+                || session.originator.as_deref() == Some("opencode")
+        });
+        let limits_source = if active_is_opencode {
+            None
+        } else {
+            cached_limits.or_else(|| latest_limits_source(&sessions))
+        };
+        let resolved_plan = if active_is_opencode {
+            plan_detector.resolve_from_sessions(
+                active_session.map(std::slice::from_ref).unwrap_or_default(),
+                plan_config,
+            )
+        } else if cached_envelopes.is_empty() {
             plan_detector.resolve_from_sessions(&sessions, plan_config)
         } else {
             plan_detector.resolve_from_envelopes(cached_envelopes, plan_config)
@@ -192,6 +207,64 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
             config,
         );
     }
+    Ok(())
+}
+
+pub fn run_discord_proof(config: &PresenceConfig, output: Option<&Path>) -> Result<()> {
+    if !config.presence_enabled {
+        bail!("Discord presence is disabled; enable presence_enabled for a live proof");
+    }
+
+    let runtime = config::runtime_settings();
+    let session_roots = config::sessions_paths();
+    let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
+    let mut parse_cache = SessionParseCache::default();
+    let (mut sessions, _diagnostics) = collect_active_sessions_multi_with_diagnostics(
+        &session_roots,
+        runtime.stale_threshold,
+        runtime.active_sticky_window,
+        &mut git_cache,
+        &mut parse_cache,
+        &config.pricing,
+    )?;
+    sessions.extend(collect_opencode_sessions(
+        runtime.stale_threshold,
+        runtime.active_sticky_window,
+        &config.pricing,
+    ));
+    let mut plan_detector = PlanDetector::new();
+    let cached_limits = parse_cache.latest_limits_source();
+    let cached_envelopes = parse_cache.rate_limit_envelopes();
+    let snapshot = RuntimeSnapshot::from_sessions(
+        sessions,
+        cached_limits,
+        &cached_envelopes,
+        &mut plan_detector,
+        &config.openai_plan,
+    );
+
+    let mut discord = DiscordPresence::new(config.effective_client_id());
+    let artifact = discord.live_proof(
+        snapshot.active_session(),
+        snapshot.limits_source.as_ref(),
+        &snapshot.resolved_plan,
+        &snapshot.resolved_service_tier,
+        config,
+        runtime_surface_hint(),
+    )?;
+    if let Some(output) = output {
+        write_json_pretty_atomic(output, &artifact).with_context(|| {
+            format!(
+                "failed to write Discord proof artifact to {}",
+                output.display()
+            )
+        })?;
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&artifact)
+            .context("failed to encode Discord proof artifact")?
+    );
     Ok(())
 }
 
@@ -1190,20 +1263,12 @@ fn print_active_summary(
     }
 
     let limits = effective_limits.unwrap_or(&active.limits);
-    if let Some(primary) = &limits.primary {
+    for window in &limits.windows {
         println!(
             "  {} remaining: {:.0}% (reset {})",
-            codex_presence_core::format_window_label(primary.window_minutes),
-            primary.remaining_percent,
-            format_time_until(primary.resets_at)
-        );
-    }
-    if let Some(secondary) = &limits.secondary {
-        println!(
-            "  {} remaining: {:.0}% (reset {})",
-            codex_presence_core::format_window_label(secondary.window_minutes),
-            secondary.remaining_percent,
-            format_time_until(secondary.resets_at)
+            codex_presence_core::format_window_label(window.window_minutes),
+            window.remaining_percent,
+            format_time_until(window.resets_at)
         );
     }
     if let Some(model) = active.model.as_deref()

@@ -11,7 +11,7 @@
 One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, semantic **quota visibility**, and **Credits** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.8.0" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.9.0" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,12 +37,13 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.8.0</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.9.0</h2>
 
 - **Truthful usage** - quota names come from their actual window duration, all global/model scopes survive normalization, and missing five-hour windows stay missing.
 - **Real Credits** - account Credits support exact balances, explicit zero, unlimited, absence, and individual privacy control.
 - **Fast without inheritance bugs** - explicit session speed wins; only unknown sessions fall back to `config.toml`, then legacy global state, and Fast renders as `⚡ Fast`.
-- **One composer** - `codex-presence-core` 1.0.0 owns deterministic field order, details/state zones, compact/descriptive labels, presets, and Discord's 128-character boundary.
+- **One composer** - `codex-presence-core` 2.0.0 owns deterministic field order, details/state zones, compact/descriptive labels, presets, and Discord's 128-character boundary.
+- **Adaptive provider lanes** - explicit usage signals, stable stream IDs, dynamic windows, and global-account credit precedence keep Codex-local telemetry isolated and truthful.
 
 <details>
 <summary>Previous v1.7.5 highlights</summary>
@@ -169,7 +170,7 @@ cargo build --release
 Example Discord state line:
 
 ```text
-GPT-5.6 Sol · Max · ⚡ Fast | Pro 20x ($200/month) · >=$7.37 · 38.9M tok · Ctx 1% used · 5h 41% · 7d 47%
+GPT-5.6 Sol · Max · ⚡ Fast | Pro 20x ($200/month) · 38.9M tok · Ctx 1% used · 5h 41% · 7d 47%
 ```
 
 <h2 id="usage"><img src="assets/readme/icons/play.png" alt="" width="28" align="center"> &nbsp;Usage</h2>

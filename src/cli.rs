@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -28,4 +30,10 @@ pub enum Commands {
     Status,
     /// Run health diagnostics for setup and runtime requirements.
     Doctor,
+    /// Send one activity, capture Discord's acknowledgement, clear it, and emit a sanitized proof.
+    DiscordProof {
+        /// Optional path for the JSON artifact (stdout always receives the same artifact).
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
 }
