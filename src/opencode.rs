@@ -690,14 +690,14 @@ mod tests {
                 directory: "D:/X/2-Dev/MCP-Servers/Codex-Discord-Rich-Presence",
                 title: "Presence",
                 model: r#"{"id":"gpt-5.5-fast","providerID":"openai"}"#,
-                updated_at: now - 4_000,
+                updated_at: now - 2_000,
             },
         );
         insert_opencode_part(
             &connection,
             "current-workspace",
             r#"{"type":"text"}"#,
-            now - 4_000,
+            now - 2_000,
         );
         insert_opencode_session(
             &connection,
