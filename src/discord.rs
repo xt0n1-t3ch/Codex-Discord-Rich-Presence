@@ -1,9 +1,11 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::collections::HashSet;
+use std::process;
 use std::time::{Duration, Instant, SystemTime};
 
 use codex_presence_core::{
@@ -12,14 +14,13 @@ use codex_presence_core::{
 };
 
 use crate::config::{DesktopPresenceDesign, PresenceConfig, PresenceSurface};
-use crate::cost::format_presentable_cost;
+use crate::cost::{PricingStatus, format_presentable_cost};
 use crate::model::format_model_display;
 use crate::session::{
     CodexSessionSnapshot, EffectiveLimitSelection, RateLimits, SessionActivityKind, SpeedMode,
 };
 use crate::telemetry::plan::ResolvedPlan;
 use crate::telemetry::service_tier::ResolvedServiceTier;
-#[cfg(test)]
 use crate::util::format_cost;
 use crate::util::format_tokens;
 
@@ -51,6 +52,9 @@ const DISCORD_MIN_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
 const DISCORD_ASSET_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 const DISCORD_ASSET_FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const DISCORD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
+const DISCORD_ACTIVITY_OPCODE: u8 = 1;
+const DISCORD_ACTIVITY_COMMAND: &str = "SET_ACTIVITY";
+const DISCORD_PROOF_SCHEMA_VERSION: u32 = 1;
 const RECONNECT_MIN_BACKOFF: Duration = Duration::from_secs(5);
 const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(60);
 const IDLE_STATE: &str = "Idling...";
@@ -65,6 +69,38 @@ pub struct PresencePresentation {
     pub large_text: String,
     pub small_image_key: Option<String>,
     pub small_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscordProofArtifact {
+    pub schema_version: u32,
+    pub generated_at: String,
+    pub process_id: u32,
+    pub client_id: String,
+    pub surface: String,
+    pub session_id: Option<String>,
+    pub cost: DiscordProofCost,
+    pub assertions: DiscordProofAssertions,
+    pub outbound_set_activity: Value,
+    pub outbound_clear_activity: Value,
+    pub set_activity_reply: Value,
+    pub clear_activity_reply: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscordProofCost {
+    pub status: PricingStatus,
+    pub known_usd: Option<f64>,
+    pub label: Option<String>,
+    pub emitted: bool,
+    pub omitted: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscordProofAssertions {
+    pub no_ge_comparator: bool,
+    pub exact_cost_when_available: bool,
+    pub partial_or_unavailable_cost_omitted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -286,6 +322,171 @@ impl DiscordPresence {
         Ok(())
     }
 
+    pub fn live_proof(
+        &mut self,
+        active_session: Option<&CodexSessionSnapshot>,
+        effective_selection: Option<&EffectiveLimitSelection>,
+        resolved_plan: &ResolvedPlan,
+        resolved_service_tier: &ResolvedServiceTier,
+        config: &PresenceConfig,
+        fallback_surface: PresenceSurface,
+    ) -> Result<DiscordProofArtifact> {
+        if !config.presence_enabled {
+            bail!("Discord presence is disabled; enable presence_enabled for a live proof");
+        }
+
+        self.surface = detect_surface(active_session, fallback_surface, self.last_known_surface);
+        self.last_known_surface = self.surface;
+        self.switch_client_if_needed(config.effective_client_id_for_surface(self.surface));
+        if self.client_id.is_none() {
+            bail!(
+                "Discord client id is missing for {}",
+                self.surface.label(config.display.desktop_presence_design)
+            );
+        }
+        self.ensure_connected()?;
+        self.refresh_asset_keys_if_needed();
+
+        let (presentation, start_epoch) = match active_session {
+            Some(session) => (
+                active_presence_presentation_with_credits(
+                    self.surface,
+                    session,
+                    effective_selection.map(|selection| &selection.limits),
+                    effective_selection.and_then(|selection| selection.credits.as_ref()),
+                    resolved_plan,
+                    resolved_service_tier,
+                    config,
+                ),
+                presence_start_epoch(session),
+            ),
+            None => (
+                idle_presence_presentation(self.surface, config),
+                idle_start_epoch(&mut self.idle_start_epoch),
+            ),
+        };
+        let (resolved_large_key, resolved_small_key) = (
+            resolve_image_key(
+                &presentation.large_image_key,
+                self.known_asset_keys.as_ref(),
+            ),
+            presentation
+                .small_image_key
+                .as_deref()
+                .and_then(|key| resolve_image_key(key, self.known_asset_keys.as_ref())),
+        );
+        let (large_image_key, small_image_key) =
+            normalize_asset_pair(resolved_large_key, resolved_small_key);
+        let activity = build_activity(ActivitySpec {
+            name: &presentation.app_name,
+            details: &presentation.details,
+            state: &presentation.state,
+            start_epoch,
+            large_image_key: large_image_key.as_deref(),
+            large_text: non_empty_trimmed(&presentation.large_text),
+            small_image_key: small_image_key.as_deref(),
+            small_text: presentation
+                .small_text
+                .as_deref()
+                .and_then(non_empty_trimmed),
+        });
+        let activity_value =
+            serde_json::to_value(&activity).context("failed to encode Discord activity")?;
+        let activity_json =
+            serde_json::to_string(&activity_value).context("failed to inspect Discord activity")?;
+        let nonce = proof_nonce();
+        let outbound_set_activity = json!({
+            "cmd": DISCORD_ACTIVITY_COMMAND,
+            "args": {
+                "pid": process::id(),
+                "activity": activity_value,
+            },
+            "nonce": nonce,
+        });
+        let set_nonce = outbound_set_activity
+            .get("nonce")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("generated Discord proof nonce is missing"))?
+            .to_string();
+        let result = (|| -> Result<DiscordProofArtifact> {
+            let (outbound_clear_activity, set_activity_reply, clear_activity_reply) = {
+                let client = self
+                    .client
+                    .as_mut()
+                    .ok_or_else(|| anyhow!("Discord IPC client unexpectedly missing"))?;
+                client
+                    .send(outbound_set_activity.clone(), DISCORD_ACTIVITY_OPCODE)
+                    .context("failed to send Discord SET_ACTIVITY proof")?;
+                let (set_opcode, set_activity_reply) = client
+                    .recv()
+                    .context("failed to receive Discord SET_ACTIVITY proof reply")?;
+                if set_opcode != u32::from(DISCORD_ACTIVITY_OPCODE) {
+                    bail!("Discord SET_ACTIVITY reply used unexpected IPC opcode {set_opcode}");
+                }
+                validate_activity_reply(&set_activity_reply, Some(&set_nonce), false)?;
+
+                let clear_nonce = proof_nonce();
+                let outbound_clear_activity = json!({
+                    "cmd": DISCORD_ACTIVITY_COMMAND,
+                    "args": {
+                        "pid": process::id(),
+                        "activity": Value::Null,
+                    },
+                    "nonce": clear_nonce,
+                });
+                client
+                    .send(outbound_clear_activity.clone(), DISCORD_ACTIVITY_OPCODE)
+                    .context("failed to send Discord clear-activity proof")?;
+                let (clear_opcode, clear_activity_reply) = client
+                    .recv()
+                    .context("failed to receive Discord clear-activity proof reply")?;
+                if clear_opcode != u32::from(DISCORD_ACTIVITY_OPCODE) {
+                    bail!("Discord clear-activity reply used unexpected IPC opcode {clear_opcode}");
+                }
+                validate_activity_reply(&clear_activity_reply, Some(&clear_nonce), true)?;
+                (
+                    outbound_clear_activity,
+                    set_activity_reply,
+                    clear_activity_reply,
+                )
+            };
+
+            let cost_is_public = !config.privacy.enabled && config.privacy.show_cost;
+            let public_text = format!("{}\n{}", presentation.details, presentation.state);
+            let (cost, mut assertions) =
+                proof_cost_for_state(active_session, &public_text, cost_is_public)?;
+            assertions.no_ge_comparator =
+                assertions.no_ge_comparator && !activity_json.contains(">=");
+            if !assertions.no_ge_comparator {
+                bail!("Discord activity DTO contained a forbidden >= comparator");
+            }
+            Ok(DiscordProofArtifact {
+                schema_version: DISCORD_PROOF_SCHEMA_VERSION,
+                generated_at: Utc::now().to_rfc3339(),
+                process_id: process::id(),
+                client_id: self.client_id.clone().unwrap_or_default(),
+                surface: self
+                    .surface
+                    .label(config.display.desktop_presence_design)
+                    .to_string(),
+                session_id: None,
+                cost,
+                assertions,
+                outbound_set_activity,
+                outbound_clear_activity,
+                set_activity_reply,
+                clear_activity_reply,
+            })
+        })();
+
+        if result.is_ok() {
+            self.close_connection_without_clear();
+        } else {
+            self.shutdown();
+        }
+        result
+    }
+
     pub fn shutdown(&mut self) {
         if !self.paused {
             let _ = self.clear_activity();
@@ -303,6 +504,22 @@ impl DiscordPresence {
         self.last_reconnect_attempt = None;
         self.consecutive_errors = 0;
         self.paused = false;
+        self.last_status = status_for_client_id(self.surface, self.client_id.as_deref());
+    }
+
+    fn close_connection_without_clear(&mut self) {
+        if let Some(client) = self.client.as_mut() {
+            let _ = client.close();
+        }
+        self.client = None;
+        self.last_sent = None;
+        self.last_publish_at = None;
+        self.last_heartbeat_at = None;
+        self.last_asset_refresh_at = None;
+        self.idle_start_epoch = None;
+        self.reconnect_backoff = RECONNECT_MIN_BACKOFF;
+        self.last_reconnect_attempt = None;
+        self.consecutive_errors = 0;
         self.last_status = status_for_client_id(self.surface, self.client_id.as_deref());
     }
 
@@ -636,6 +853,108 @@ fn build_activity(spec: ActivitySpec<'_>) -> Activity<'_> {
     activity
 }
 
+fn proof_nonce() -> String {
+    let timestamp = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| Utc::now().timestamp_micros().saturating_mul(1_000));
+    format!("codex-presence-proof-{}-{timestamp}", process::id())
+}
+
+fn validate_activity_reply(
+    reply: &Value,
+    expected_nonce: Option<&str>,
+    expect_clear: bool,
+) -> Result<()> {
+    if reply.get("cmd").and_then(Value::as_str) != Some(DISCORD_ACTIVITY_COMMAND) {
+        bail!("Discord activity reply was not a SET_ACTIVITY acknowledgement");
+    }
+    if reply.get("evt").is_some_and(|event| !event.is_null()) {
+        bail!("Discord activity reply carried an unexpected event");
+    }
+    if let Some(expected_nonce) = expected_nonce
+        && reply.get("nonce").and_then(Value::as_str) != Some(expected_nonce)
+    {
+        bail!("Discord activity reply nonce did not match the outbound DTO");
+    }
+    let nonce = reply
+        .get("nonce")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if nonce.is_empty() {
+        bail!("Discord activity reply nonce is missing");
+    }
+    if expect_clear {
+        if reply.get("data") != Some(&Value::Null) {
+            bail!("Discord clear-activity reply did not acknowledge an empty activity");
+        }
+    } else if !reply.get("data").is_some_and(Value::is_object) {
+        bail!("Discord SET_ACTIVITY reply did not include accepted activity data");
+    }
+    Ok(())
+}
+
+fn proof_cost_for_state(
+    session: Option<&CodexSessionSnapshot>,
+    state: &str,
+    cost_is_public: bool,
+) -> Result<(DiscordProofCost, DiscordProofAssertions)> {
+    let (status, known_usd, label) = session
+        .map(|session| {
+            (
+                session.pricing_status,
+                session.known_cost_usd,
+                format_presentable_cost(session.known_cost_usd, session.pricing_status),
+            )
+        })
+        .unwrap_or((PricingStatus::Unavailable, None, None));
+    let no_ge_comparator = !state.contains(">=");
+    let raw_cost = known_usd.map(format_cost);
+    let (emitted, omitted) = match status {
+        PricingStatus::Exact => {
+            let Some(label) = label.as_ref() else {
+                bail!("exact pricing status had no presentable cost label");
+            };
+            if cost_is_public {
+                if !state.contains(label) {
+                    bail!("exact cost label was not emitted in the public state");
+                }
+                (true, false)
+            } else {
+                if state.contains(label) {
+                    bail!("private exact cost leaked into the public state");
+                }
+                (false, true)
+            }
+        }
+        PricingStatus::Partial | PricingStatus::Unavailable => {
+            if let Some(raw_cost) = raw_cost.as_ref()
+                && state.contains(raw_cost)
+            {
+                bail!("partial or unavailable cost leaked into the public state");
+            }
+            (false, true)
+        }
+    };
+    let assertions = DiscordProofAssertions {
+        no_ge_comparator,
+        exact_cost_when_available: status != PricingStatus::Exact || emitted || !cost_is_public,
+        partial_or_unavailable_cost_omitted: status == PricingStatus::Exact || omitted,
+    };
+    if !assertions.no_ge_comparator {
+        bail!("public Discord state contained a forbidden >= comparator");
+    }
+    Ok((
+        DiscordProofCost {
+            status,
+            known_usd: emitted.then_some(known_usd).flatten(),
+            label: emitted.then_some(label).flatten(),
+            emitted,
+            omitted,
+        },
+        assertions,
+    ))
+}
+
 fn should_skip_publish(
     previous: &Option<PresencePayload>,
     payload: &PresencePayload,
@@ -785,21 +1104,22 @@ fn context_state_part(session: &CodexSessionSnapshot) -> Option<String> {
 }
 
 fn limits_state_part(limits: &RateLimits) -> Option<String> {
-    let mut parts = Vec::new();
-    if let Some(primary) = &limits.primary {
-        parts.push(format!(
-            "{} {:.0}%",
-            format_window_label(primary.window_minutes),
-            primary.remaining_percent
-        ));
-    }
-    if let Some(secondary) = &limits.secondary {
-        parts.push(format!(
-            "{} {:.0}%",
-            format_window_label(secondary.window_minutes),
-            secondary.remaining_percent
-        ));
-    }
+    let parts = limits
+        .windows
+        .iter()
+        .filter(|window| {
+            window.window_minutes > 0
+                && window.remaining_percent.is_finite()
+                && (0.0..=100.0).contains(&window.remaining_percent)
+        })
+        .map(|window| {
+            format!(
+                "{} {:.0}% remaining",
+                format_window_label(window.window_minutes),
+                window.remaining_percent
+            )
+        })
+        .collect::<Vec<_>>();
     if parts.is_empty() {
         None
     } else {
@@ -1062,20 +1382,20 @@ mod tests {
                 source: ContextWindowSource::Event,
                 raw_source: ContextWindowSource::Event,
             }),
-            limits: RateLimits {
-                primary: Some(UsageWindow {
+            limits: RateLimits::new(vec![
+                UsageWindow {
                     used_percent: 36.0,
                     remaining_percent: 64.0,
                     window_minutes: 300,
                     resets_at: None,
-                }),
-                secondary: Some(UsageWindow {
+                },
+                UsageWindow {
                     used_percent: 82.0,
                     remaining_percent: 18.0,
                     window_minutes: 10080,
                     resets_at: None,
-                }),
-            },
+                },
+            ]),
             rate_limit_envelopes: Vec::new(),
             started_at: None,
             last_token_event_at: None,
@@ -1239,8 +1559,8 @@ mod tests {
         assert!(state.contains(format_cost(session.total_cost_usd).as_str()));
         assert!(state.contains("30.0K tok"));
         assert!(state.contains("Ctx 6% used"));
-        assert!(state.contains("5h 64%"));
-        assert!(state.contains("7d 18%"));
+        assert!(state.contains("5h 64% remaining"));
+        assert!(state.contains("7d 18% remaining"));
     }
 
     #[test]
@@ -1391,15 +1711,12 @@ mod tests {
     #[test]
     fn weekly_only_limit_never_invents_five_hour_window() {
         let session = sample_session();
-        let limits = RateLimits {
-            primary: Some(crate::session::UsageWindow {
-                used_percent: 4.0,
-                remaining_percent: 96.0,
-                window_minutes: 10_080,
-                resets_at: None,
-            }),
-            secondary: None,
-        };
+        let limits = RateLimits::new(vec![crate::session::UsageWindow {
+            used_percent: 4.0,
+            remaining_percent: 96.0,
+            window_minutes: 10_080,
+            resets_at: None,
+        }]);
         let mut config = PresenceConfig::default();
         config.privacy.show_model = false;
         config.privacy.show_cost = false;
@@ -1413,8 +1730,250 @@ mod tests {
             &resolved_service_tier(false),
             &config,
         );
-        assert!(state.contains("7d 96%"));
+        assert!(state.contains("7d 96% remaining"));
         assert!(!state.contains("5h"));
+    }
+
+    #[test]
+    fn partial_cost_is_omitted_from_the_public_state_line() {
+        let mut session = sample_session();
+        session.pricing_status = PricingStatus::Partial;
+        let (_, state) = presence_lines(
+            &session,
+            Some(&session.limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &PresenceConfig::default(),
+        );
+
+        assert!(
+            !state.contains("$1.23"),
+            "partial cost leaked into: {state}"
+        );
+        assert!(
+            !state.contains(">="),
+            "cost comparator leaked into: {state}"
+        );
+        assert!(
+            state.contains("30.0K tok"),
+            "exact tokens disappeared: {state}"
+        );
+    }
+
+    #[test]
+    fn live_proof_cost_contract_is_fail_closed() {
+        let exact = sample_session();
+        let (_, exact_state) = presence_lines(
+            &exact,
+            Some(&exact.limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &PresenceConfig::default(),
+        );
+        let (exact_cost, exact_assertions) =
+            proof_cost_for_state(Some(&exact), &exact_state, true).expect("exact cost proof");
+        assert_eq!(exact_cost.status, PricingStatus::Exact);
+        assert_eq!(exact_cost.label.as_deref(), Some("$1.23"));
+        assert!(exact_cost.emitted);
+        assert!(!exact_cost.omitted);
+        assert!(exact_assertions.exact_cost_when_available);
+        assert!(exact_assertions.no_ge_comparator);
+
+        let mut partial = exact.clone();
+        partial.pricing_status = PricingStatus::Partial;
+        let (_, partial_state) = presence_lines(
+            &partial,
+            Some(&partial.limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &PresenceConfig::default(),
+        );
+        let (partial_cost, partial_assertions) =
+            proof_cost_for_state(Some(&partial), &partial_state, true).expect("partial cost proof");
+        assert_eq!(partial_cost.status, PricingStatus::Partial);
+        assert!(partial_cost.label.is_none());
+        assert!(!partial_cost.emitted);
+        assert!(partial_cost.omitted);
+        assert!(partial_assertions.partial_or_unavailable_cost_omitted);
+        assert!(!partial_state.contains(">="));
+        assert!(!partial_state.contains("$1.23"));
+
+        let mut unavailable = partial;
+        unavailable.known_cost_usd = None;
+        unavailable.pricing_status = PricingStatus::Unavailable;
+        let (_, unavailable_state) = presence_lines(
+            &unavailable,
+            Some(&unavailable.limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &PresenceConfig::default(),
+        );
+        let (unavailable_cost, unavailable_assertions) =
+            proof_cost_for_state(Some(&unavailable), &unavailable_state, true)
+                .expect("unavailable cost proof");
+        assert_eq!(unavailable_cost.status, PricingStatus::Unavailable);
+        assert!(unavailable_cost.label.is_none());
+        assert!(unavailable_cost.omitted);
+        assert!(unavailable_assertions.partial_or_unavailable_cost_omitted);
+    }
+
+    #[test]
+    fn live_proof_ack_validation_requires_set_and_clear_replies() {
+        let set_reply = json!({
+            "cmd": "SET_ACTIVITY",
+            "data": {"name": "ChatGPT App"},
+            "evt": null,
+            "nonce": "proof-1",
+        });
+        validate_activity_reply(&set_reply, Some("proof-1"), false)
+            .expect("accepted SET_ACTIVITY reply");
+
+        let clear_reply = json!({
+            "cmd": "SET_ACTIVITY",
+            "data": null,
+            "evt": null,
+            "nonce": "clear-1",
+        });
+        validate_activity_reply(&clear_reply, Some("clear-1"), true).expect("accepted clear reply");
+
+        let rejected = json!({
+            "cmd": "SET_ACTIVITY",
+            "data": null,
+            "evt": "ERROR",
+            "nonce": "proof-1",
+        });
+        assert!(validate_activity_reply(&rejected, Some("proof-1"), false).is_err());
+    }
+
+    #[test]
+    fn live_proof_redacts_exact_cost_when_privacy_hides_it() {
+        let exact = sample_session();
+        let mut config = PresenceConfig::default();
+        config.privacy.show_cost = false;
+        let (_, state) = presence_lines(
+            &exact,
+            Some(&exact.limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+
+        let (cost, assertions) =
+            proof_cost_for_state(Some(&exact), &state, false).expect("private exact cost proof");
+        assert_eq!(cost.status, PricingStatus::Exact);
+        assert!(cost.known_usd.is_none());
+        assert!(cost.label.is_none());
+        assert!(!cost.emitted);
+        assert!(cost.omitted);
+        assert!(assertions.exact_cost_when_available);
+        assert!(!state.contains("$1.23"));
+    }
+
+    #[test]
+    fn live_proof_accepts_exact_cost_in_the_details_zone() {
+        let exact = sample_session();
+        let mut config = PresenceConfig::default();
+        let cost = config
+            .display
+            .presence_layout
+            .fields
+            .iter_mut()
+            .find(|field| field.field == PresenceFieldId::Cost)
+            .expect("cost field");
+        cost.zone = codex_presence_core::PresenceZone::Details;
+        let (details, state) = presence_lines(
+            &exact,
+            Some(&exact.limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+        assert!(details.contains("$1.23"));
+        assert!(!state.contains("$1.23"));
+        proof_cost_for_state(Some(&exact), &format!("{details}\n{state}"), true)
+            .expect("details-zone exact cost proof");
+    }
+
+    #[test]
+    fn sparse_and_unknown_duration_windows_are_omitted_without_fabrication() {
+        let mut session = sample_session();
+        let limits = RateLimits::new(vec![
+            UsageWindow {
+                used_percent: 45.0,
+                remaining_percent: 55.0,
+                window_minutes: 0,
+                resets_at: None,
+            },
+            UsageWindow {
+                used_percent: 4.0,
+                remaining_percent: 96.0,
+                window_minutes: 10_080,
+                resets_at: None,
+            },
+        ]);
+        session.limits = limits.clone();
+        let mut config = PresenceConfig::default();
+        config.privacy.show_model = false;
+        config.privacy.show_cost = false;
+        config.privacy.show_tokens = false;
+        config.privacy.show_context = false;
+        let (_, state) = presence_lines(
+            &session,
+            Some(&limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+
+        assert!(
+            state.contains("7d 96% remaining"),
+            "weekly window disappeared: {state}"
+        );
+        assert!(
+            !state.contains("0m"),
+            "unknown window was synthesized: {state}"
+        );
+        assert!(
+            !state.contains("5h"),
+            "five-hour window was fabricated: {state}"
+        );
+    }
+
+    #[test]
+    fn spark_without_provider_reported_usage_has_no_quota_line() {
+        let mut session = sample_session();
+        session.model = Some("gpt-5.3-codex-spark".to_string());
+        session.limits = RateLimits::default();
+        session.rate_limit_envelopes.clear();
+        let mut config = PresenceConfig::default();
+        config.privacy.show_cost = false;
+        config.privacy.show_tokens = false;
+        config.privacy.show_context = false;
+        let (details, state) = presence_lines(
+            &session,
+            None,
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+
+        assert!(details.contains("project-alpha"));
+        assert!(
+            !state.contains("5h"),
+            "unreported Spark window leaked: {state}"
+        );
+        assert!(
+            !state.contains("7d"),
+            "unreported Spark window leaked: {state}"
+        );
     }
 
     #[test]

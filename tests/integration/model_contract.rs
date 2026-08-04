@@ -241,7 +241,7 @@ fn public_cost_presentation_preserves_completeness() {
     );
     assert_eq!(
         format_presentable_cost(Some(0.0065), PricingStatus::Partial),
-        Some(">=$0.0065".to_string())
+        None
     );
     assert_eq!(
         format_presentable_cost(None, PricingStatus::Unavailable),

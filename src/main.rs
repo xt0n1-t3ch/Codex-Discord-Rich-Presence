@@ -30,6 +30,10 @@ fn run() -> Result<u8> {
             Ok(0)
         }
         Some(Commands::Doctor) => app::doctor(&config),
+        Some(Commands::DiscordProof { output }) => {
+            app::run_discord_proof(&config, output.as_deref())?;
+            Ok(0)
+        }
         Some(Commands::Codex { args }) => {
             let acquired = process_guard::acquire_or_takeover_single_instance()?;
             if let Some(pid) = acquired.takeover_pid {

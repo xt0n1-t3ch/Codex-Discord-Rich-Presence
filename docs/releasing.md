@@ -6,10 +6,10 @@ administration token is never stored in Actions. Local implementation does not i
 
 ## Version surfaces
 
-`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and Windows SBOM name. For v1.8.0:
+`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and Windows SBOM name. For v1.9.0:
 
-- binary/workspace: 1.8.0;
-- `codex-presence-core`: 1.0.0;
+- binary/workspace: 1.9.0;
+- `codex-presence-core`: 2.0.0;
 - config schema: 13.
 
 The tag version, Cargo metadata, README release copy, changelog section, and release contract must agree before preflight succeeds.

@@ -393,23 +393,26 @@ fn render_active(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
 }
 
 fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
-    let rows = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(3),
-        Constraint::Min(2),
-    ])
-    .split(area);
-    let limits = data.effective_limits;
-    let primary = limits.and_then(|value| value.primary.as_ref());
-    let primary_label = primary
-        .map(|value| format_window_label(value.window_minutes))
-        .unwrap_or_else(|| "quota unavailable".to_string());
-    render_usage_gauge(frame, rows[0], &primary_label, primary);
-    let secondary = limits.and_then(|value| value.secondary.as_ref());
-    let secondary_label = secondary
-        .map(|value| format_window_label(value.window_minutes))
-        .unwrap_or_else(|| "additional quota unavailable".to_string());
-    render_usage_gauge(frame, rows[1], &secondary_label, secondary);
+    let windows = data
+        .effective_limits
+        .map(|limits| limits.windows.as_slice())
+        .unwrap_or_default();
+    let gauge_count = windows.len().max(1);
+    let mut constraints = vec![Constraint::Length(3); gauge_count];
+    constraints.push(Constraint::Min(2));
+    let rows = Layout::vertical(constraints).split(area);
+    if windows.is_empty() {
+        render_usage_gauge(frame, rows[0], "quota unavailable", None);
+    } else {
+        for (index, window) in windows.iter().enumerate() {
+            render_usage_gauge(
+                frame,
+                rows[index],
+                &format_window_label(window.window_minutes),
+                Some(window),
+            );
+        }
+    }
     let warning = data
         .spark_plan_warning
         .unwrap_or("Context: observed JSONL, then local model cache, then bundled catalog.");
@@ -442,7 +445,7 @@ fn render_usage(frame: &mut Frame<'_>, area: Rect, data: &RenderData<'_>) {
         Paragraph::new(line)
             .block(panel("Plan + context", Some(theme::BORDER)))
             .wrap(Wrap { trim: true }),
-        rows[2],
+        rows[gauge_count],
     );
 }
 
@@ -795,22 +798,19 @@ pub fn frame_signature(data: &RenderData<'_>) -> String {
         );
     }
     if let Some(limits) = data.effective_limits {
-        write_window_signature(&mut signature, "primary", limits.primary.as_ref());
-        write_window_signature(&mut signature, "secondary", limits.secondary.as_ref());
+        for (index, window) in limits.windows.iter().enumerate() {
+            write_window_signature(&mut signature, index, window);
+        }
     }
     signature
 }
 
-fn write_window_signature(signature: &mut String, name: &str, window: Option<&UsageWindow>) {
-    if let Some(window) = window {
-        let _ = write!(
-            signature,
-            "{}:{:.2}:{:.2}:{}|",
-            name, window.used_percent, window.remaining_percent, window.window_minutes
-        );
-    } else {
-        let _ = write!(signature, "{name}:none|");
-    }
+fn write_window_signature(signature: &mut String, index: usize, window: &UsageWindow) {
+    let _ = write!(
+        signature,
+        "{}:{:.2}:{:.2}:{}|",
+        index, window.used_percent, window.remaining_percent, window.window_minutes
+    );
 }
 
 fn select_layout_mode(width: u16, height: u16) -> UiLayoutMode {
@@ -1039,6 +1039,48 @@ mod tests {
         assert_eq!(limit_color(80.0), theme::TEXT);
         assert_eq!(limit_color(45.0), theme::MUTED);
         assert_eq!(limit_color(12.0), theme::TEXT);
+    }
+
+    #[test]
+    fn dynamic_usage_windows_render_and_affect_the_frame_signature() {
+        let first_limits = Box::leak(Box::new(RateLimits::new(vec![
+            UsageWindow {
+                used_percent: 10.0,
+                remaining_percent: 90.0,
+                window_minutes: 17,
+                resets_at: None,
+            },
+            UsageWindow {
+                used_percent: 20.0,
+                remaining_percent: 80.0,
+                window_minutes: 300,
+                resets_at: None,
+            },
+            UsageWindow {
+                used_percent: 30.0,
+                remaining_percent: 70.0,
+                window_minutes: 1440,
+                resets_at: None,
+            },
+        ])));
+        let mut first = sample_render_data(None);
+        first.effective_limits = Some(first_limits);
+        let rendered = render_test_text(132, 42, &first);
+        assert!(rendered.contains("17m"));
+        assert!(rendered.contains("5h"));
+        assert!(rendered.contains("1d"));
+
+        let second_limits = Box::leak(Box::new(RateLimits::new(vec![
+            first_limits.windows[0].clone(),
+            first_limits.windows[1].clone(),
+            UsageWindow {
+                used_percent: 31.0,
+                ..first_limits.windows[2].clone()
+            },
+        ])));
+        let mut second = sample_render_data(None);
+        second.effective_limits = Some(second_limits);
+        assert_ne!(frame_signature(&first), frame_signature(&second));
     }
 
     #[test]

@@ -240,7 +240,7 @@ pub fn format_presentable_cost(
     let formatted = crate::util::format_cost(total);
     match status {
         PricingStatus::Exact => Some(formatted),
-        PricingStatus::Partial => Some(format!(">={formatted}")),
+        PricingStatus::Partial => None,
         PricingStatus::Unavailable => None,
     }
 }
@@ -460,7 +460,7 @@ mod tests {
     fn partial_and_unavailable_costs_cannot_render_as_exact() {
         assert_eq!(
             format_presentable_cost(Some(0.0065), PricingStatus::Partial),
-            Some(">=$0.0065".to_string())
+            None
         );
         assert_eq!(
             format_presentable_cost(None, PricingStatus::Unavailable),
