@@ -252,6 +252,9 @@ pub fn run_discord_proof(config: &PresenceConfig, output: Option<&Path>) -> Resu
         config,
         runtime_surface_hint(),
     )?;
+    let encoded = serde_json::to_string_pretty(&artifact)
+        .context("failed to encode Discord proof artifact")?;
+    println!("{encoded}");
     if let Some(output) = output {
         write_json_pretty_atomic(output, &artifact).with_context(|| {
             format!(
@@ -260,11 +263,6 @@ pub fn run_discord_proof(config: &PresenceConfig, output: Option<&Path>) -> Resu
             )
         })?;
     }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&artifact)
-            .context("failed to encode Discord proof artifact")?
-    );
     Ok(())
 }
 

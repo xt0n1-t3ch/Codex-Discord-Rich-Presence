@@ -259,8 +259,19 @@ pub struct RateLimitResetCredit {
 #[serde(rename_all = "camelCase")]
 pub struct AccountRateLimitsRead {
     pub envelopes: Vec<RateLimitEnvelope>,
+    pub individual_limits: Vec<IndividualSpendLimit>,
     pub rate_limit_reset_credits: Option<RateLimitResetCreditsSummary>,
     pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IndividualSpendLimit {
+    pub limit_id: String,
+    pub limit: Option<String>,
+    pub used: Option<String>,
+    pub remaining_percent: f64,
+    pub resets_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -498,11 +509,20 @@ pub fn parse_account_rate_limits_response(
             .collect(),
         _ => result.rate_limits.into_iter().collect(),
     };
-    let envelopes = snapshots
-        .into_iter()
-        .flat_map(|snapshot| wire_envelopes(snapshot, observed_at))
-        .collect::<Vec<_>>();
-    if envelopes.is_empty() && result.rate_limit_reset_credits.is_none() {
+    let mut envelopes = Vec::new();
+    let mut individual_limits = Vec::new();
+    for mut snapshot in snapshots {
+        if let Some(individual) = snapshot.individual_limit.take()
+            && let Some(limit) = wire_individual_limit(snapshot.limit_id.as_deref(), individual)
+        {
+            individual_limits.push(limit);
+        }
+        envelopes.extend(wire_envelopes(snapshot, observed_at));
+    }
+    if envelopes.is_empty()
+        && individual_limits.is_empty()
+        && result.rate_limit_reset_credits.is_none()
+    {
         return Err(
             "Codex account quota response contains no quota windows or credits".to_string(),
         );
@@ -510,6 +530,7 @@ pub fn parse_account_rate_limits_response(
 
     Ok(AccountRateLimitsRead {
         envelopes,
+        individual_limits,
         rate_limit_reset_credits: result.rate_limit_reset_credits,
         observed_at,
     })
@@ -537,41 +558,30 @@ fn wire_envelopes(
         });
     }
 
-    if let Some(individual) = snapshot.individual_limit
-        && individual.remaining_percent.is_some_and(f64::is_finite)
-    {
-        let remaining = individual.remaining_percent.unwrap().clamp(0.0, 100.0);
-        let limit_name = match (individual.used.as_deref(), individual.limit.as_deref()) {
-            (Some(used), Some(limit)) => {
-                Some(format!("Individual spend limit ({used} of {limit})"))
-            }
-            _ => Some("Individual spend limit".to_string()),
-        };
-        envelopes.push(RateLimitEnvelope {
-            scope: RateLimitScope::IndividualAccount,
-            limit_id: Some(format!(
-                "{}:individual",
-                base_limit_id.as_deref().unwrap_or("account")
-            )),
-            limit_name,
-            plan_type: snapshot.plan_type,
-            observed_at: Some(observed_at),
-            limits: RateLimits::new(vec![UsageWindow {
-                used_percent: 100.0 - remaining,
-                remaining_percent: remaining,
-                window_minutes: 0,
-                resets_at: individual
-                    .resets_at
-                    .and_then(|timestamp| Utc.timestamp_opt(timestamp, 0).single()),
-            }]),
-            credits: None,
-        });
-    }
-
     envelopes
 }
 
+fn wire_individual_limit(
+    base_limit_id: Option<&str>,
+    individual: WireSpendControlLimit,
+) -> Option<IndividualSpendLimit> {
+    let remaining_percent = individual.remaining_percent?.clamp(0.0, 100.0);
+    if !remaining_percent.is_finite() {
+        return None;
+    }
+    Some(IndividualSpendLimit {
+        limit_id: format!("{}:individual", base_limit_id.unwrap_or("account")),
+        limit: individual.limit,
+        used: individual.used,
+        remaining_percent,
+        resets_at: individual
+            .resets_at
+            .and_then(|timestamp| Utc.timestamp_opt(timestamp, 0).single()),
+    })
+}
+
 fn wire_window(window: WireUsageWindow) -> Option<UsageWindow> {
+    let window_minutes = window.window_duration_mins.filter(|minutes| *minutes > 0)?;
     let used_percent = window
         .used_percent
         .or_else(|| window.remaining_percent.map(|remaining| 100.0 - remaining))?;
@@ -582,7 +592,7 @@ fn wire_window(window: WireUsageWindow) -> Option<UsageWindow> {
     Some(UsageWindow {
         used_percent: used_percent.clamp(0.0, 100.0),
         remaining_percent: remaining_percent.clamp(0.0, 100.0),
-        window_minutes: window.window_duration_mins.unwrap_or(0),
+        window_minutes,
         resets_at: window
             .resets_at
             .and_then(|timestamp| Utc.timestamp_opt(timestamp, 0).single()),
@@ -816,18 +826,20 @@ pub fn select_effective_limits_by_source(
         return None;
     }
 
-    let has_global_limits = candidates.iter().any(|candidate| {
-        candidate.envelope.scope == RateLimitScope::GlobalAccount
-            && limits_present(&candidate.envelope.limits)
-    });
-    let limits_pool = candidates
+    let limit_candidates = candidates
+        .iter()
+        .filter(|candidate| limits_present(&candidate.envelope.limits))
+        .collect::<Vec<_>>();
+    let has_global_limits = limit_candidates
+        .iter()
+        .any(|candidate| candidate.envelope.scope == RateLimitScope::GlobalAccount);
+    let limits_pool = limit_candidates
         .iter()
         .filter(|candidate| {
             !has_global_limits || candidate.envelope.scope == RateLimitScope::GlobalAccount
         })
+        .copied()
         .collect::<Vec<_>>();
-    let selected = select_unique_ranked(&limits_pool)?;
-
     let has_global_credits = candidates.iter().any(|candidate| {
         candidate.envelope.scope == RateLimitScope::GlobalAccount
             && candidate.envelope.credits.is_some()
@@ -840,14 +852,24 @@ pub fn select_effective_limits_by_source(
         })
         .map(|candidate| &candidate.envelope)
         .collect::<Vec<_>>();
-    let credits = select_unique_ranked_ref(&credits).and_then(|envelope| envelope.credits.clone());
+    let credit_envelope = select_unique_ranked_ref(&credits);
+    let credits = credit_envelope.and_then(|envelope| envelope.credits.clone());
+    let selected = select_unique_ranked(&limits_pool);
+    if !limits_pool.is_empty() && selected.is_none() {
+        return None;
+    }
+    let basis = selected
+        .map(|candidate| &candidate.envelope)
+        .or(credit_envelope)?;
 
     Some(EffectiveLimitSelection {
         source_session_id: source.stream_id.clone(),
-        source_limit_id: selected.envelope.limit_id.clone(),
-        source_scope: selected.envelope.scope,
-        observed_at: selected.envelope.observed_at,
-        limits: selected.envelope.limits.clone(),
+        source_limit_id: basis.limit_id.clone(),
+        source_scope: basis.scope,
+        observed_at: basis.observed_at,
+        limits: selected
+            .map(|candidate| candidate.envelope.limits.clone())
+            .unwrap_or_default(),
         credits,
     })
 }
@@ -1366,6 +1388,12 @@ mod tests {
         let individual = RateLimitEnvelope {
             scope: RateLimitScope::IndividualAccount,
             observed_at: Utc.timestamp_opt(200, 0).single(),
+            limits: RateLimits::new(vec![UsageWindow {
+                used_percent: 10.0,
+                remaining_percent: 90.0,
+                window_minutes: 300,
+                resets_at: None,
+            }]),
             credits: Some(CreditBalance {
                 balance: Some("10".to_string()),
                 has_credits: true,
@@ -1570,6 +1598,35 @@ mod tests {
             resets.credits.as_ref().unwrap()[0].description.as_deref(),
             Some("Weekly and session windows")
         );
+    }
+
+    #[test]
+    fn account_windows_require_duration_and_individual_spend_limits_round_trip_separately() {
+        let observed_at = Utc.timestamp_opt(1_785_000_000, 0).single().unwrap();
+        let response = serde_json::json!({
+            "result": {
+                "rateLimits": {
+                    "limitId": "codex",
+                    "primary": {"usedPercent": 20.0},
+                    "individualLimit": {
+                        "limit": "100",
+                        "used": "25",
+                        "remainingPercent": 75.0,
+                        "resetsAt": 1785369546
+                    }
+                }
+            }
+        });
+
+        let parsed = parse_account_rate_limits_response(&response.to_string(), observed_at)
+            .expect("individual spend-control response");
+        assert!(parsed.envelopes.is_empty());
+        assert_eq!(parsed.individual_limits.len(), 1);
+        assert_eq!(parsed.individual_limits[0].remaining_percent, 75.0);
+        let encoded = serde_json::to_value(&parsed).expect("serialize account response");
+        let round_trip: AccountRateLimitsRead =
+            serde_json::from_value(encoded).expect("deserialize account response");
+        assert_eq!(round_trip, parsed);
     }
 
     #[test]

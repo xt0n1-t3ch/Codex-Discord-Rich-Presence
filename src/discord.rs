@@ -71,10 +71,6 @@ pub struct PresencePresentation {
     pub small_text: Option<String>,
 }
 
-/// Sanitized wire proof emitted by the opt-in `discord-proof` command.
-///
-/// The activity and replies contain only the public Discord IPC DTOs. No
-/// credentials, cookies, or local session paths are included.
 #[derive(Debug, Clone, Serialize)]
 pub struct DiscordProofArtifact {
     pub schema_version: u32,
@@ -326,9 +322,6 @@ impl DiscordPresence {
         Ok(())
     }
 
-    /// Perform one explicit Discord IPC publish/ack/clear cycle and return the
-    /// exact public DTOs observed on the wire. This is intentionally separate
-    /// from the polling path so a diagnostic run never changes daemon state.
     pub fn live_proof(
         &mut self,
         active_session: Option<&CodexSessionSnapshot>,
@@ -459,8 +452,9 @@ impl DiscordPresence {
             };
 
             let cost_is_public = !config.privacy.enabled && config.privacy.show_cost;
+            let public_text = format!("{}\n{}", presentation.details, presentation.state);
             let (cost, mut assertions) =
-                proof_cost_for_state(active_session, &presentation.state, cost_is_public)?;
+                proof_cost_for_state(active_session, &public_text, cost_is_public)?;
             assertions.no_ge_comparator =
                 assertions.no_ge_comparator && !activity_json.contains(">=");
             if !assertions.no_ge_comparator {
@@ -1113,8 +1107,6 @@ fn limits_state_part(limits: &RateLimits) -> Option<String> {
     let parts = limits
         .windows
         .iter()
-        // A zero duration is the core wire sentinel for an unknown provider
-        // window. It must not become a fabricated `0m` quota label.
         .filter(|window| {
             window.window_minutes > 0
                 && window.remaining_percent.is_finite()
@@ -1880,6 +1872,32 @@ mod tests {
         assert!(cost.omitted);
         assert!(assertions.exact_cost_when_available);
         assert!(!state.contains("$1.23"));
+    }
+
+    #[test]
+    fn live_proof_accepts_exact_cost_in_the_details_zone() {
+        let exact = sample_session();
+        let mut config = PresenceConfig::default();
+        let cost = config
+            .display
+            .presence_layout
+            .fields
+            .iter_mut()
+            .find(|field| field.field == PresenceFieldId::Cost)
+            .expect("cost field");
+        cost.zone = codex_presence_core::PresenceZone::Details;
+        let (details, state) = presence_lines(
+            &exact,
+            Some(&exact.limits),
+            None,
+            &resolved_plan_pro(),
+            &resolved_service_tier(false),
+            &config,
+        );
+        assert!(details.contains("$1.23"));
+        assert!(!state.contains("$1.23"));
+        proof_cost_for_state(Some(&exact), &format!("{details}\n{state}"), true)
+            .expect("details-zone exact cost proof");
     }
 
     #[test]

@@ -240,8 +240,6 @@ pub fn format_presentable_cost(
     let formatted = crate::util::format_cost(total);
     match status {
         PricingStatus::Exact => Some(formatted),
-        // A partial subtotal is diagnostic data, not a billable total. Keep
-        // it out of public presence so Discord never implies false precision.
         PricingStatus::Partial => None,
         PricingStatus::Unavailable => None,
     }
