@@ -1,8 +1,12 @@
 # Release Procedure
 
-Releases are tag-only, immutable, and bound to a protected `main` commit. The
-operator approval step uses the local authenticated GitHub CLI so an
-administration token is never stored in Actions. Local implementation does not imply promotion.
+Releases are immutable and bound to a protected `main` commit. Quality checks
+run **locally**, not in GitHub Actions: there is no per-push / per-PR CI, and the
+Release workflow is **manual-only** (`workflow_dispatch`) — pushing a tag does
+not trigger it. Run the local gate (`scripts/verify.ps1`) and build locally, or
+dispatch the workflow by hand. The operator approval step uses the local
+authenticated GitHub CLI so an administration token is never stored in Actions.
+Local implementation does not imply promotion.
 
 ## Version surfaces
 
@@ -17,7 +21,9 @@ The tag version, Cargo metadata, README release copy, changelog section, and rel
 ## Required proof
 
 1. Run all five PowerShell release-contract suites.
-2. Run locked fmt, clippy, tests, release build, and `cargo audit --deny warnings`.
+2. Run the local gate `scripts/verify.ps1` (fmt check, clippy `-D warnings`,
+   `cargo test --workspace`), plus the release build and
+   `cargo audit --deny warnings`.
 3. Prove schema 12 to 13 migration and parser fixtures independent of the user profile.
 4. On Windows, exercise `status`, `doctor`, TUI persistence, Fast, semantic quota windows, Credits, and real Discord publication.
 5. Keep Linux/macOS compile and test gates green.
@@ -41,9 +47,12 @@ The tag version, Cargo metadata, README release copy, changelog section, and rel
    git push origin vX.Y.Z
    ```
 
-4. Watch the Release workflow. It rechecks tag ancestry, the approved SHA,
-   the latest attempt of every protected check, version ordering, artifacts,
-   the Windows SPDX SBOM, and SHA-256 digests before it publishes the draft once.
+4. Publish the release. The Release workflow is manual-only now, so pushing the
+   tag does not start it — either build and publish locally
+   (`scripts/build-release.ps1` + `gh release create vX.Y.Z <assets>`), or
+   dispatch the workflow by hand from the Actions tab for the tagged commit. On
+   dispatch it rechecks tag ancestry, the approved SHA, version ordering,
+   artifacts, the Windows SPDX SBOM, and SHA-256 digests before publishing once.
 5. Verify the public release and then clear the one-use approval:
 
    ```powershell
