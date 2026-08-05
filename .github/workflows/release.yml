@@ -1,9 +1,10 @@
 name: Release
 
+# Releases are built and published locally (see scripts/build-release + gh) to
+# keep GitHub Actions minutes for essentials only. Kept as a manual fallback;
+# it never runs automatically on a tag push.
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_dispatch:
 
 permissions:
   contents: read
