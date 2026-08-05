@@ -36,10 +36,19 @@ This repo ships a Rust Discord Rich Presence runtime for Codex. Work from source
 | Test integration regressions | `cargo test --test integration` |
 | Format check | `cargo fmt --check` |
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` |
+| Local verify (all gates) | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1` |
 | Release compile | `cargo build --release` |
 | Windows artifact | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1` |
 
 `Taskfile.yml` mirrors the core commands for machines with Task installed.
+
+## CI / local verification
+
+Checks run **locally**, not in GitHub Actions, to keep Actions minutes for
+essentials. There is no per-push / per-PR CI: `.github/workflows/` keeps only
+`release.yml`, which is **manual-only** (`workflow_dispatch`). Run
+`scripts/verify.ps1` (fmt check + clippy `-D warnings` + `cargo test`) before
+pushing; see [`docs/releasing.md`](docs/releasing.md).
 
 ## Coding Rules
 
