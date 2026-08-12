@@ -4,6 +4,7 @@ param(
   [Parameter(Mandatory)] [string]$OutputPath,
   [Parameter(Mandatory)] [string]$PackageName,
   [Parameter(Mandatory)] [string]$PackageVersion,
+  [ValidateSet("x64", "arm64")] [string]$Architecture = "x64",
   [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
@@ -65,8 +66,8 @@ $document = [ordered]@{
   spdxVersion = "SPDX-2.3"
   dataLicense = "CC0-1.0"
   SPDXID = "SPDXRef-DOCUMENT"
-  name = "$PackageName-$PackageVersion-windows-x64"
-  documentNamespace = "https://github.com/xt0n1-t3ch/$PackageName/sbom/$PackageVersion/$artifactHash"
+  name = "$PackageName-$PackageVersion-windows-$Architecture"
+  documentNamespace = "https://github.com/xt0n1-t3ch/$PackageName/sbom/$PackageVersion/windows-$Architecture/$artifactHash"
   creationInfo = [ordered]@{
     created = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
     creators = @("Tool: Pulse release-contract SPDX generator/1")

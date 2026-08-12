@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Schema 13 field layout for project, branch, model, activity, tokens, cost, quotas, credits, context, and systems, including visibility, zone, order, and compact/descriptive presentation.
 - Credits support with explicit zero, unlimited, absent, and malformed input behavior; Credits is enabled in Standard and Full presets and remains individually private.
 - Operational TUI usage and privacy surfaces for semantic quota windows, scoped limits, Credits, and `⚡ Fast` presentation.
+- Native Daybreak Blue and Cyber Red model identities, aliases, six reasoning efforts, runtime-first Blue context, and published Red context/pricing without invented Fast or credit rates.
+- Windows ARM64 release packaging with an architecture-qualified executable, SPDX SBOM, PE `0xAA64` validation, and a native `windows-11-arm` smoke gate.
 
 ### Changed
 
@@ -22,6 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Service-tier authority is active-session evidence first, `config.toml` fallback second, legacy global state third, then explicit unknown/standard behavior.
 - Rich Presence composition preserves all observed global/model quota envelopes, omits unavailable values, and enforces Discord's 128-character line boundary deterministically.
 - Repository governance now uses YAML issue forms, Conventional Commits, runtime-proof PRs, synchronized SemVer/core/schema release gates, Dependabot, and a Windows SPDX SBOM contract.
+- Windows release assembly now publishes ten assets: x64 and ARM64 executables/SBOMs, Linux/macOS binaries, two logos, and one checksum manifest.
 
 ### Fixed
 
@@ -33,14 +36,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Security
 
-- Release artifacts retain immutable tag/SHA approval and checksum verification; the Windows binary additionally receives a validated SPDX 2.3 SBOM.
+- Release artifacts retain immutable tag/SHA approval and checksum verification; both Windows binaries receive architecture-specific validated SPDX 2.3 SBOMs and PE-machine checks.
 
 ### Validated
 
 - Windows release-contract suites, locked workspace fmt/clippy/tests/release build, and RustSec audit.
 - Schema migration, adaptive quota, Credits, service-tier, privacy, and provider-lane regression coverage.
 - Real Discord IPC SET/CLEAR proof with exact nonce correlation, sanitized DTO output, partial-cost omission, and activity cleanup.
-- Linux, macOS, and Windows compile/test gates remain enforced by the protected CI and tag-only release workflow.
+- Linux, macOS, Windows x64, and native Windows ARM64 build gates remain enforced by the manual-only release workflow after local verification.
 
 ## [1.7.6] - 2026-07-10
 

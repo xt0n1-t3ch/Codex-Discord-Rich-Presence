@@ -13,15 +13,16 @@
 | Release metadata | `pwsh -NoProfile -File tests/release_contract.tests.ps1` | Covers SemVer, Cargo parity, changelog, prerelease, build metadata, and generated notes |
 | Release approval | `pwsh -NoProfile -File tests/release_approval.tests.ps1` | Covers the local immutable-release check and exact-SHA approval contract without storing an admin token in Actions |
 | Release target | `pwsh -NoProfile -File tests/release_target.tests.ps1` | Covers annotated tag ancestry, exact-SHA approval, latest protected checks, and latest-release ordering |
-| Release assets | `pwsh -NoProfile -File tests/release_assets.tests.ps1` | Covers portable filenames, required payloads, and SHA-256 manifest generation |
+| Release assets | `pwsh -NoProfile -File tests/release_assets.tests.ps1` | Covers ten portable release assets, required x64/ARM64 payloads, and SHA-256 manifest generation |
+| Windows PE | `pwsh -NoProfile -File tests/release_pe.tests.ps1` | Requires x64 machine `0x8664`, ARM64 machine `0xAA64`, and rejects mismatches |
 | Release workflow | `pwsh -NoProfile -File tests/release_workflow.tests.ps1` | Covers Action pins, least privilege, job dependencies, toolchain, lockfile enforcement, and the pinned RustSec gate |
-| Windows artifact | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1` | Produces `releases/windows/codex-discord-rich-presence.exe` |
+| Windows artifacts | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Architecture all` | Produces x64 and ARM64 executables, SBOMs, logos, and checksums |
 
 ## Regression Coverage
 
 | Area | Module/Test seam |
 |:---|:---|
-| Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, GPT-5.6 capabilities, usable/raw context provenance, prices, credits, and cache policy |
+| Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, Daybreak/Cyber and GPT-5.6 capabilities, runtime/catalog context provenance, prices, credits, and cache policy |
 | Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, omit partial public costs, fail closed for unknown models, and clamp cache accounting |
 | Fast mode | `src/session.rs` parses per-session service tier; `tests/integration/model_display.rs` validates Codex App labels and capability gating |
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |

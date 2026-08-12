@@ -591,4 +591,63 @@ mod tests {
             .expect("bundled fallback");
         assert_eq!(context.source, ContextSource::BundledCatalog);
     }
+
+    #[test]
+    fn daybreak_models_resolve_to_stable_cyber_labels_without_invented_capabilities() {
+        let blue = resolve_model("gpt-daybreak-blue-latest").expect("Daybreak Blue model");
+        assert_eq!(blue.canonical_id(), "gpt-daybreak-blue-latest");
+        assert_eq!(blue.display_name(), "5.6-Cyber-Blue");
+        assert!(blue.context().is_none());
+        assert!(blue.api_rates().is_none());
+        assert!(blue.credit_rates().is_none());
+        assert!(!blue.supports_fast());
+
+        let red = resolve_model("gpt-daybreak-red-latest").expect("Daybreak Red alias");
+        assert_eq!(red.canonical_id(), "gpt-5.6-cyber");
+        assert_eq!(red.display_name(), "5.6-Cyber-Red");
+        assert!(!red.supports_fast());
+
+        for effort in [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+            ReasoningEffort::Ultra,
+        ] {
+            assert!(blue.supports_effort(effort));
+            assert!(red.supports_effort(effort));
+        }
+
+        assert_eq!(
+            format_model_display(
+                "gpt-daybreak-blue-latest",
+                Some(ReasoningEffort::High),
+                true,
+            ),
+            "GPT-5.6-Cyber-Blue · High"
+        );
+        assert_eq!(
+            format_model_display("gpt-5.6-cyber-red", Some(ReasoningEffort::Ultra), true),
+            "GPT-5.6-Cyber-Red · Ultra"
+        );
+    }
+
+    #[test]
+    fn cyber_red_catalog_matches_the_published_api_contract() {
+        let red = resolve_model("gpt-5.6-cyber").expect("GPT-5.6 Cyber model");
+        let context = red.context().expect("published Cyber context");
+        assert_eq!(context.raw_tokens, 400_000);
+        assert_eq!(context.effective_percent, 100);
+        assert_eq!(context.api_tokens, Some(400_000));
+        assert_eq!(context.long_context_input_threshold, Some(272_000));
+        assert_eq!(context.max_output_tokens, Some(128_000));
+
+        let rates = red.api_rates().expect("published Cyber pricing");
+        assert_eq!(rates.input_per_million, 12.5);
+        assert_eq!(rates.cache_write_per_million, Some(15.625));
+        assert_eq!(rates.cached_input_per_million, 1.25);
+        assert_eq!(rates.output_per_million, 75.0);
+        assert!(red.credit_rates().is_none());
+    }
 }

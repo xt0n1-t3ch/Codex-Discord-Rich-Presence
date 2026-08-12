@@ -57,14 +57,35 @@ function Add-FixtureFile {
     [System.IO.File]::WriteAllText($path, $Content, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Add-PeFixture {
+    param(
+        [Parameter(Mandatory)] [string] $Root,
+        [Parameter(Mandatory)] [string] $RelativePath,
+        [Parameter(Mandatory)] [int] $Machine
+    )
+    $path = Join-Path $Root $RelativePath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+    $bytes = [byte[]]::new(128)
+    $bytes[0] = 0x4D
+    $bytes[1] = 0x5A
+    [BitConverter]::GetBytes([uint32]64).CopyTo($bytes, 0x3C)
+    $bytes[64] = 0x50
+    $bytes[65] = 0x45
+    [BitConverter]::GetBytes([uint16]$Machine).CopyTo($bytes, 68)
+    [System.IO.File]::WriteAllBytes($path, $bytes)
+}
+
 try {
     $localBuild = Get-Content -Raw -LiteralPath $localBuildScript
-    Assert-True ($localBuild -match 'cargoCmd build --locked --workspace --release --all-features') "Local release build must use the locked full workspace gate."
+    Assert-True ($localBuild -match 'cargoCmd build --locked --workspace --release --all-features --target') "Local release build must use a locked target-specific full workspace gate."
+    Assert-True ($localBuild -match 'aarch64-pc-windows-msvc') "Local release build must support the Windows ARM64 Rust target."
+    Assert-True ($localBuild -match 'codex-discord-rich-presence-windows-arm64\.exe') "Local release build must package the ARM64 executable."
     Assert-True ($localBuild -match 'codex-app-logo\.png') "Local release build must package the portable Codex App logo."
     Assert-True ($localBuild -match 'chatgpt-app-logo\.jpg') "Local release build must package the portable ChatGPT App logo."
     Assert-True ($localBuild -match 'SHA256SUMS\.txt') "Local release build must emit a checksum manifest."
     Assert-True ($localBuild -match 'new-windows-sbom\.ps1') "Local release build must generate a Windows SPDX SBOM."
     Assert-True ($localBuild -match 'check-windows-sbom\.ps1') "Local release build must validate the Windows SPDX SBOM."
+    Assert-True ($localBuild -match 'check-windows-pe\.ps1') "Local release build must validate each Windows PE machine."
 
     New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 
@@ -78,8 +99,10 @@ try {
 
     $artifactRoot = Join-Path $temporaryRoot "downloaded"
     $outputDirectory = Join-Path $temporaryRoot "release-assets"
-    Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/codex-discord-rich-presence-windows-x64.exe" -Content "windows-binary"
+    Add-PeFixture -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/codex-discord-rich-presence-windows-x64.exe" -Machine 0x8664
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-pc-windows-msvc/codex-discord-rich-presence-windows-x64.spdx.json" -Content '{"spdxVersion":"SPDX-2.3"}'
+    Add-PeFixture -Root $artifactRoot -RelativePath "release-aarch64-pc-windows-msvc/codex-discord-rich-presence-windows-arm64.exe" -Machine 0xAA64
+    Add-FixtureFile -Root $artifactRoot -RelativePath "release-aarch64-pc-windows-msvc/codex-discord-rich-presence-windows-arm64.spdx.json" -Content '{"spdxVersion":"SPDX-2.3"}'
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-unknown-linux-gnu/codex-discord-rich-presence-linux-x64" -Content "linux-binary"
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-x86_64-apple-darwin/codex-discord-rich-presence-macos-x64" -Content "macos-x64-binary"
     Add-FixtureFile -Root $artifactRoot -RelativePath "release-aarch64-apple-darwin/codex-discord-rich-presence-macos-arm64" -Content "macos-arm64-binary"
@@ -92,6 +115,8 @@ try {
     $expectedNames = @(
         "codex-discord-rich-presence-windows-x64.exe"
         "codex-discord-rich-presence-windows-x64.spdx.json"
+        "codex-discord-rich-presence-windows-arm64.exe"
+        "codex-discord-rich-presence-windows-arm64.spdx.json"
         "codex-discord-rich-presence-linux-x64"
         "codex-discord-rich-presence-macos-x64"
         "codex-discord-rich-presence-macos-arm64"
@@ -106,7 +131,7 @@ try {
     }
 
     $manifestLines = @(Get-Content -LiteralPath (Join-Path $outputDirectory "SHA256SUMS.txt"))
-    Assert-Equal 7 $manifestLines.Count "Checksum manifest must cover each published payload."
+    Assert-Equal 9 $manifestLines.Count "Checksum manifest must cover each published payload."
     foreach ($name in $expectedNames | Where-Object { $_ -ne "SHA256SUMS.txt" }) {
         $path = Join-Path $outputDirectory $name
         $expectedHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()

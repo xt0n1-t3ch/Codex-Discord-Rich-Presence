@@ -1676,6 +1676,40 @@ mod tests {
     }
 
     #[test]
+    fn daybreak_payloads_use_cyber_labels_without_fast() {
+        for (model, effort, expected) in [
+            (
+                "gpt-daybreak-blue-latest",
+                crate::session::ReasoningEffort::High,
+                "GPT-5.6-Cyber-Blue · High",
+            ),
+            (
+                "gpt-daybreak-red-latest",
+                crate::session::ReasoningEffort::Ultra,
+                "GPT-5.6-Cyber-Red · Ultra",
+            ),
+        ] {
+            let mut session = sample_session();
+            session.model = Some(model.to_string());
+            session.reasoning_effort = Some(effort);
+            session.speed = crate::model::SessionSpeed::explicit(
+                SpeedMode::Fast,
+                crate::model::SpeedSource::ThreadSettings,
+            );
+            let (_, state) = presence_lines(
+                &session,
+                Some(&session.limits),
+                None,
+                &resolved_plan_pro(),
+                &resolved_service_tier(true),
+                &PresenceConfig::default(),
+            );
+            assert!(state.contains(expected), "missing {expected} in {state}");
+            assert!(!state.contains("⚡ Fast"), "invented Fast in {state}");
+        }
+    }
+
+    #[test]
     fn service_tier_fallback_applies_only_when_session_speed_is_unknown() {
         let mut session = sample_session();
         session.model = Some("gpt-5.6-sol".to_string());

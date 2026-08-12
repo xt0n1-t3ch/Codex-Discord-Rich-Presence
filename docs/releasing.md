@@ -10,7 +10,7 @@ Local implementation does not imply promotion.
 
 ## Version surfaces
 
-`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and Windows SBOM name. For v1.9.0:
+`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and both Windows target/artifact/SBOM/PE-machine contracts. For v1.9.0:
 
 - binary/workspace: 1.9.0;
 - `codex-presence-core`: 2.0.0;
@@ -20,14 +20,16 @@ The tag version, Cargo metadata, README release copy, changelog section, and rel
 
 ## Required proof
 
-1. Run all five PowerShell release-contract suites.
+1. Run all six PowerShell release-contract suites, including `release_pe.tests.ps1`.
 2. Run the local gate `scripts/verify.ps1` (fmt check, clippy `-D warnings`,
    `cargo test --workspace`), plus the release build and
    `cargo audit --deny warnings`.
 3. Prove schema 12 to 13 migration and parser fixtures independent of the user profile.
 4. On Windows, exercise `status`, `doctor`, TUI persistence, Fast, semantic quota windows, Credits, and real Discord publication.
 5. Keep Linux/macOS compile and test gates green.
-6. Generate `codex-discord-rich-presence-windows-x64.spdx.json`, validate its binary SHA-256, and include it in `SHA256SUMS.txt`.
+6. Install Rust targets `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc` plus the MSVC ARM64 toolset, then run `scripts/build-release.ps1 -Architecture all`.
+7. Validate PE machines `0x8664` and `0xAA64`, generate architecture-specific SPDX SBOMs, and include all nine payloads in `SHA256SUMS.txt` (ten published assets including the manifest).
+8. Before closing Windows ARM64 support, run `--version` and `doctor` on the native `windows-11-arm` release job. A local x64-hosted cross-build does not substitute for that proof.
 
 ## Publish
 
@@ -52,7 +54,7 @@ The tag version, Cargo metadata, README release copy, changelog section, and rel
    (`scripts/build-release.ps1` + `gh release create vX.Y.Z <assets>`), or
    dispatch the workflow by hand from the Actions tab for the tagged commit. On
    dispatch it rechecks tag ancestry, the approved SHA, version ordering,
-   artifacts, the Windows SPDX SBOM, and SHA-256 digests before publishing once.
+   artifacts, both Windows SPDX SBOMs and PE machines, and SHA-256 digests before publishing once.
 5. Verify the public release and then clear the one-use approval:
 
    ```powershell
