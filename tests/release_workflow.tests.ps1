@@ -129,6 +129,8 @@ foreach ($targetArgument in @(
     Assert-Matches $targetArgument $publish "Release target wiring is missing '$targetArgument'."
 }
 Assert-Matches 'filter=latest' $targetScript "Protected checks must ignore stale successful attempts."
+Assert-Matches 'Release preflight' $targetScript "Release target validation must require the validated preflight job."
+Assert-Matches 'Build aarch64-pc-windows-msvc' $targetScript "Release target validation must require the native Windows ARM64 build."
 Assert-Matches 'fail_on_unmatched_files: true' $publish "Release creation must reject an empty file glob."
 Assert-Matches 'overwrite_files: false' $publish "Release creation must not replace existing assets."
 Assert-Matches 'SHA256SUMS\.txt' $publish "Publish must prove the checksum manifest is present."
