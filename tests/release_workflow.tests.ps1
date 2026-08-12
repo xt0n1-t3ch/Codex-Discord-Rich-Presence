@@ -109,6 +109,7 @@ foreach ($requiredCommand in @(
 )) {
     Assert-Matches ([regex]::Escape($requiredCommand)) $preflight "Preflight is missing '$requiredCommand'."
 }
+Assert-Matches '\$global:LASTEXITCODE = 0' $preflight "Preflight must clear expected native-command probe failures after the contract suites."
 
 Assert-Matches '(?m)^    needs: preflight\r?$' $build "Matrix builds must depend on preflight."
 Assert-Matches '(?m)^    needs: \[preflight, build\]\r?$' $publish "Publish must depend on preflight and every matrix build."
