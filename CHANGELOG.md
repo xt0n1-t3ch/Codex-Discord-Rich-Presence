@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - 2026-08-12
+
+### Added
+
+- Native Daybreak Blue and Cyber Red model identities, canonical aliases, six reasoning efforts, runtime-first Blue context, and published Red context/pricing without invented Fast or credit rates.
+- Windows ARM64 packaging with `codex-discord-rich-presence-windows-arm64.exe`, an architecture-specific SPDX SBOM, PE `0xAA64` validation, and native `windows-11-arm` release smoke.
+
+### Changed
+
+- Release assembly now publishes exactly ten assets: Windows x64 and ARM64 executables/SBOMs, Linux and macOS binaries, two logos, and one checksum manifest.
+- Locked dependencies now resolve `anyhow` 1.0.104, `chrono` 0.4.45, and `thiserror` 2.0.19; transitive `lru` is updated to 0.18.2 to clear RUSTSEC-2026-0253.
+
+### Security
+
+- Both Windows binaries receive architecture-specific SPDX 2.3 SBOMs, PE-machine validation, and SHA-256 verification before an immutable release is finalized.
+
+### Validated
+
+- Model contract and display coverage for Daybreak Blue/Red canonical IDs, aliases, efforts, context precedence, and pricing completeness.
+- Local release-contract, formatting, lint, workspace test, release-build, Windows PE, SBOM, and checksum gates.
+- Native Windows x64 and ARM64 `--version` and `doctor` smoke remain mandatory in the manual release workflow.
+
 ## [1.9.0] - 2026-08-04
 
 ### Added
@@ -14,8 +36,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Schema 13 field layout for project, branch, model, activity, tokens, cost, quotas, credits, context, and systems, including visibility, zone, order, and compact/descriptive presentation.
 - Credits support with explicit zero, unlimited, absent, and malformed input behavior; Credits is enabled in Standard and Full presets and remains individually private.
 - Operational TUI usage and privacy surfaces for semantic quota windows, scoped limits, Credits, and `⚡ Fast` presentation.
-- Native Daybreak Blue and Cyber Red model identities, aliases, six reasoning efforts, runtime-first Blue context, and published Red context/pricing without invented Fast or credit rates.
-- Windows ARM64 release packaging with an architecture-qualified executable, SPDX SBOM, PE `0xAA64` validation, and a native `windows-11-arm` smoke gate.
 
 ### Changed
 
@@ -24,7 +44,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Service-tier authority is active-session evidence first, `config.toml` fallback second, legacy global state third, then explicit unknown/standard behavior.
 - Rich Presence composition preserves all observed global/model quota envelopes, omits unavailable values, and enforces Discord's 128-character line boundary deterministically.
 - Repository governance now uses YAML issue forms, Conventional Commits, runtime-proof PRs, synchronized SemVer/core/schema release gates, Dependabot, and a Windows SPDX SBOM contract.
-- Windows release assembly now publishes ten assets: x64 and ARM64 executables/SBOMs, Linux/macOS binaries, two logos, and one checksum manifest.
 
 ### Fixed
 
@@ -36,14 +55,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Security
 
-- Release artifacts retain immutable tag/SHA approval and checksum verification; both Windows binaries receive architecture-specific validated SPDX 2.3 SBOMs and PE-machine checks.
+- Release artifacts retain immutable tag/SHA approval and checksum verification; the Windows binary additionally receives a validated SPDX 2.3 SBOM.
 
 ### Validated
 
 - Windows release-contract suites, locked workspace fmt/clippy/tests/release build, and RustSec audit.
 - Schema migration, adaptive quota, Credits, service-tier, privacy, and provider-lane regression coverage.
 - Real Discord IPC SET/CLEAR proof with exact nonce correlation, sanitized DTO output, partial-cost omission, and activity cleanup.
-- Linux, macOS, Windows x64, and native Windows ARM64 build gates remain enforced by the manual-only release workflow after local verification.
+- Linux, macOS, and Windows compile/test gates remain enforced by the protected CI and tag-only release workflow.
 
 ## [1.7.6] - 2026-07-10
 
@@ -398,7 +417,8 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Open source docs and CI/release workflows.
 
 [1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
-[1.9.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...HEAD
+[1.10.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...v1.9.0
 [1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3

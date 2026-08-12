@@ -11,7 +11,7 @@
 One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, semantic **quota visibility**, and **Credits** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.9.0" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.10.0" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,22 +37,22 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.9.0</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.10.0</h2>
+
+- **Native Windows ARM64** - Snapdragon and other Arm64 Windows machines now receive a dedicated executable, architecture-specific SPDX SBOM, checksum, PE validation, and native release smoke.
+- **Daybreak Blue** - `gpt-daybreak-blue-latest` and its supported aliases render as `GPT-5.6-Cyber-Blue`, preserve runtime-observed context, and keep unpublished pricing unavailable.
+- **Daybreak Red** - `gpt-5.6-cyber` and Daybreak Red aliases render as `GPT-5.6-Cyber-Red` with the published 400K context and API pricing contract.
+- **All observed efforts** - Low, Medium, High, Extra High, Max, and Ultra remain visible for both GPT-5.6 Cyber families without inventing Fast support.
+- **Hardened release inventory** - every release is assembled as exactly ten assets spanning Windows x64/ARM64, Linux, macOS, both Windows SBOMs, branding, and checksums.
+
+<details>
+<summary>Previous v1.9.0 highlights</summary>
 
 - **Truthful usage** - quota names come from their actual window duration, all global/model scopes survive normalization, and missing five-hour windows stay missing.
 - **Real Credits** - account Credits support exact balances, explicit zero, unlimited, absence, and individual privacy control.
 - **Fast without inheritance bugs** - explicit session speed wins; only unknown sessions fall back to `config.toml`, then legacy global state, and Fast renders as `⚡ Fast`.
 - **One composer** - `codex-presence-core` 2.0.0 owns deterministic field order, details/state zones, compact/descriptive labels, presets, and Discord's 128-character boundary.
 - **Adaptive provider lanes** - explicit usage signals, stable stream IDs, dynamic windows, and global-account credit precedence keep Codex-local telemetry isolated and truthful.
-
-<details>
-<summary>Previous v1.7.5 highlights</summary>
-
-- **Shared live control** — Pulse and the standalone daemon now read the same persisted config on every poll, so design and all ten privacy fields take effect without restarting either process.
-- **Durable master switch** — press `M`, or use Pulse's Rich Presence toggle, to clear Discord once and enter a truthful `Paused` state while local session monitoring continues.
-- **Reliable resume** — turning presence back on invalidates the prior payload and publishes the current session again through the selected Codex App, ChatGPT App, CLI, or VS Code identity.
-- **Last-good resilience** — an incomplete, invalid, or transiently replaced config is logged and ignored; the running process keeps its last valid settings instead of crashing.
-- **Schema-12 migration** — existing schema-11 users remain enabled by default, and explicit paused state persists across both products.
 
 </details>
 
