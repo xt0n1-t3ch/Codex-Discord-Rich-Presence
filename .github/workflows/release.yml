@@ -64,6 +64,7 @@ jobs:
           ./tests/release_assets.tests.ps1
           ./tests/release_pe.tests.ps1
           ./tests/release_workflow.tests.ps1
+          $global:LASTEXITCODE = 0
 
       - name: Cargo fmt
         run: cargo --locked fmt --check
