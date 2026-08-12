@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses [Semantic Versioning](https://semver.org/).
 
-## [1.10.1] - 2026-08-12
+## [1.10.2] - 2026-08-12
 
 ### Added
 
@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Fixed
 
 - Release preflight clears the expected native-command exit status left by negative contract probes, so a fully passing suite exits successfully on Linux PowerShell.
+- Publication validates the six release jobs that actually run—preflight plus every Linux, macOS, and Windows architecture—instead of requiring retired per-push CI contexts.
 
 ### Security
 
@@ -421,7 +422,7 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Open source docs and CI/release workflows.
 
 [1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
-[1.10.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.9.0...v1.10.1
+[1.10.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.9.0...v1.10.2
 [1.9.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...v1.9.0
 [1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4

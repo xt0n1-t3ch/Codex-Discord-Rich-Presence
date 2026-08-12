@@ -30,9 +30,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $requiredChecks = @(
-    "Lint, Test, Build (ubuntu-latest)"
-    "Lint, Test, Build (windows-latest)"
-    "Lint, Test, Build (macos-latest)"
+    "Release preflight"
+    "Build x86_64-unknown-linux-gnu"
+    "Build x86_64-apple-darwin"
+    "Build aarch64-apple-darwin"
+    "Build x86_64-pc-windows-msvc"
+    "Build aarch64-pc-windows-msvc"
 )
 
 function Invoke-GitCommand {
@@ -167,7 +170,7 @@ try {
                 }; Descending = $true } |
             Select-Object -First 1
         if ($null -eq $latestRun -or $latestRun.status -cne "completed" -or $latestRun.conclusion -cne "success") {
-            throw "Protected check '$requiredCheck' is missing or unsuccessful for '$Sha'."
+            throw "Release prerequisite '$requiredCheck' is missing or unsuccessful for '$Sha'."
         }
     }
 

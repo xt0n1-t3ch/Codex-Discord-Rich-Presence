@@ -8,9 +8,12 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $targetScript = Join-Path $repositoryRoot "scripts/check-release-target.ps1"
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-release-target-" + [guid]::NewGuid())
 $requiredChecks = @(
-    "Lint, Test, Build (ubuntu-latest)"
-    "Lint, Test, Build (windows-latest)"
-    "Lint, Test, Build (macos-latest)"
+    "Release preflight"
+    "Build x86_64-unknown-linux-gnu"
+    "Build x86_64-apple-darwin"
+    "Build aarch64-apple-darwin"
+    "Build x86_64-pc-windows-msvc"
+    "Build aarch64-pc-windows-msvc"
 )
 
 function Assert-Equal {
@@ -152,14 +155,14 @@ try {
     $valid = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $validApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha
     Assert-Equal 0 $valid.ExitCode "A protected main commit with immutable releases must pass. Output: $($valid.Output)"
     $validResult = $valid.Output | ConvertFrom-Json
-    Assert-Equal 3 $validResult.required_checks "The gate must validate all three protected platform contexts."
+    Assert-Equal 6 $validResult.required_checks "The gate must validate preflight and every release platform build."
     Assert-Equal $true $validResult.release_approval "The gate did not confirm exact-SHA operator approval."
 
     $unapproved = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $validApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha -ApprovedSha ("0" * 40)
     Assert-Equal 1 $unapproved.ExitCode "A release SHA without exact operator approval must fail closed."
     Assert-Matches "approved release SHA" $unapproved.Output "Approval mismatch failure is unclear."
 
-    $failedCheckName = "Lint, Test, Build (windows-latest)"
+    $failedCheckName = "Build aarch64-pc-windows-msvc"
     $failedCheckApi = New-ApiFixture -Name "api-failed-check" -Sha $gitFixture.Sha -FailedCheck $failedCheckName
     $failedCheck = Invoke-TargetCheck -GitRoot $gitFixture.Path -ApiFixture $failedCheckApi -Tag "v1.7.2" -Version "1.7.2" -Sha $gitFixture.Sha
     Assert-Equal 1 $failedCheck.ExitCode "A failed protected context must block release creation."
