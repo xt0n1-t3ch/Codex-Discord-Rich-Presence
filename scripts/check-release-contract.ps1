@@ -126,6 +126,16 @@ function Assert-RepositoryReleaseContract {
     if ([string]$contract.release.windows_sbom -notmatch '\.spdx\.json$' -or [string]$contract.release.checksum_manifest -ne 'SHA256SUMS.txt') {
         throw "Release integrity contract must require an SPDX JSON SBOM and SHA256SUMS.txt."
     }
+    $actualWindowsTargets = @($contract.release.windows_targets | ForEach-Object {
+        "$($_.target)|$($_.architecture)|$($_.artifact)|$($_.sbom)|$($_.pe_machine)"
+    } | Sort-Object)
+    $expectedWindowsTargets = @(
+        "aarch64-pc-windows-msvc|arm64|codex-discord-rich-presence-windows-arm64.exe|codex-discord-rich-presence-windows-arm64.spdx.json|0xAA64"
+        "x86_64-pc-windows-msvc|x64|codex-discord-rich-presence-windows-x64.exe|codex-discord-rich-presence-windows-x64.spdx.json|0x8664"
+    )
+    if (($actualWindowsTargets -join "`n") -cne ($expectedWindowsTargets -join "`n")) {
+        throw "Release contract must declare the exact x64 and ARM64 Windows artifacts, SBOMs, targets, and PE machines."
+    }
 }
 
 function Write-ReleaseNotes {
@@ -181,6 +191,8 @@ function Write-ReleaseNotes {
         ""
         "- codex-discord-rich-presence-windows-x64.exe"
         "- codex-discord-rich-presence-windows-x64.spdx.json"
+        "- codex-discord-rich-presence-windows-arm64.exe"
+        "- codex-discord-rich-presence-windows-arm64.spdx.json"
         "- codex-discord-rich-presence-linux-x64"
         "- codex-discord-rich-presence-macos-x64"
         "- codex-discord-rich-presence-macos-arm64"

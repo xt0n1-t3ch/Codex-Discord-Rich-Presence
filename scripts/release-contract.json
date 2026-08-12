@@ -18,6 +18,22 @@
     "annotated_tag": true,
     "immutable": true,
     "windows_sbom": "codex-discord-rich-presence-windows-x64.spdx.json",
+    "windows_targets": [
+      {
+        "target": "x86_64-pc-windows-msvc",
+        "architecture": "x64",
+        "artifact": "codex-discord-rich-presence-windows-x64.exe",
+        "sbom": "codex-discord-rich-presence-windows-x64.spdx.json",
+        "pe_machine": "0x8664"
+      },
+      {
+        "target": "aarch64-pc-windows-msvc",
+        "architecture": "arm64",
+        "artifact": "codex-discord-rich-presence-windows-arm64.exe",
+        "sbom": "codex-discord-rich-presence-windows-arm64.spdx.json",
+        "pe_machine": "0xAA64"
+      }
+    ],
     "checksum_manifest": "SHA256SUMS.txt"
   }
 }

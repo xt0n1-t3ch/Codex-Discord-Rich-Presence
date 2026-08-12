@@ -86,13 +86,17 @@ definitions (verified 2026-08-02).
 
 | ID | Codex App label | Effective context | Ultra | Fast |
 |:---|:---|---:|:---:|:---:|
+| `gpt-daybreak-blue-latest`, `gpt-daybreak-blue`, `gpt-5.6-cyber-blue` | `5.6-Cyber-Blue` | Runtime-observed (`258_400` currently observed) | Yes | No |
+| `gpt-5.6-cyber`, `gpt-daybreak-red`, `gpt-daybreak-red-latest`, `gpt-5.6-cyber-red` | `5.6-Cyber-Red` | `400_000` | Yes | No |
 | `gpt-5.6`, `gpt-5.6-sol` | `5.6 Sol` | `353_400` | Yes | Yes |
 | `gpt-5.6-terra` | `5.6 Terra` | `353_400` | Yes | Yes |
 | `gpt-5.6-luna` | `5.6 Luna` | `353_400` | No | Yes |
 
 The raw context is `372_000`; Codex App exposes 95% as usable context. Context resolution order is observed JSONL `model_context_window`, valid local `~/.codex/models_cache.json`, then the bundled catalog. Snapshots preserve `raw_window_tokens`, usable `window_tokens`, `effective_percent`, the selected `source`, and `raw_source` separately. The local cache reader is size- and count-bounded and falls back closed on malformed or implausible data.
 
-No public GPT-5.6 API context, max-output, long-context surcharge threshold, cache-write credit rate, or Fast usage multiplier was verified on 2026-07-09. Those fields remain absent rather than inheriting older GPT-5 constants.
+Daybreak Blue has no bundled context, pricing, credit rates, or Fast capability: observed runtime context wins, and missing economics stay unavailable. Cyber Red uses the published `gpt-5.6-cyber` contract: 400K context, 128K max output, and a 272K long-context threshold. Cumulative session telemetry cannot prove which individual request crossed that threshold, so totals above it remain partial lower bounds rather than receiving an invented surcharge.
+
+No public max-output, long-context threshold, cache-write credit rate, or Fast usage multiplier was verified for Sol, Terra, or Luna on 2026-07-09. Those fields remain absent rather than inheriting older GPT-5 constants.
 
 ## Presentation
 
@@ -103,6 +107,8 @@ Fast is session-scoped and stored independently from the canonical model id. JSO
 - `GPT-5.6 Sol · Max`
 - `GPT-5.6 Sol · Max · ⚡ Fast`
 - `GPT-5.6 Terra · Light`
+- `GPT-5.6-Cyber-Blue · High`
+- `GPT-5.6-Cyber-Red · Ultra`
 
 `gpt-5.6` is an alias of Sol. No `gpt-5.6-pro` model is invented; Pro remains a plan/reasoning concept outside the model family.
 
@@ -138,6 +144,9 @@ API rates per one million tokens, verified 2026-07-09:
 | Sol | `$5.00` | `$6.25` | `$0.50` | `$30.00` |
 | Terra | `$2.50` | `$3.125` | `$0.25` | `$15.00` |
 | Luna | `$1.00` | `$1.25` | `$0.10` | `$6.00` |
+| Cyber Red (verified 2026-08-12) | `$12.50` | `$15.625` | `$1.25` | `$75.00` |
+
+Cyber Blue is intentionally absent from this table because no public pricing contract was verified.
 
 `compute_cost()` takes `TokenUsage`, clamps cache reads to total input, and returns `PricingStatus`:
 
@@ -166,6 +175,8 @@ The bundled policy records a 1,024-token eligibility minimum and a 30-minute min
 | Codex credit rates | <https://help.openai.com/en/articles/20001106-codex-rate-card-2> | 2026-07-09 |
 | App-server reset-credit shape | <https://raw.githubusercontent.com/openai/codex/main/codex-rs/app-server-protocol/schema/typescript/v2/RateLimitResetCreditsSummary.ts> and related v2 types | 2026-08-02 |
 | App capabilities/context | Local Codex 0.144.0 `models_cache.json` | 2026-07-09 |
+| GPT-5.6 Cyber Red context and API pricing | <https://developers.openai.com/api/docs/models/gpt-5.6-cyber> | 2026-08-12 |
+| Daybreak Blue/Red distinction | <https://learn.chatgpt.com/docs/cyber-safety> | 2026-08-12 |
 
 ## Local Files
 

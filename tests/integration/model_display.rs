@@ -40,3 +40,27 @@ fn gpt_5_6_display_matches_codex_app_labels() {
         "GPT-5.6 Luna"
     );
 }
+
+#[test]
+fn daybreak_models_have_cyber_labels_and_never_invent_fast() {
+    assert_eq!(
+        format_model_display("gpt-daybreak-blue", Some(ReasoningEffort::High), false,),
+        "GPT-5.6-Cyber-Blue · High"
+    );
+    assert_eq!(
+        format_model_display(
+            "gpt-daybreak-blue-latest-fast",
+            Some(ReasoningEffort::High),
+            true,
+        ),
+        "GPT-5.6-Cyber-Blue · High"
+    );
+    assert_eq!(
+        format_model_display(
+            "gpt-daybreak-red-latest",
+            Some(ReasoningEffort::Ultra),
+            true,
+        ),
+        "GPT-5.6-Cyber-Red · Ultra"
+    );
+}

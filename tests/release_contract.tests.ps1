@@ -205,6 +205,8 @@ Release v1.7.1
     Assert-Matches 'v1\.8\.0%2Bbuild\.7' $releaseNotes "Build metadata must be URL-escaped in the comparison link."
     Assert-Matches 'codex-discord-rich-presence-windows-x64\.exe' $releaseNotes "Release notes must list portable asset names."
     Assert-Matches 'codex-discord-rich-presence-windows-x64\.spdx\.json' $releaseNotes "Release notes must list the Windows SPDX SBOM."
+    Assert-Matches 'codex-discord-rich-presence-windows-arm64\.exe' $releaseNotes "Release notes must list the Windows ARM64 asset."
+    Assert-Matches 'codex-discord-rich-presence-windows-arm64\.spdx\.json' $releaseNotes "Release notes must list the Windows ARM64 SPDX SBOM."
 
     Write-Output "release metadata contract: 7 scenarios passed"
 }

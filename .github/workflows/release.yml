@@ -62,6 +62,7 @@ jobs:
           ./tests/release_approval.tests.ps1
           ./tests/release_target.tests.ps1
           ./tests/release_assets.tests.ps1
+          ./tests/release_pe.tests.ps1
           ./tests/release_workflow.tests.ps1
 
       - name: Cargo fmt
@@ -112,6 +113,10 @@ jobs:
             target: x86_64-pc-windows-msvc
             os_name: windows
             arch: x64
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            os_name: windows
+            arch: arm64
 
     steps:
       - name: Checkout tag
@@ -146,18 +151,32 @@ jobs:
         shell: pwsh
         run: |
           $outputDirectory = "releases/${{ matrix.os_name }}"
+          $artifactName = "codex-discord-rich-presence-windows-${{ matrix.arch }}.exe"
           New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
-          Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence.exe" "$outputDirectory/codex-discord-rich-presence-windows-x64.exe"
+          Copy-Item "${env:CARGO_TARGET_DIR}/${{ matrix.target }}/release/codex-discord-presence.exe" "$outputDirectory/$artifactName"
           Copy-Item "assets/branding/codex-app.png" "$outputDirectory/codex-app-logo.png"
           Copy-Item "assets/branding/chatgpt-app.jpg" "$outputDirectory/chatgpt-app-logo.jpg"
+
+      - name: Verify Windows PE machine and native smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifact = "releases/windows/codex-discord-rich-presence-windows-${{ matrix.arch }}.exe"
+          ./scripts/check-windows-pe.ps1 -ArtifactPath $artifact -Architecture "${{ matrix.arch }}"
+          & $artifact --version
+          if ($LASTEXITCODE -ne 0) { throw "--version smoke failed with exit code $LASTEXITCODE" }
+          $env:CODEX_HOME = Join-Path $env:RUNNER_TEMP "codex-home"
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:CODEX_HOME "sessions") | Out-Null
+          & $artifact doctor
+          if ($LASTEXITCODE -ne 0) { throw "doctor smoke failed with exit code $LASTEXITCODE" }
 
       - name: Generate and verify Windows SPDX SBOM
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $artifact = "releases/windows/codex-discord-rich-presence-windows-x64.exe"
-          $sbom = "releases/windows/codex-discord-rich-presence-windows-x64.spdx.json"
-          ./scripts/new-windows-sbom.ps1 -ArtifactPath $artifact -OutputPath $sbom -PackageName codex-discord-presence -PackageVersion "${{ needs.preflight.outputs.version }}"
+          $artifact = "releases/windows/codex-discord-rich-presence-windows-${{ matrix.arch }}.exe"
+          $sbom = "releases/windows/codex-discord-rich-presence-windows-${{ matrix.arch }}.spdx.json"
+          ./scripts/new-windows-sbom.ps1 -ArtifactPath $artifact -OutputPath $sbom -PackageName codex-discord-presence -PackageVersion "${{ needs.preflight.outputs.version }}" -Architecture "${{ matrix.arch }}"
           ./scripts/check-windows-sbom.ps1 -ArtifactPath $artifact -SbomPath $sbom -PackageName codex-discord-presence -PackageVersion "${{ needs.preflight.outputs.version }}"
 
       - name: Upload target artifact
@@ -206,7 +225,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s release-assets/SHA256SUMS.txt
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 8
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 10
           cd release-assets
           sha256sum --check SHA256SUMS.txt
 
@@ -262,7 +281,7 @@ jobs:
           test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.draft')" = "true"
           mapfile -t actual_assets < <(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate --jq '.[].name' | sort)
           mapfile -t expected_assets < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
-          test "${#actual_assets[@]}" -eq 8
+          test "${#actual_assets[@]}" -eq 10
           diff <(printf '%s\n' "${expected_assets[@]}") <(printf '%s\n' "${actual_assets[@]}")
 
           gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate \

@@ -10,7 +10,7 @@ This repo ships a Rust Discord Rich Presence runtime for Codex. Work from source
 | Identity policy | Only Codex app names, Codex app IDs, and Codex/OpenAI assets may publish |
 | Runtime data | Read local Codex session JSONL and global state only |
 | Privacy | No telemetry or cloud storage; only the configured Discord Rich Presence fields leave the machine |
-| Release binary | Windows artifact lives at `releases/windows/codex-discord-rich-presence.exe` |
+| Release binaries | Windows x64 and ARM64 artifacts live under `releases/windows/` with architecture-qualified filenames |
 
 ## Repo Layout
 
@@ -38,7 +38,7 @@ This repo ships a Rust Discord Rich Presence runtime for Codex. Work from source
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Local verify (all gates) | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1` |
 | Release compile | `cargo build --release` |
-| Windows artifact | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1` |
+| Windows artifacts | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Architecture all` |
 
 `Taskfile.yml` mirrors the core commands for machines with Task installed.
 

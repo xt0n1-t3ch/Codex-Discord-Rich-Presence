@@ -41,6 +41,8 @@ try {
     $sources = [ordered]@{
         "codex-discord-rich-presence-windows-x64.exe" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-windows-x64.exe"
         "codex-discord-rich-presence-windows-x64.spdx.json" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-windows-x64.spdx.json"
+        "codex-discord-rich-presence-windows-arm64.exe" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-windows-arm64.exe"
+        "codex-discord-rich-presence-windows-arm64.spdx.json" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-windows-arm64.spdx.json"
         "codex-discord-rich-presence-linux-x64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-linux-x64"
         "codex-discord-rich-presence-macos-x64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-macos-x64"
         "codex-discord-rich-presence-macos-arm64" = Find-RequiredArtifact -Files $files -FileName "codex-discord-rich-presence-macos-arm64"
@@ -57,6 +59,9 @@ try {
         throw "Expected at least one chatgpt-app-logo.jpg artifact, found none."
     }
     $sources["chatgpt-app-logo.jpg"] = $chatgptLogos[0]
+
+    & (Join-Path $PSScriptRoot "check-windows-pe.ps1") -ArtifactPath $sources["codex-discord-rich-presence-windows-x64.exe"].FullName -Architecture x64 | Out-Null
+    & (Join-Path $PSScriptRoot "check-windows-pe.ps1") -ArtifactPath $sources["codex-discord-rich-presence-windows-arm64.exe"].FullName -Architecture arm64 | Out-Null
 
     $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
     if (Test-Path -LiteralPath $resolvedOutputDirectory) {

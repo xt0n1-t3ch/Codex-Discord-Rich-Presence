@@ -457,6 +457,36 @@ mod tests {
     }
 
     #[test]
+    fn cyber_red_uses_published_rates_and_keeps_long_context_cost_partial() {
+        let exact = compute_cost(
+            "gpt-5.6-cyber",
+            TokenUsage {
+                input_tokens: 100_000,
+                cached_input_tokens: 20_000,
+                cache_write_tokens: Some(10_000),
+                output_tokens: 5_000,
+            },
+            SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
+            &PricingConfig::default(),
+        );
+        assert_eq!(exact.status, PricingStatus::Exact);
+        assert!((exact.known_total_cost_usd.expect("known subtotal") - 1.55625).abs() < 0.000001);
+
+        let partial = compute_cost(
+            "gpt-daybreak-red-latest",
+            TokenUsage {
+                input_tokens: 272_001,
+                output_tokens: 1,
+                ..TokenUsage::default()
+            },
+            SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
+            &PricingConfig::default(),
+        );
+        assert_eq!(partial.status, PricingStatus::Partial);
+        assert!(partial.known_total_cost_usd.is_some());
+    }
+
+    #[test]
     fn partial_and_unavailable_costs_cannot_render_as_exact() {
         assert_eq!(
             format_presentable_cost(Some(0.0065), PricingStatus::Partial),

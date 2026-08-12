@@ -14,7 +14,7 @@ use codex_discord_presence::model::{
 fn bundled_catalog_is_machine_readable_and_carries_source_metadata() {
     let catalog = model_catalog();
     assert!(catalog.models.len() >= 7);
-    assert_eq!(catalog.verified_on, "2026-07-09");
+    assert_eq!(catalog.verified_on, "2026-08-12");
     assert!(
         catalog
             .sources
@@ -27,6 +27,74 @@ fn bundled_catalog_is_machine_readable_and_carries_source_metadata() {
             .iter()
             .any(|source| source.kind == "codex_app_catalog")
     );
+    assert!(catalog.sources.iter().any(|source| {
+        source.kind == "openai_gpt_5_6_cyber"
+            && source.url == "https://developers.openai.com/api/docs/models/gpt-5.6-cyber"
+            && source.verified_on == "2026-08-12"
+    }));
+    assert!(catalog.sources.iter().any(|source| {
+        source.kind == "openai_daybreak_trusted_access"
+            && source.url == "https://learn.chatgpt.com/docs/cyber-safety"
+            && source.verified_on == "2026-08-12"
+    }));
+}
+
+#[test]
+fn daybreak_aliases_efforts_context_and_pricing_match_the_cyber_contract() {
+    for alias in [
+        "gpt-daybreak-blue-latest",
+        "gpt-daybreak-blue",
+        "gpt-5.6-cyber-blue",
+    ] {
+        let blue = resolve_model(alias).expect("Blue alias");
+        assert_eq!(blue.canonical_id(), "gpt-daybreak-blue-latest");
+        assert_eq!(blue.display_name(), "5.6-Cyber-Blue");
+        assert!(!blue.supports_fast());
+        assert!(blue.api_rates().is_none());
+        assert!(blue.credit_rates().is_none());
+    }
+    for alias in [
+        "gpt-5.6-cyber",
+        "gpt-daybreak-red",
+        "gpt-daybreak-red-latest",
+        "gpt-5.6-cyber-red",
+    ] {
+        let red = resolve_model(alias).expect("Red alias");
+        assert_eq!(red.canonical_id(), "gpt-5.6-cyber");
+        assert_eq!(red.display_name(), "5.6-Cyber-Red");
+        assert!(!red.supports_fast());
+        for effort in [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+            ReasoningEffort::Ultra,
+        ] {
+            assert!(red.supports_effort(effort));
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = dir.path().join("models_cache.json");
+    fs::write(&cache, r#"{"models":[]}"#).expect("empty cache");
+    let observed =
+        resolve_context_window_from_cache_path("gpt-daybreak-blue-latest", Some(258_400), &cache)
+            .expect("runtime context");
+    assert_eq!(observed.effective_tokens, 258_400);
+    assert_eq!(observed.raw_tokens, 258_400);
+    assert_eq!(observed.source, ContextSource::ObservedJsonl);
+
+    let red = resolve_model("gpt-5.6-cyber").expect("Red");
+    let context = red.context().expect("published context");
+    assert_eq!(context.api_tokens, Some(400_000));
+    assert_eq!(context.max_output_tokens, Some(128_000));
+    assert_eq!(context.long_context_input_threshold, Some(272_000));
+    let rates = red.api_rates().expect("published pricing");
+    assert_eq!(rates.input_per_million, 12.5);
+    assert_eq!(rates.cached_input_per_million, 1.25);
+    assert_eq!(rates.cache_write_per_million, Some(15.625));
+    assert_eq!(rates.output_per_million, 75.0);
 }
 
 #[test]

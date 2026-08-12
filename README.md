@@ -83,7 +83,7 @@ No hosted service. No account sync. No transcript upload. Just a Rust daemon tha
 
 <h2 id="install"><img src="assets/readme/icons/download.png" alt="" width="28" align="center"> &nbsp;Install</h2>
 
-Download a Windows, macOS, or Linux binary from [GitHub Releases](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest).
+Download a Windows, macOS, or Linux binary from [GitHub Releases](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest). Windows publishes both `codex-discord-rich-presence-windows-x64.exe` and native `codex-discord-rich-presence-windows-arm64.exe`.
 
 ```powershell
 codex-discord-presence status
@@ -91,10 +91,12 @@ codex-discord-presence doctor
 codex-discord-presence
 ```
 
-Windows local artifact:
+Windows local artifacts:
 
 ```powershell
-.\releases\windows\codex-discord-rich-presence.exe
+.\scripts\build-release.ps1 -Architecture all
+.\releases\windows\codex-discord-rich-presence-windows-x64.exe
+.\releases\windows\codex-discord-rich-presence-windows-arm64.exe
 ```
 
 ### Build from source
@@ -123,7 +125,7 @@ cargo build --release
 | **Readable activity** | Thinking, reading, editing, running, waiting, and idle states stay short enough for Discord while preserving the useful target when configured. |
 | **Model + plan line** | GPT-5.6 App labels, reasoning effort, session-scoped Fast markers, and `Pro 5x` / `Pro 20x` display labels resolve from shared contracts. |
 | **Cost + cache truth** | Input, cached input, output, cache hit ratio, cached-input savings, and total cost are computed before Discord rendering, not recomputed inside the payload formatter. |
-| **Context and quota windows** | GPT-5.6 resolves observed JSONL first, local Codex model cache second, and bundled 353.4K usable context last, while preserving the 372K raw inventory value. |
+| **Context and quota windows** | GPT-5.6 resolves observed JSONL first, local Codex model cache second, and bundled context last. Daybreak Blue preserves runtime context without inventing a catalog limit; Cyber Red uses its published 400K contract. |
 
 ### Terminal dashboard
 
