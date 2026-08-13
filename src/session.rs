@@ -760,6 +760,17 @@ mod tests {
     }
 
     #[test]
+    fn session_meta_treats_work_desktop_originator_as_desktop() {
+        let snapshot = parse_one(
+            r#"{"type":"session_meta","payload":{"id":"work-desktop","cwd":"C:\\repo\\app","originator":"codex_work_desktop","source":"vscode"}}"#,
+        );
+        assert_eq!(
+            snapshot.detected_surface(),
+            Some(crate::config::PresenceSurface::Desktop)
+        );
+    }
+
+    #[test]
     fn session_meta_distinguishes_cli_vscode_and_desktop_surfaces() {
         let desktop = parse_one(
             r#"{"type":"session_meta","payload":{"id":"desktop","cwd":"C:\\repo\\app","originator":"Codex Desktop","source":"vscode"}}"#,

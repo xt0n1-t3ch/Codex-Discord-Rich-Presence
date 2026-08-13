@@ -397,6 +397,7 @@ fn classify_surface_signal(value: &str) -> Option<PresenceSurface> {
         return None;
     }
     if normalized.contains("codex desktop")
+        || normalized.contains("codex_work_desktop")
         || normalized.contains("openai.codex")
         || normalized.contains("opencode")
         || normalized == "desktop"
