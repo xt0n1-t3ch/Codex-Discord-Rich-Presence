@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Refreshed `thiserror`, `serde`, and `ctrlc` to their compatible patch
+  releases.
+
+### Fixed
+
+- Sessions whose originator is `codex_work_desktop` now retain the selected
+  Codex App or ChatGPT App desktop identity even when their source is VS Code.
+
 ## [1.10.2] - 2026-08-12
 
 ### Added
