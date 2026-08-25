@@ -27,7 +27,7 @@
 | Fast mode | `src/session.rs` parses per-session service tier; `tests/integration/model_display.rs` validates Codex App labels and capability gating |
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
 | Surface identity | `src/session.rs`, `src/app.rs`, and `src/discord.rs` distinguish CLI, VS Code extension-host, VS Code terminal, desktop, OpenCode, sticky idle, launcher lineage, and selected desktop client ids |
-| Discord branding | `src/discord.rs` verifies RPC activity-title overrides, exact surface labels, separated reasoning/speed display, and Codex App / ChatGPT App design assets |
+| Discord branding | `src/discord.rs` verifies RPC activity-title overrides, exact surface labels, separated reasoning/speed display, and Codex App / ChatGPT App design assets; `src/session.rs` proves `codex_work_desktop` originators override a misleading VS Code source |
 | Discord live proof | `src/discord.rs` verifies exact-cost emission, partial/unavailable omission, and the no-`>=` fail-closed contract used by the opt-in `discord-proof` wire seam |
 | Terminal layout | `src/ui.rs` covers layout, monochrome wordmark, plan picker, persisted design/master toggle copy, paused state, footer, spinner, and reserved rows |
 | Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
