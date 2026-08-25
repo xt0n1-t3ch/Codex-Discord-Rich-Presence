@@ -114,7 +114,7 @@ Fast is session-scoped and stored independently from the canonical model id. JSO
 
 ## Surface Identity
 
-Session metadata is authoritative. `Codex Desktop` and OpenCode map to desktop, `codex_vscode` maps to `Codex VS Code Extension`, and `codex-tui` maps to `Codex CLI`. When metadata is absent, the runtime requires an extension-host process, an OpenCode marker, or the explicit `CODEX_PRESENCE_SURFACE=cli|vscode|desktop` override; generic VS Code terminal variables and unrelated open apps never change the identity.
+Session metadata is authoritative. `Codex Desktop`, `codex_work_desktop`, and OpenCode map to desktop, `codex_vscode` maps to `Codex VS Code Extension`, and `codex-tui` maps to `Codex CLI`. When metadata is absent, the runtime requires an extension-host process, an OpenCode marker, or the explicit `CODEX_PRESENCE_SURFACE=cli|vscode|desktop` override; generic VS Code terminal variables and unrelated open apps never change the identity.
 
 Config schema 13 stores the shared `presence_enabled` master switch, `display.desktop_presence_design`, and the ordered ten-field composer:
 
