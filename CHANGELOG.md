@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-08-25
+
 ### Changed
 
 - Refreshed `thiserror`, `serde`, and `ctrlc` to their compatible patch
@@ -434,6 +436,7 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Open source docs and CI/release workflows.
 
 [1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
+[1.10.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.9.0...v1.10.2
 [1.9.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...v1.9.0
 [1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5

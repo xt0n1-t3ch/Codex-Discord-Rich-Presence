@@ -11,7 +11,7 @@
 One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, semantic **quota visibility**, and **Credits** — with no cloud telemetry.
 
 <p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.10.2" height="47"></a>
+  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.10.3" height="47"></a>
   <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
   <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
   <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
@@ -37,7 +37,7 @@ One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, 
 
 ---
 
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.10.2</h2>
+<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.10.3</h2>
 
 - **Native Windows ARM64** - Snapdragon and other Arm64 Windows machines now receive a dedicated executable, architecture-specific SPDX SBOM, checksum, PE validation, and native release smoke.
 - **Daybreak Blue** - `gpt-daybreak-blue-latest` and its supported aliases render as `GPT-5.6-Cyber-Blue`, preserve runtime-observed context, and keep unpublished pricing unavailable.
