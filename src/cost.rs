@@ -502,3 +502,43 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod astra_tests {
+    use super::*;
+    #[test]
+    fn astra_pricing_keeps_partial_telemetry_honest() {
+        let usage = TokenUsage {
+            input_tokens: 100_000,
+            cached_input_tokens: 20_000,
+            cache_write_tokens: Some(10_000),
+            output_tokens: 1_000,
+        };
+        let standard = compute_cost(
+            "gpt-6-astra",
+            usage,
+            SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
+            &PricingConfig::default(),
+        );
+        assert_eq!(standard.status, PricingStatus::Exact);
+        assert!((standard.total_cost_usd - 0.995).abs() < 1e-9);
+        let fast = compute_cost(
+            "gpt-6-astra",
+            usage,
+            SessionSpeed::explicit(SpeedMode::Fast, SpeedSource::ThreadSettings),
+            &PricingConfig::default(),
+        );
+        assert!((fast.total_cost_usd - 1.99).abs() < 1e-9);
+        let long = compute_cost(
+            "gpt-6-astra",
+            TokenUsage {
+                input_tokens: 300_000,
+                ..usage
+            },
+            SessionSpeed::explicit(SpeedMode::Standard, SpeedSource::ThreadSettings),
+            &PricingConfig::default(),
+        );
+        assert_eq!(long.status, PricingStatus::Partial);
+        assert!(format_presentable_cost(long.known_total_cost_usd, long.status).is_none());
+    }
+}

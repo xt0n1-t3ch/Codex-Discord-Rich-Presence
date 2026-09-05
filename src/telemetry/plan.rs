@@ -19,6 +19,7 @@ pub enum DetectedPlanTier {
     Plus,
     Business,
     Enterprise,
+    Edu,
     #[serde(
         rename = "pro_5x",
         alias = "pro5x",
@@ -48,6 +49,7 @@ impl DetectedPlanTier {
             Self::Plus => "Plus",
             Self::Business => "Business",
             Self::Enterprise => "Enterprise",
+            Self::Edu => "Edu",
             Self::Pro5x => "Pro 5x",
             Self::Pro20x => "Pro 20x",
             Self::Unknown => "Unknown",
@@ -61,7 +63,7 @@ impl DetectedPlanTier {
             Self::Plus => Some(20),
             Self::Pro5x => Some(100),
             Self::Pro20x => Some(200),
-            Self::Business | Self::Enterprise | Self::Unknown => None,
+            Self::Business | Self::Enterprise | Self::Edu | Self::Unknown => None,
         }
     }
 
@@ -81,6 +83,7 @@ impl From<OpenAiPlanTier> for DetectedPlanTier {
             OpenAiPlanTier::Plus => Self::Plus,
             OpenAiPlanTier::Business => Self::Business,
             OpenAiPlanTier::Enterprise => Self::Enterprise,
+            OpenAiPlanTier::Edu => Self::Edu,
             OpenAiPlanTier::Pro5x => Self::Pro5x,
             OpenAiPlanTier::Pro20x => Self::Pro20x,
         }
@@ -179,8 +182,6 @@ impl PlanDetector {
         sessions: &[CodexSessionSnapshot],
         plan_config: &OpenAiPlanDisplayConfig,
     ) -> ResolvedPlan {
-        let auto_resolved = self.resolve_auto_from_sessions(sessions);
-
         if matches!(plan_config.mode, OpenAiPlanMode::Manual) {
             let raw_plan_type = plan_config.tier.title().to_ascii_lowercase();
             return ResolvedPlan {
@@ -191,7 +192,7 @@ impl PlanDetector {
             };
         }
 
-        auto_resolved
+        self.resolve_auto_from_sessions(sessions)
     }
 
     pub fn resolve_from_envelopes(
@@ -199,8 +200,6 @@ impl PlanDetector {
         envelopes: &[RateLimitEnvelope],
         plan_config: &OpenAiPlanDisplayConfig,
     ) -> ResolvedPlan {
-        let auto_resolved = self.resolve_auto(select_plan_signal_from_envelopes(envelopes));
-
         if matches!(plan_config.mode, OpenAiPlanMode::Manual) {
             let raw_plan_type = plan_config.tier.title().to_ascii_lowercase();
             return ResolvedPlan {
@@ -211,7 +210,7 @@ impl PlanDetector {
             };
         }
 
-        auto_resolved
+        self.resolve_auto(select_plan_signal_from_envelopes(envelopes))
     }
 
     fn resolve_auto_from_sessions(&mut self, sessions: &[CodexSessionSnapshot]) -> ResolvedPlan {
@@ -219,7 +218,9 @@ impl PlanDetector {
     }
 
     fn resolve_auto(&mut self, signal: Option<PlanSignal>) -> ResolvedPlan {
-        if let Some(signal) = signal {
+        if let Some(signal) = signal.filter(|signal| {
+            parse_plan_type(signal.raw_plan_type.as_deref()) != DetectedPlanTier::Unknown
+        }) {
             let resolved = ResolvedPlan {
                 tier: parse_plan_type(signal.raw_plan_type.as_deref()),
                 source: DetectedPlanSource::Telemetry,
@@ -236,7 +237,9 @@ impl PlanDetector {
             memory.source = DetectedPlanSource::Memory;
             return memory;
         }
-        if let Some(cached) = &self.cached {
+        if let Some(cached) = &self.cached
+            && cached.tier != DetectedPlanTier::Unknown
+        {
             let mut resolved = cached.clone();
             resolved.source = DetectedPlanSource::Cache;
             return resolved;
@@ -257,10 +260,11 @@ pub fn parse_plan_type(raw: Option<&str>) -> DetectedPlanTier {
         "plus" => DetectedPlanTier::Plus,
         "business" => DetectedPlanTier::Business,
         "enterprise" => DetectedPlanTier::Enterprise,
-        "pro" | "pro20x" | "pro_20x" | "pro-20x" | "pro200" | "pro_200" | "pro-200" => {
+        "pro" | "pro20x" | "pro_20x" | "pro-20x" | "pro 20x" | "pro200" | "pro_200" | "pro-200" => {
             DetectedPlanTier::Pro20x
         }
-        "pro5x" | "pro_5x" | "pro-5x" | "pro100" | "pro_100" | "pro-100" => DetectedPlanTier::Pro5x,
+        "prolite" | "pro_lite" | "pro 5x" | "pro5x" | "pro_5x" | "pro-5x" | "pro100"
+        | "pro_100" | "pro-100" => DetectedPlanTier::Pro5x,
         _ => DetectedPlanTier::Unknown,
     }
 }
@@ -356,6 +360,9 @@ fn select_plan_signal_from<'a>(
             continue;
         };
 
+        if parse_plan_type(Some(&raw_plan_type)) == DetectedPlanTier::Unknown {
+            continue;
+        }
         let signal = PlanSignal {
             raw_plan_type: Some(raw_plan_type),
             observed_at: envelope.observed_at,
