@@ -1,17 +1,17 @@
 # Codex Discord Rich Presence
 
-A local Rust runtime that publishes Codex activity to Discord and shows the same state in a terminal dashboard. Release v1.11.0 adds GPT-6 Astra, Windows Efficiency mode and clearer monetary display.
+A local Rust runtime that publishes Codex activity to Discord and shows the same state in a terminal dashboard. Release v1.11.1 adds GPT-6 Astra, Windows Efficiency mode and clearer monetary display.
 
 <div align="center">
 <img src="assets/branding/codex-readme-hero.png" alt="Codex Discord Rich Presence" width="100%">
 
-[![Release v1.11.0](https://img.shields.io/badge/Release-v1.11.0-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
+[![Release v1.11.1](https://img.shields.io/badge/Release-v1.11.1-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
 [![MIT](https://img.shields.io/badge/License-MIT-171717)](LICENSE)
 
 [Install](#install) · [What's new](#whats-new-in-v1110) · [Controls](#terminal-controls) · [Configuration](#configuration) · [Documentation](docs/index.md)
 </div>
 
-## What's New in v1.11.0
+## What's New in v1.11.1
 
 - GPT-6 Astra model identity, observed reasoning effort, a 1,050,000-token total context window, 922,000-token input limit and 128,000-token output limit.
 - Standard/Fast pricing with explicit completeness. Missing request-level evidence does not become an exact total or invented subscription credits.

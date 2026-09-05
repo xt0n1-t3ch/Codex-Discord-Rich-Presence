@@ -7,15 +7,17 @@ pub fn requested(value: Option<&str>) -> bool {
     })
 }
 
+#[cfg(windows)]
 pub fn apply_from_env(name: &str) {
-    if !requested(std::env::var(name).ok().as_deref()) {
-        return;
-    }
-    #[cfg(windows)]
-    if let Err(error) = windows::enable() {
+    if requested(std::env::var(name).ok().as_deref())
+        && let Err(error) = windows::enable()
+    {
         tracing::warn!(%error, "Windows efficiency mode could not be enabled");
     }
 }
+
+#[cfg(not(windows))]
+pub fn apply_from_env(_name: &str) {}
 
 #[cfg(windows)]
 mod windows {
