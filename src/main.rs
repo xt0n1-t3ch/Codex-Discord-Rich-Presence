@@ -10,6 +10,7 @@ use codex_discord_presence::process_guard;
 use codex_discord_presence::util::setup_tracing;
 
 fn main() -> ExitCode {
+    codex_discord_presence::power::apply_from_env("CODEX_PRESENCE_EFFICIENCY_MODE");
     match run() {
         Ok(code) => ExitCode::from(code),
         Err(err) => {

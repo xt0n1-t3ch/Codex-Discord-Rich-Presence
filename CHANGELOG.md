@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-05
+
+### Added
+
+- GPT-6 Astra identity, observed reasoning effort, a 1,050,000-token total context window, 922,000-token input limit and 128,000-token output limit.
+- Astra Standard/Fast pricing resolution with explicit incomplete coverage and no invented subscription-credit rates.
+- Windows Efficiency mode through process-local EcoQoS and Idle priority, with an environment opt-out and read-only process verifier.
+
+### Fixed
+
+- Manual plan overrides resolve before automatic cache updates. Protocol pro maps to Pro 20x and prolite to Pro 5x; Edu and explicit plan aliases are supported.
+- Unknown plan labels are omitted from public Discord model text when no reliable identification exists.
+- Monetary display rounds to two decimal places while retaining full calculation precision and cost-completeness rules.
+
+### Changed
+
+- README and release documentation explain the standalone terminal interface, source boundaries, Windows process policy and immutable artifact checks.
+- The shared core remains version 2.0.0. Codex identity policy and config schema 13 are unchanged.
+
 ## [1.10.3] - 2026-08-25
 
 ### Changed

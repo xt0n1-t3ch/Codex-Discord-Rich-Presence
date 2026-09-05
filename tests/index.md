@@ -43,3 +43,11 @@
 | Adaptive usage contract | `crates/codex-presence-core/src/usage.rs` covers explicit provider-lane classification, stable stream isolation, dynamic/arbitrary windows, Codex used/remaining complements, canonical `account/rateLimits/read` parsing, separate reset-credit count/details with null-versus-empty preservation, missing-percentage and unknown-duration omission, malformed duration and credits-only payloads, global-account credit precedence, deterministic serde, and equal-rank fail-closed selection |
 
 Rule: bugs that cross module seams get an integration regression; module-local bugs can stay beside the Rust module.
+
+## Regresiones Astra
+
+`cargo test --lib astra` verifica identidad Standard/Fast, contexto, tarifas y coste parcial. `unknown_account_plan_is_not_published_with_astra` comprueba que un plan desconocido no llega a Discord. La política de identidad continúa siendo Codex.
+
+## Windows efficiency and release validation
+
+`src/power.rs` tests option parsing and the Windows ABI layout. `scripts/check-windows-efficiency.ps1` reads the running process policy. Release checks validate versions, PE architecture, software bills of materials and checksums.

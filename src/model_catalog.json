@@ -2,6 +2,8 @@
   "schema_version": 1,
   "verified_on": "2026-08-12",
   "sources": [
+    {"kind": "openai_gpt_6_astra", "url": "https://developers.openai.com/api/docs/models/gpt-6-astra", "verified_on": "2026-09-04"},
+    {"kind": "openai_astra_pricing", "url": "https://developers.openai.com/api/docs/pricing", "verified_on": "2026-09-04"},
     {
       "kind": "openai_model_guide",
       "url": "https://developers.openai.com/api/docs/guides/latest-model",
@@ -48,6 +50,36 @@
     "minimum_lifetime_minutes": 30
   },
   "models": [
+    {
+      "id": "gpt-6-astra",
+      "aliases": [],
+      "display_name": "GPT-6 Astra",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "supports_fast": true,
+      "fast_usage_multiplier": 2.0,
+      "context": {
+        "raw_tokens": 1050000,
+        "effective_percent": 100,
+        "api_tokens": 1050000,
+        "max_input_tokens": 922000,
+        "max_output_tokens": 128000,
+        "long_context_input_threshold": 272000
+      },
+      "api_pricing": {
+        "input_per_million": 10.0,
+        "cache_write_per_million": 12.5,
+        "cached_input_per_million": 1.0,
+        "output_per_million": 50.0
+      },
+      "credit_rates": null
+    },
     {
       "id": "gpt-daybreak-blue-latest",
       "aliases": ["gpt-daybreak-blue", "gpt-5.6-cyber-blue"],
