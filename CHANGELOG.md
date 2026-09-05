@@ -6,7 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-## [1.11.0] - 2026-09-05
+## [1.11.1] - 2026-09-05
+
+### Added
+
+- Publish GPT-6 Astra identity, observed effort, context limits and Standard/Fast pricing with honest incomplete-cost handling.
+- Publish process-local Windows Efficiency mode with an environment opt-out and read-only policy verifier.
+
+### Fixed
+
+- Make Windows Efficiency mode initialization an explicit no-op on other operating systems, so warning-denying Linux builds pass without suppressing lints. Windows EcoQoS behavior is unchanged.
+
+The v1.11.0 candidate did not publish release assets. This release includes its Astra, plan-precedence, monetary-display and Windows efficiency changes.
+
+## [1.11.0] - 2026-09-05 (unshipped candidate)
 
 ### Added
 
