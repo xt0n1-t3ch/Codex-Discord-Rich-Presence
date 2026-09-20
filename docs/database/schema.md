@@ -27,7 +27,7 @@ Schemas 11 and 12 migrate atomically to schema 13. Existing visibility choices a
 |:---|:---|
 | Identity | `session_id`, `cwd`, `project_name`, `git_branch`, `originator`, `source` |
 | Model | `model`, `reasoning_effort`, session-scoped `speed`, and `context_window` with source |
-| Usage | token totals, backward-compatible `total_cost_usd`, optional `known_cost_usd`, `pricing_source`, `pricing_status`, `cost_attribution`, reconciliation flag, and `cost_breakdown` |
+| Usage | token totals including optional `cache_write_tokens_total`, backward-compatible `total_cost_usd`, optional `known_cost_usd`, `pricing_source`, `pricing_status`, `cost_attribution`, reconciliation flag, and `cost_breakdown` |
 | Activity | `activity`, `last_activity`, token-event timestamps |
 | Limits | `limits`, all global/model-scoped `rate_limit_envelopes`, semantic `window_minutes`, and optional account `credits` |
 | Source | `source_file` |

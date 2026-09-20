@@ -32,10 +32,10 @@ codex-discord-presence discord-proof --output proof.json
 ```
 
 The artifact records the exact outbound `SET_ACTIVITY` DTO, both accepted
-replies, the selected public surface, and cost assertions. Exact pricing is
-emitted only when `PricingStatus::Exact`; partial or unavailable subtotals are
-omitted. The proof fails closed if the public state contains `>=`, if an exact
-cost label is missing, or if a partial/unavailable subtotal leaks into state.
+replies, the selected public surface, and cost assertions. Known exact and partial
+subtotals render as currency only when the cost field is public. Unavailable
+values remain absent. The proof rejects missing enabled costs and unavailable
+amounts. Coverage remains in the structured snapshot, not in the Discord label.
 The command does not acquire the daemon single-instance lock and does not stop
 Discord, Pulse, or any existing presence process.
 
@@ -148,7 +148,7 @@ API rates per one million tokens, verified 2026-07-09:
 
 Cyber Blue is intentionally absent from this table because no public pricing contract was verified.
 
-`compute_cost()` takes `TokenUsage`, clamps cache reads to total input, and returns `PricingStatus`:
+`compute_cost_for_request()` takes `TokenUsage` and optional observed request input. It subtracts known cache reads and writes once from ordinary input and returns `PricingStatus`:
 
 | Status | Meaning |
 |:---|:---|
@@ -156,9 +156,9 @@ Cyber Blue is intentionally absent from this table because no public pricing con
 | `partial` | The known subtotal excludes a published component absent from telemetry, currently GPT-5.6 cache writes in Codex JSONL |
 | `unavailable` | No verified pricing or valid user override exists |
 
-Unknown models never inherit a fallback rate. Discord and the terminal omit partial subtotals and hide unavailable costs. OpenCode can produce an exact GPT-5.6 total because its database reports cache-write tokens separately.
+Unknown models never inherit a fallback rate. Discord emits known subtotals without coverage text and hides unavailable costs. Structured output retains the classification. OpenCode can produce an exact GPT-5.6 total because its database reports cache-write tokens separately.
 
-Because Codex JSONL exposes cumulative session totals rather than the size of every billed prompt, a GPT-5.5 or GPT-5.4 session whose cumulative input exceeds the published 272K long-context threshold keeps a partial lower-bound subtotal internally, but that subtotal is omitted from public presence. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
+The session tracker accumulates usage deltas with each observed model and speed. It uses aligned last-request input to resolve the context tier. Cumulative input never acts as a request size. Missing request boundaries keep the known subtotal partial. Astra requests with observed input over 272K use the documented long-context multipliers. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
 
 ## Prompt Cache Policy
 
@@ -188,3 +188,9 @@ The bundled policy records a 1,024-token eligibility minimum and a 30-minute min
 | `~/.codex/discord-presence-metrics.md` | Human-readable metrics report |
 | `~/.codex/sessions/**/*.jsonl` | Codex sessions |
 | `~/.local/share/opencode/opencode*.db` | OpenCode-hosted Codex sessions |
+
+## Unreleased session-cost corrections
+
+`src/session/costing.rs` owns event accumulation, repeated-event rejection, cache-write totals and multimodel subtotals. `cache_write_input_tokens` and `cache_write_tokens` remain optional. Missing model tariffs do not erase previously known cost.
+
+The shared compositor reserves space for enabled cost fields when a preceding model label fills the Discord line. The field-order and privacy contracts stay unchanged. The [Astra model card](https://developers.openai.com/api/docs/models/gpt-6-astra) and [per-run cost arithmetic](https://developers.openai.com/cookbook/articles/per_run_spending_controller_responses_api) were checked on 2026-09-20 for request-level context multipliers and disjoint token categories. Existing catalog rows keep their original verification dates.

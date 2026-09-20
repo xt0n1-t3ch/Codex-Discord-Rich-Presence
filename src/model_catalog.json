@@ -2,6 +2,8 @@
   "schema_version": 1,
   "verified_on": "2026-08-12",
   "sources": [
+    {"kind": "openai_astra_request_costs", "url": "https://developers.openai.com/api/docs/models/gpt-6-astra", "verified_on": "2026-09-20"},
+    {"kind": "openai_token_cost_components", "url": "https://developers.openai.com/cookbook/articles/per_run_spending_controller_responses_api", "verified_on": "2026-09-20"},
     {"kind": "openai_gpt_6_astra", "url": "https://developers.openai.com/api/docs/models/gpt-6-astra", "verified_on": "2026-09-04"},
     {"kind": "openai_astra_pricing", "url": "https://developers.openai.com/api/docs/pricing", "verified_on": "2026-09-04"},
     {
@@ -64,6 +66,7 @@
       ],
       "supports_fast": true,
       "fast_usage_multiplier": 2.0,
+      "long_context_pricing": { "input_and_cache": 2.0, "output": 1.5 },
       "context": {
         "raw_tokens": 1050000,
         "effective_percent": 100,

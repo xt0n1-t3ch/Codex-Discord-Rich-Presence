@@ -224,6 +224,7 @@ fn row_to_snapshot(
         session_delta_tokens: None,
         input_tokens_total: input_total,
         cached_input_tokens_total: row.tokens_cache_read,
+        cache_write_tokens_total: None,
         output_tokens_total: output_total,
         last_input_tokens: None,
         last_cached_input_tokens: None,

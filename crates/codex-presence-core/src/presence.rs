@@ -231,6 +231,8 @@ pub fn compose_presence(
 ) -> PresenceLines {
     let mut details = Vec::new();
     let mut state = Vec::new();
+    let mut details_cost = None;
+    let mut state_cost = None;
     for field in &layout.fields {
         if !field.enabled {
             continue;
@@ -240,13 +242,23 @@ pub fn compose_presence(
         };
         let rendered = render_value(layout.label_style, field.field, value);
         match field.zone {
-            PresenceZone::Details => details.push(rendered),
-            PresenceZone::State => state.push(rendered),
+            PresenceZone::Details => {
+                if field.field == PresenceFieldId::Cost {
+                    details_cost = Some(details.len());
+                }
+                details.push(rendered);
+            }
+            PresenceZone::State => {
+                if field.field == PresenceFieldId::Cost {
+                    state_cost = Some(state.len());
+                }
+                state.push(rendered);
+            }
         }
     }
     PresenceLines {
-        details: compact_join(&details, details_fallback, " · ", 128),
-        state: compact_join(&state, state_fallback, " • ", 128),
+        details: compact_join(&details, details_fallback, " · ", 128, details_cost),
+        state: compact_join(&state, state_fallback, " • ", 128, state_cost),
     }
 }
 
@@ -274,16 +286,32 @@ fn render_value(style: LabelStyle, field: PresenceFieldId, value: &str) -> Strin
     }
 }
 
-fn compact_join(parts: &[String], fallback: &str, separator: &str, limit: usize) -> String {
-    let mut accepted: Vec<&str> = Vec::new();
-    for part in parts {
+fn compact_join(
+    parts: &[String],
+    fallback: &str,
+    separator: &str,
+    limit: usize,
+    priority: Option<usize>,
+) -> String {
+    let mut accepted: Vec<String> = Vec::new();
+    for (index, part) in parts.iter().enumerate() {
+        let reserved = priority
+            .filter(|priority| index < *priority)
+            .and_then(|priority| parts.get(priority))
+            .map_or(0, |value| value.chars().count() + separator.chars().count());
+        let available = limit.saturating_sub(reserved);
+        let part = if accepted.is_empty() && reserved > 0 {
+            truncate_chars(part, available)
+        } else {
+            part.clone()
+        };
         let candidate = if accepted.is_empty() {
             part.clone()
         } else {
             format!("{}{}{}", accepted.join(separator), separator, part)
         };
-        if candidate.chars().count() <= limit {
-            accepted.push(part.as_str());
+        if candidate.chars().count() <= available {
+            accepted.push(part);
         }
     }
     let value = if accepted.is_empty() {
@@ -306,6 +334,18 @@ fn truncate_chars(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_model_cannot_displace_enabled_session_cost() {
+        let layout = PresenceLayoutConfig::default();
+        let mut values = PresenceValues::default();
+        values.insert(PresenceFieldId::Model, "M".repeat(125));
+        values.insert(PresenceFieldId::Cost, "$123.45");
+        let lines = compose_presence(&layout, &values, "Coding", "Idle");
+        assert!(lines.state.contains("$123.45"));
+        assert!(lines.state.chars().count() <= 128);
+        assert!(lines.state.starts_with('M'));
+    }
 
     #[test]
     fn composer_honors_visibility_order_and_missing_values() {
