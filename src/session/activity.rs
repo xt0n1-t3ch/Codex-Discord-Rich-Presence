@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::config::PricingConfig;
-use crate::cost::{self, CostAttribution, TokenUsage};
+use crate::cost::CostAttribution;
 use crate::model::{
     SessionSpeed, SpeedMode, SpeedSource, canonical_model_key, model_requests_fast, resolve_model,
 };
@@ -31,6 +31,7 @@ use super::{
 
 #[derive(Debug, Default)]
 pub(super) struct SessionAccumulator {
+    costing: super::costing::SessionCostTracker,
     session_id: Option<String>,
     cwd: Option<PathBuf>,
     started_at: Option<DateTime<Utc>>,
@@ -306,6 +307,12 @@ impl SessionAccumulator {
                     }
                 }
                 Some("token_count") => {
+                    self.costing.observe(
+                        payload,
+                        event_timestamp,
+                        self.model.as_deref(),
+                        self.speed,
+                    );
                     self.previous_session_total_tokens = self.session_total_tokens;
 
                     if let Some(total_input_tokens) = total_input_tokens_from_info(payload) {
@@ -551,27 +558,7 @@ impl SessionAccumulator {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown-session")
             .to_string();
-        let mut cost = cost::compute_cost(
-            if self.pricing_is_mixed_model {
-                ""
-            } else {
-                self.model.as_deref().unwrap_or("")
-            },
-            TokenUsage {
-                input_tokens: self.input_tokens_total,
-                cached_input_tokens: self.cached_input_tokens_total,
-                cache_write_tokens: None,
-                output_tokens: self.output_tokens_total,
-            },
-            self.speed,
-            pricing_config,
-        );
-        if self.pricing_had_unpriced_fast
-            || self.pricing_had_unknown_speed
-            || self.pricing_is_mixed_speed
-        {
-            cost.mark_partial();
-        }
+        let cost = self.costing.compute(pricing_config);
         let cost_attribution = match (self.pricing_is_mixed_model, self.pricing_is_mixed_speed) {
             (false, false) => CostAttribution::SingleModel,
             (true, false) => CostAttribution::MixedModels,
@@ -615,6 +602,7 @@ impl SessionAccumulator {
             session_delta_tokens,
             input_tokens_total: self.input_tokens_total,
             cached_input_tokens_total: self.cached_input_tokens_total,
+            cache_write_tokens_total: self.costing.cache_write_tokens(),
             output_tokens_total: self.output_tokens_total,
             last_input_tokens: self.last_input_tokens,
             last_cached_input_tokens: self.last_cached_input_tokens,

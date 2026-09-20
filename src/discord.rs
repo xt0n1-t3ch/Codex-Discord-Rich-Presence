@@ -100,7 +100,8 @@ pub struct DiscordProofCost {
 pub struct DiscordProofAssertions {
     pub no_ge_comparator: bool,
     pub exact_cost_when_available: bool,
-    pub partial_or_unavailable_cost_omitted: bool,
+    pub known_cost_emitted_when_public: bool,
+    pub unavailable_cost_omitted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -910,7 +911,7 @@ fn proof_cost_for_state(
     let no_ge_comparator = !state.contains(">=");
     let raw_cost = known_usd.map(format_cost);
     let (emitted, omitted) = match status {
-        PricingStatus::Exact => {
+        PricingStatus::Exact | PricingStatus::Partial => {
             let Some(label) = label.as_ref() else {
                 bail!("exact pricing status had no presentable cost label");
             };
@@ -926,7 +927,7 @@ fn proof_cost_for_state(
                 (false, true)
             }
         }
-        PricingStatus::Partial | PricingStatus::Unavailable => {
+        PricingStatus::Unavailable => {
             if let Some(raw_cost) = raw_cost.as_ref()
                 && state.contains(raw_cost)
             {
@@ -938,7 +939,10 @@ fn proof_cost_for_state(
     let assertions = DiscordProofAssertions {
         no_ge_comparator,
         exact_cost_when_available: status != PricingStatus::Exact || emitted || !cost_is_public,
-        partial_or_unavailable_cost_omitted: status == PricingStatus::Exact || omitted,
+        known_cost_emitted_when_public: status == PricingStatus::Unavailable
+            || emitted
+            || !cost_is_public,
+        unavailable_cost_omitted: status != PricingStatus::Unavailable || omitted,
     };
     if !assertions.no_ge_comparator {
         bail!("public Discord state contained a forbidden >= comparator");
@@ -1358,6 +1362,7 @@ mod tests {
             session_delta_tokens: Some(600),
             input_tokens_total: 24_000,
             cached_input_tokens_total: 15_000,
+            cache_write_tokens_total: None,
             output_tokens_total: 6_000,
             last_input_tokens: Some(1_500),
             last_cached_input_tokens: Some(900),
@@ -1772,7 +1777,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_cost_is_omitted_from_the_public_state_line() {
+    fn partial_cost_amount_is_shown_without_coverage_text() {
         let mut session = sample_session();
         session.pricing_status = PricingStatus::Partial;
         let (_, state) = presence_lines(
@@ -1785,8 +1790,8 @@ mod tests {
         );
 
         assert!(
-            !state.contains("$1.23"),
-            "partial cost leaked into: {state}"
+            state.contains("$1.23"),
+            "session cost amount missing from: {state}"
         );
         assert!(
             !state.contains(">="),
@@ -1831,12 +1836,12 @@ mod tests {
         let (partial_cost, partial_assertions) =
             proof_cost_for_state(Some(&partial), &partial_state, true).expect("partial cost proof");
         assert_eq!(partial_cost.status, PricingStatus::Partial);
-        assert!(partial_cost.label.is_none());
-        assert!(!partial_cost.emitted);
-        assert!(partial_cost.omitted);
-        assert!(partial_assertions.partial_or_unavailable_cost_omitted);
+        assert_eq!(partial_cost.label.as_deref(), Some("$1.23"));
+        assert!(partial_cost.emitted);
+        assert!(!partial_cost.omitted);
+        assert!(partial_assertions.known_cost_emitted_when_public);
         assert!(!partial_state.contains(">="));
-        assert!(!partial_state.contains("$1.23"));
+        assert!(partial_state.contains("$1.23"));
 
         let mut unavailable = partial;
         unavailable.known_cost_usd = None;
@@ -1855,7 +1860,7 @@ mod tests {
         assert_eq!(unavailable_cost.status, PricingStatus::Unavailable);
         assert!(unavailable_cost.label.is_none());
         assert!(unavailable_cost.omitted);
-        assert!(unavailable_assertions.partial_or_unavailable_cost_omitted);
+        assert!(unavailable_assertions.unavailable_cost_omitted);
     }
 
     #[test]

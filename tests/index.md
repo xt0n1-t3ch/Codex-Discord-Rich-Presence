@@ -23,12 +23,12 @@
 | Area | Module/Test seam |
 |:---|:---|
 | Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, Daybreak/Cyber and GPT-5.6 capabilities, runtime/catalog context provenance, prices, credits, and cache policy |
-| Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, omit partial public costs, fail closed for unknown models, and clamp cache accounting |
+| Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, emit currency-only known subtotals, fail closed for unknown models, and clamp cache accounting |
 | Fast mode | `src/session.rs` parses per-session service tier; `tests/integration/model_display.rs` validates Codex App labels and capability gating |
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
 | Surface identity | `src/session.rs`, `src/app.rs`, and `src/discord.rs` distinguish CLI, VS Code extension-host, VS Code terminal, desktop, OpenCode, sticky idle, launcher lineage, and selected desktop client ids |
 | Discord branding | `src/discord.rs` verifies RPC activity-title overrides, exact surface labels, separated reasoning/speed display, and Codex App / ChatGPT App design assets; `src/session.rs` proves `codex_work_desktop` originators override a misleading VS Code source |
-| Discord live proof | `src/discord.rs` verifies exact-cost emission, partial/unavailable omission, and the no-`>=` fail-closed contract used by the opt-in `discord-proof` wire seam |
+| Discord live proof | `src/discord.rs` verifies known-subtotal emission and unavailable omission, and the no-`>=` fail-closed contract used by the opt-in `discord-proof` wire seam |
 | Terminal layout | `src/ui.rs` covers layout, monochrome wordmark, plan picker, persisted design/master toggle copy, paused state, footer, spinner, and reserved rows |
 | Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
 | Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 13, ordered ten-field composition, Credits defaults, enabled-by-default migration, external design/privacy/master reload, invalid-file last-good fallback, and identity normalization |
@@ -51,3 +51,7 @@ Rule: bugs that cross module seams get an integration regression; module-local b
 ## Windows efficiency and release validation
 
 `src/power.rs` tests option parsing and the Windows ABI layout. `scripts/check-windows-efficiency.ps1` reads the running process policy. Release checks validate versions, PE architecture, software bills of materials and checksums.
+
+## Version 1.11.2 cost regressions
+
+`src/session/costing.rs` covers repeated cumulative events, per-sample cache writes, model/speed changes, unknown-model subtotals, missing request history and observed long-context requests. `crates/codex-presence-core/src/presence.rs` protects enabled cost fields against long model labels while preserving privacy and field order.

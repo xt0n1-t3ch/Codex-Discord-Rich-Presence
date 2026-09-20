@@ -73,3 +73,7 @@ Every pricing catalog change needs a pricing-resolution test and a context-windo
 Before saying a Windows exe is fixed, run the build script and verify the produced `releases/windows/codex-discord-rich-presence.exe` with `status` or `doctor`.
 
 Windows Efficiency mode is implemented in src/power.rs and initialized by the binary. CODEX_PRESENCE_EFFICIENCY_MODE=0 opts out. scripts/check-windows-efficiency.ps1 reads process policy without changing it.
+
+## Session-cost ownership
+
+`src/session/costing.rs` owns per-event cost accumulation. Preserve model, speed and cache-write telemetry for each delta. Repeated cumulative events must not add cost. Apply long-context pricing only to an observed request size, never to cumulative session input. Unknown components retain a partial known subtotal. Discord shows currency only when that field is enabled; snapshots retain coverage and provenance.

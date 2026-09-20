@@ -270,6 +270,7 @@ fn pricing_status_distinguishes_exact_partial_and_unavailable() {
     let exact = compute_cost(
         "gpt-5.6-sol",
         TokenUsage {
+            input_tokens: 25_000,
             cache_write_tokens: Some(25_000),
             ..TokenUsage::default()
         },
@@ -302,14 +303,14 @@ fn prompt_cache_policy_is_explicit_and_verified() {
 }
 
 #[test]
-fn public_cost_presentation_preserves_completeness() {
+fn public_cost_presentation_uses_currency_only_for_known_subtotals() {
     assert_eq!(
         format_presentable_cost(Some(0.0065), PricingStatus::Exact),
         Some("$0.01".to_string())
     );
     assert_eq!(
         format_presentable_cost(Some(0.0065), PricingStatus::Partial),
-        None
+        Some("$0.01".to_string())
     );
     assert_eq!(
         format_presentable_cost(None, PricingStatus::Unavailable),

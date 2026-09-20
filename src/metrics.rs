@@ -516,6 +516,7 @@ mod tests {
             session_delta_tokens: Some(0),
             input_tokens_total: input,
             cached_input_tokens_total: cached,
+            cache_write_tokens_total: None,
             output_tokens_total: output,
             last_input_tokens: Some(0),
             last_cached_input_tokens: Some(0),

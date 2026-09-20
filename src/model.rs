@@ -47,6 +47,13 @@ pub struct CatalogModel {
     pub pricing_model: Option<String>,
     pub api_pricing: Option<CatalogRates>,
     pub credit_rates: Option<CatalogRates>,
+    pub long_context_pricing: Option<LongContextMultipliers>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+pub struct LongContextMultipliers {
+    pub input_and_cache: f64,
+    pub output: f64,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -239,6 +246,10 @@ impl ModelResolution {
 
     pub fn api_rates(self) -> Option<CatalogRates> {
         resolve_pricing_model(self.model).and_then(|model| model.api_pricing)
+    }
+
+    pub fn long_context_pricing(self) -> Option<LongContextMultipliers> {
+        resolve_pricing_model(self.model).and_then(|model| model.long_context_pricing)
     }
 
     pub fn credit_rates(self) -> Option<CatalogRates> {
@@ -469,6 +480,9 @@ fn validate_bundled_catalog(catalog: &ModelCatalog) -> Result<(), &'static str> 
                 .is_some_and(|multiplier| !valid_positive_rate(multiplier))
             || model.api_pricing.is_some_and(|rates| !valid_rates(rates))
             || model.credit_rates.is_some_and(|rates| !valid_rates(rates))
+            || model.long_context_pricing.is_some_and(|rates| {
+                !valid_positive_rate(rates.input_and_cache) || !valid_positive_rate(rates.output)
+            })
         {
             return Err("invalid model metadata");
         }

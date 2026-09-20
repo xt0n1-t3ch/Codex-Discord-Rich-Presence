@@ -158,17 +158,39 @@ pub fn compute_cost(
     speed: SessionSpeed,
     pricing_config: &PricingConfig,
 ) -> CostComputation {
+    let context_known = resolve_model(model_id)
+        .and_then(|model| model.context())
+        .and_then(|context| context.long_context_input_threshold)
+        .is_none_or(|threshold| usage.input_tokens <= threshold);
+    compute_cost_for_request(
+        model_id,
+        usage,
+        speed,
+        pricing_config,
+        context_known.then_some(usage.input_tokens),
+    )
+}
+
+pub fn compute_cost_for_request(
+    model_id: &str,
+    usage: TokenUsage,
+    speed: SessionSpeed,
+    pricing_config: &PricingConfig,
+    prompt_input_tokens: Option<u64>,
+) -> CostComputation {
     let resolved = resolve_model_pricing(model_id, pricing_config);
     let Some(pricing) = resolved.pricing else {
         return unavailable_computation();
     };
 
     let cached_input_tokens = usage.cached_input_tokens.min(usage.input_tokens);
-    let non_cached_input_tokens = usage.input_tokens.saturating_sub(cached_input_tokens);
+    let remaining_input = usage.input_tokens.saturating_sub(cached_input_tokens);
+    let cache_write_tokens = usage.cache_write_tokens.unwrap_or(0).min(remaining_input);
+    let non_cached_input_tokens = remaining_input.saturating_sub(cache_write_tokens);
     let mut breakdown = TokenCostBreakdown {
         input_cost_usd: per_million(non_cached_input_tokens, pricing.input_per_million),
         cache_write_cost_usd: match (usage.cache_write_tokens, pricing.cache_write_per_million) {
-            (Some(tokens), Some(rate)) => per_million(tokens, rate),
+            (Some(_), Some(rate)) => per_million(cache_write_tokens, rate),
             _ => 0.0,
         },
         cached_input_cost_usd: per_million(cached_input_tokens, pricing.cached_input_per_million),
@@ -191,15 +213,36 @@ pub fn compute_cost(
     };
     breakdown.apply_multiplier(economic_multiplier);
 
-    let cache_complete =
-        pricing.cache_write_per_million.is_none() || usage.cache_write_tokens.is_some();
-    // Session telemetry is cumulative and cannot prove whether any one prompt crossed the
-    // model's long-context threshold. Preserve the published base-rate subtotal as a lower
-    // bound instead of presenting it as exact once cumulative input exceeds that boundary.
-    let long_context_complete = model
+    let cache_complete = usage.cached_input_tokens <= usage.input_tokens
+        && usage
+            .cache_write_tokens
+            .is_none_or(|tokens| tokens <= remaining_input)
+        && match pricing.cache_write_per_million {
+            Some(_) => usage.cache_write_tokens.is_some(),
+            None => usage.cache_write_tokens.is_none_or(|tokens| tokens == 0),
+        };
+    let long_context_complete = match model
         .and_then(|model| model.context())
         .and_then(|context| context.long_context_input_threshold)
-        .is_none_or(|threshold| usage.input_tokens <= threshold);
+    {
+        None => true,
+        Some(threshold) => match prompt_input_tokens {
+            Some(input) if input <= threshold => true,
+            Some(_) => {
+                if let Some(rates) = model.and_then(|model| model.long_context_pricing()) {
+                    breakdown.input_cost_usd *= rates.input_and_cache;
+                    breakdown.cached_input_cost_usd *= rates.input_and_cache;
+                    breakdown.cache_write_cost_usd *= rates.input_and_cache;
+                    breakdown.cached_input_savings_usd *= rates.input_and_cache;
+                    breakdown.output_cost_usd *= rates.output;
+                    true
+                } else {
+                    false
+                }
+            }
+            None => false,
+        },
+    };
     let Some(known_total) = breakdown.known_component_total() else {
         return unavailable_computation();
     };
@@ -239,8 +282,7 @@ pub fn format_presentable_cost(
     let total = known_total_cost_usd.filter(|value| value.is_finite() && *value >= 0.0)?;
     let formatted = crate::util::format_cost(total);
     match status {
-        PricingStatus::Exact => Some(formatted),
-        PricingStatus::Partial => None,
+        PricingStatus::Exact | PricingStatus::Partial => Some(formatted),
         PricingStatus::Unavailable => None,
     }
 }
@@ -470,7 +512,7 @@ mod tests {
             &PricingConfig::default(),
         );
         assert_eq!(exact.status, PricingStatus::Exact);
-        assert!((exact.known_total_cost_usd.expect("known subtotal") - 1.55625).abs() < 0.000001);
+        assert!((exact.known_total_cost_usd.expect("known subtotal") - 1.43125).abs() < 0.000001);
 
         let partial = compute_cost(
             "gpt-daybreak-red-latest",
@@ -490,7 +532,7 @@ mod tests {
     fn partial_and_unavailable_costs_cannot_render_as_exact() {
         assert_eq!(
             format_presentable_cost(Some(0.0065), PricingStatus::Partial),
-            None
+            Some("$0.01".to_string())
         );
         assert_eq!(
             format_presentable_cost(None, PricingStatus::Unavailable),
@@ -521,14 +563,14 @@ mod astra_tests {
             &PricingConfig::default(),
         );
         assert_eq!(standard.status, PricingStatus::Exact);
-        assert!((standard.total_cost_usd - 0.995).abs() < 1e-9);
+        assert!((standard.total_cost_usd - 0.895).abs() < 1e-9);
         let fast = compute_cost(
             "gpt-6-astra",
             usage,
             SessionSpeed::explicit(SpeedMode::Fast, SpeedSource::ThreadSettings),
             &PricingConfig::default(),
         );
-        assert!((fast.total_cost_usd - 1.99).abs() < 1e-9);
+        assert!((fast.total_cost_usd - 1.79).abs() < 1e-9);
         let long = compute_cost(
             "gpt-6-astra",
             TokenUsage {
@@ -539,6 +581,10 @@ mod astra_tests {
             &PricingConfig::default(),
         );
         assert_eq!(long.status, PricingStatus::Partial);
-        assert!(format_presentable_cost(long.known_total_cost_usd, long.status).is_none());
+        assert!(
+            format_presentable_cost(long.known_total_cost_usd, long.status)
+                .expect("partial cost")
+                .starts_with('$')
+        );
     }
 }

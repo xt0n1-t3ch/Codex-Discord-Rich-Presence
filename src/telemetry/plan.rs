@@ -421,6 +421,7 @@ mod tests {
             session_delta_tokens: Some(1),
             input_tokens_total: 1,
             cached_input_tokens_total: 0,
+            cache_write_tokens_total: None,
             output_tokens_total: 0,
             last_input_tokens: Some(1),
             last_cached_input_tokens: Some(0),

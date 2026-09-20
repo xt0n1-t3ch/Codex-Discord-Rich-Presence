@@ -22,6 +22,7 @@ use crate::telemetry::limits::{
 };
 
 mod activity;
+mod costing;
 mod parser;
 
 use activity::SessionAccumulator;
@@ -112,6 +113,8 @@ pub struct CodexSessionSnapshot {
     pub session_delta_tokens: Option<u64>,
     pub input_tokens_total: u64,
     pub cached_input_tokens_total: u64,
+    #[serde(default)]
+    pub cache_write_tokens_total: Option<u64>,
     pub output_tokens_total: u64,
     pub last_input_tokens: Option<u64>,
     pub last_cached_input_tokens: Option<u64>,
@@ -624,6 +627,7 @@ mod tests {
             session_delta_tokens: None,
             input_tokens_total: 0,
             cached_input_tokens_total: 0,
+            cache_write_tokens_total: None,
             output_tokens_total: 0,
             last_input_tokens: None,
             last_cached_input_tokens: None,
@@ -943,8 +947,8 @@ mod tests {
         );
 
         assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-luna"));
-        assert_eq!(snapshot.pricing_source, PricingSource::Unavailable);
-        assert_eq!(snapshot.total_cost_usd, 0.0);
+        assert_eq!(snapshot.pricing_status, crate::cost::PricingStatus::Partial);
+        assert!((snapshot.total_cost_usd - 0.01266).abs() < 1e-9);
     }
 
     #[test]
@@ -1332,6 +1336,7 @@ mod tests {
             session_delta_tokens: None,
             input_tokens_total: 0,
             cached_input_tokens_total: 0,
+            cache_write_tokens_total: None,
             output_tokens_total: 0,
             last_input_tokens: None,
             last_cached_input_tokens: None,
@@ -1387,6 +1392,7 @@ mod tests {
             session_delta_tokens: None,
             input_tokens_total: 0,
             cached_input_tokens_total: 0,
+            cache_write_tokens_total: None,
             output_tokens_total: 0,
             last_input_tokens: None,
             last_cached_input_tokens: None,
