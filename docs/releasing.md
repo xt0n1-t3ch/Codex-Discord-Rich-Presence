@@ -10,10 +10,10 @@ Local implementation does not imply promotion.
 
 ## Version surfaces
 
-`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and both Windows target/artifact/SBOM/PE-machine contracts. For v1.11.1:
+`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and both Windows target/artifact/SBOM/PE-machine contracts. For v1.11.2:
 
-- binary/workspace: 1.11.1;
-- `codex-presence-core`: 2.0.0;
+- binary/workspace: 1.11.2;
+- `codex-presence-core`: 2.0.1;
 - config schema: 13.
 
 The tag version, Cargo metadata, README release copy, changelog section, and release contract must agree before preflight succeeds.

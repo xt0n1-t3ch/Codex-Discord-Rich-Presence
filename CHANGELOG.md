@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-09-19
+
+### Fixed
+
+- Accumulate session cost per usage event with model, speed and cache-write telemetry. Reject repeated events and preserve known multimodel subtotals.
+- Apply supported long-context prices to observed request input, not accumulated session input.
+- Publish enabled known monetary amounts as currency only, including partial subtotals, while keeping unavailable amounts absent and preserving coverage in snapshots.
+- Reserve space for enabled costs in the shared Discord compositor when model labels are long.
+
+### Security
+
+- Update `rustls` to 0.23.45 to address RUSTSEC-2026-0285, which affects TLS 1.3 handshake validation.
+
+### Compatibility and rollback
+
+- Runtime 1.11.2 and `codex-presence-core` 2.0.1 preserve the public core API, configuration schema 13, Discord identity rules and privacy controls.
+- Costs remain estimates from observed telemetry and selected rates. A currency-only known subtotal can be partial; snapshots retain coverage and provenance.
+- Restore the previous executable to roll back. This release does not migrate the configuration or rewrite session data.
+
 ## [1.11.1] - 2026-09-05
 
 ### Added
