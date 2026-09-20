@@ -6,6 +6,7 @@ pub mod discord;
 pub mod metrics;
 pub mod model;
 pub mod opencode;
+pub mod power;
 pub mod process_guard;
 pub mod session;
 pub mod telemetry;

@@ -190,6 +190,7 @@ pub enum OpenAiPlanTier {
     Plus,
     Business,
     Enterprise,
+    Edu,
     #[serde(
         rename = "pro_5x",
         alias = "pro5x",
@@ -218,6 +219,7 @@ impl OpenAiPlanTier {
             Self::Plus => "Plus",
             Self::Business => "Business",
             Self::Enterprise => "Enterprise",
+            Self::Edu => "Edu",
             Self::Pro5x => "Pro 5x",
             Self::Pro20x => "Pro 20x",
         }
@@ -230,7 +232,7 @@ impl OpenAiPlanTier {
             Self::Plus => Some(20),
             Self::Pro5x => Some(100),
             Self::Pro20x => Some(200),
-            Self::Business | Self::Enterprise => None,
+            Self::Business | Self::Enterprise | Self::Edu => None,
         }
     }
 }
@@ -270,7 +272,7 @@ pub struct PlanPreset {
     pub label: &'static str,
 }
 
-const PLAN_PRESETS: [PlanPreset; 8] = [
+const PLAN_PRESETS: [PlanPreset; 9] = [
     PlanPreset {
         mode: OpenAiPlanMode::Auto,
         tier: None,
@@ -310,6 +312,11 @@ const PLAN_PRESETS: [PlanPreset; 8] = [
         mode: OpenAiPlanMode::Manual,
         tier: Some(OpenAiPlanTier::Enterprise),
         label: "Enterprise",
+    },
+    PlanPreset {
+        mode: OpenAiPlanMode::Manual,
+        tier: Some(OpenAiPlanTier::Edu),
+        label: "Edu",
     },
 ];
 

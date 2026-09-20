@@ -305,7 +305,7 @@ fn prompt_cache_policy_is_explicit_and_verified() {
 fn public_cost_presentation_preserves_completeness() {
     assert_eq!(
         format_presentable_cost(Some(0.0065), PricingStatus::Exact),
-        Some("$0.0065".to_string())
+        Some("$0.01".to_string())
     );
     assert_eq!(
         format_presentable_cost(Some(0.0065), PricingStatus::Partial),

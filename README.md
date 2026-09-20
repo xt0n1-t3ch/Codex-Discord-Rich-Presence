@@ -1,275 +1,134 @@
 # Codex Discord Rich Presence
 
-<div align="center">
-
-<picture>
-  <img src="assets/branding/codex-readme-hero.png" alt="Codex Discord Rich Presence hero with Codex App-inspired gradient and Discord Rich Presence preview" width="100%">
-</picture>
-
-### Local-first activity for Codex App, ChatGPT App, CLI, VS Code, and OpenCode.
-
-One Rust runtime for **identity**, **model**, **cost**, **cache**, **context**, semantic **quota visibility**, and **Credits** — with no cloud telemetry.
-
-<p>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"><img src="assets/readme/badges/release.png" alt="Release v1.10.3" height="47"></a>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml"><img src="assets/readme/badges/ci-ready.png" alt="CI ready" height="47"></a>
-  <a href="https://openai.com/codex/"><img src="assets/readme/badges/openai-codex.png" alt="OpenAI Codex" height="47"></a>
-  <a href="https://discord.com/developers/docs/rich-presence/overview"><img src="assets/readme/badges/discord-rpc.png" alt="Discord RPC" height="47"></a>
-  <br>
-  <a href="https://www.rust-lang.org/"><img src="assets/readme/badges/rust-daemon.png" alt="Rust daemon" height="47"></a>
-  <a href="https://ratatui.rs/"><img src="assets/readme/badges/ratatui-ui.png" alt="Ratatui UI" height="47"></a>
-  <img src="assets/readme/badges/local-first.png" alt="Local-first privacy" height="47">
-  <img src="assets/readme/badges/platforms.png" alt="Windows macOS Linux" height="47">
-</p>
-
-<sub>
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest">Release</a> ·
-  <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/actions/workflows/ci.yml">CI</a> ·
-  <a href="https://openai.com/codex/">OpenAI Codex</a> ·
-  <a href="https://discord.com/developers/docs/rich-presence/overview">Discord RPC</a> ·
-  <a href="https://www.rust-lang.org/">Rust</a> ·
-  <a href="https://ratatui.rs/">Ratatui</a>
-</sub>
-
-<a href="#install"><b>Install</b></a>&nbsp; · &nbsp;<a href="#whats-new"><b>What's New</b></a>&nbsp; · &nbsp;<a href="#about"><b>About</b></a>&nbsp; · &nbsp;<a href="#screenshots"><b>Screenshots</b></a>&nbsp; · &nbsp;<a href="#features"><b>Features</b></a>&nbsp; · &nbsp;<a href="#usage"><b>Usage</b></a>&nbsp; · &nbsp;<a href="docs/"><b>Docs</b></a>
-
-</div>
-
----
-
-<h2 id="whats-new"><img src="assets/readme/icons/sparkles.png" alt="" width="28" align="center"> &nbsp;What's New in v1.10.3</h2>
-
-- **Native Windows ARM64** - Snapdragon and other Arm64 Windows machines now receive a dedicated executable, architecture-specific SPDX SBOM, checksum, PE validation, and native release smoke.
-- **Daybreak Blue** - `gpt-daybreak-blue-latest` and its supported aliases render as `GPT-5.6-Cyber-Blue`, preserve runtime-observed context, and keep unpublished pricing unavailable.
-- **Daybreak Red** - `gpt-5.6-cyber` and Daybreak Red aliases render as `GPT-5.6-Cyber-Red` with the published 400K context and API pricing contract.
-- **All observed efforts** - Low, Medium, High, Extra High, Max, and Ultra remain visible for both GPT-5.6 Cyber families without inventing Fast support.
-- **Hardened release inventory** - every release is assembled as exactly ten assets spanning Windows x64/ARM64, Linux, macOS, both Windows SBOMs, branding, and checksums.
-
-<details>
-<summary>Previous v1.9.0 highlights</summary>
-
-- **Truthful usage** - quota names come from their actual window duration, all global/model scopes survive normalization, and missing five-hour windows stay missing.
-- **Real Credits** - account Credits support exact balances, explicit zero, unlimited, absence, and individual privacy control.
-- **Fast without inheritance bugs** - explicit session speed wins; only unknown sessions fall back to `config.toml`, then legacy global state, and Fast renders as `⚡ Fast`.
-- **One composer** - `codex-presence-core` 2.0.0 owns deterministic field order, details/state zones, compact/descriptive labels, presets, and Discord's 128-character boundary.
-- **Adaptive provider lanes** - explicit usage signals, stable stream IDs, dynamic windows, and global-account credit precedence keep Codex-local telemetry isolated and truthful.
-
-</details>
-
-**[Download the latest release](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)** &nbsp;·&nbsp; **[Full changelog](CHANGELOG.md)**
-
-<h2 id="about"><img src="assets/readme/icons/info.png" alt="" width="28" align="center"> &nbsp;About</h2>
-
-Codex already knows what you are doing: which session is active, which model is working, how much context is used, how many tokens came from cache, and whether the session is still alive. Discord sees none of that by default.
-
-**Codex Discord Rich Presence bridges that gap locally.** It reads Codex and OpenCode session data from your machine, normalizes it into one usage snapshot, and renders two outputs from the same truth:
-
-- a Discord Rich Presence card with the right Codex identity and clean activity text;
-- a Ratatui terminal dashboard for live model, plan, cost, cache, context, and quota visibility.
-
-No hosted service. No account sync. No transcript upload. Just a Rust daemon that watches local files and publishes the presence fields you choose.
-
-<h2 id="screenshots"><img src="assets/readme/icons/image.png" alt="" width="28" align="center"> &nbsp;Screenshots</h2>
+A local Rust runtime that publishes Codex activity to Discord and shows the same state in a terminal dashboard. Release v1.11.1 adds GPT-6 Astra, Windows Efficiency mode and clearer monetary display.
 
 <div align="center">
+<img src="assets/branding/codex-readme-hero.png" alt="Codex Discord Rich Presence" width="100%">
 
-<img src="assets/screenshots/codex-discord-rich-presence.png" alt="Discord card showing Codex App activity with model, reasoning, cost, tokens, context usage, and quota windows" width="520">
+[![Release v1.11.1](https://img.shields.io/badge/Release-v1.11.1-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
+[![MIT](https://img.shields.io/badge/License-MIT-171717)](LICENSE)
 
-<sub><b>Discord Rich Presence</b> — Codex App branding · GPT model · plan · tokens · cost · context · quota windows.</sub>
-
-
-
+[Install](#install) · [What's new](#whats-new-in-v1110) · [Controls](#terminal-controls) · [Configuration](#configuration) · [Documentation](docs/index.md)
 </div>
 
-<h2 id="install"><img src="assets/readme/icons/download.png" alt="" width="28" align="center"> &nbsp;Install</h2>
+## What's New in v1.11.1
 
-Download a Windows, macOS, or Linux binary from [GitHub Releases](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest). Windows publishes both `codex-discord-rich-presence-windows-x64.exe` and native `codex-discord-rich-presence-windows-arm64.exe`.
+- GPT-6 Astra model identity, observed reasoning effort, a 1,050,000-token total context window, 922,000-token input limit and 128,000-token output limit.
+- Standard/Fast pricing with explicit completeness. Missing request-level evidence does not become an exact total or invented subscription credits.
+- Manual plan overrides take precedence over automatic cache updates. Protocol `pro` maps to Pro 20x and `prolite` to Pro 5x; Edu and explicit aliases are recognized.
+- Unknown plan labels no longer appear as public `Unknown` text in Discord.
+- Monetary display uses two decimal places while calculations retain their original precision.
+- Windows Efficiency mode requests EcoQoS and Idle process priority, with an environment opt-out.
 
-```powershell
-codex-discord-presence status
-codex-discord-presence doctor
-codex-discord-presence
-```
+The shared `codex-presence-core` API remains version 2.0.0. See the [changelog](CHANGELOG.md) for previous releases.
 
-Windows local artifacts:
+## Install
 
-```powershell
-.\scripts\build-release.ps1 -Architecture all
-.\releases\windows\codex-discord-rich-presence-windows-x64.exe
-.\releases\windows\codex-discord-rich-presence-windows-arm64.exe
-```
+Download your architecture from [GitHub Releases](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest). Published release assets include Windows x64/ARM64, Linux x64 and macOS Intel/Apple Silicon binaries, Windows SPDX software bills of materials, branding files and SHA-256 checksums.
 
-### Build from source
+For Windows x64, run:
 
 ```powershell
-git clone https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence.git
-cd Codex-Discord-Rich-Presence
-cargo build --release
+.\codex-discord-rich-presence-windows-x64.exe doctor
+.\codex-discord-rich-presence-windows-x64.exe status
+.\codex-discord-rich-presence-windows-x64.exe
 ```
 
-<h2 id="features"><img src="assets/readme/icons/layers.png" alt="" width="28" align="center"> &nbsp;Features</h2>
+The last command opens the foreground terminal dashboard. Keep Discord open for publication. `status` and `doctor` are one-shot diagnostics, not the dashboard.
 
-<div align="center">
-
-<img src="assets/branding/codex-feature-strip.png" alt="Codex presence capability strip: Discord, privacy, Rust runtime, Codex, terminal dashboard, context, cache, and layout" width="100%">
-
-<sub><b>One local runtime</b> — Discord status, privacy controls, Rust daemon, terminal dashboard, cache, context, and session layout from one snapshot.</sub>
-
-</div>
-
-### Discord Rich Presence
-
-| | |
-| :--- | :--- |
-| **Exact surface identity** | `Codex CLI`, `Codex VS Code Extension`, and desktop sessions are classified from session metadata first and launcher lineage second; unrelated open apps cannot contaminate the result. |
-| **Readable activity** | Thinking, reading, editing, running, waiting, and idle states stay short enough for Discord while preserving the useful target when configured. |
-| **Model + plan line** | GPT-5.6 App labels, reasoning effort, session-scoped Fast markers, and `Pro 5x` / `Pro 20x` display labels resolve from shared contracts. |
-| **Cost + cache truth** | Input, cached input, output, cache hit ratio, cached-input savings, and total cost are computed before Discord rendering, not recomputed inside the payload formatter. |
-| **Context and quota windows** | GPT-5.6 resolves observed JSONL first, local Codex model cache second, and bundled context last. Daybreak Blue preserves runtime context without inventing a catalog limit; Cyber Red uses its published 400K contract. |
-
-### Terminal dashboard
-
-| | |
-| :--- | :--- |
-| **Codex-first header** | Large centered wordmark, local-first subtitle, spinner, mode, Discord state, and poll cadence. |
-| **Responsive layouts** | Full, compact, and minimal views keep terminal output readable across Windows Terminal, macOS Terminal, Linux terminals, and small panes. |
-| **Plan picker** | Press `P` to choose Auto Detect, Free, Go, Plus, Pro 5x, Pro 20x, Business, or Enterprise. |
-| **Desktop design toggle** | Press `D` to switch and persist `Codex App` or `ChatGPT App`; Discord reconnects to the matching application identity. |
-| **Master presence toggle** | Press `M` to persistently pause or resume Discord publication without stopping local session monitoring. |
-| **Usage snapshot** | Cost, cache hit ratio, savings, uptime, spend trend, limits, and recent sessions share the same runtime snapshot as Discord. |
-| **No forced image protocol** | The repo owns both Codex App and ChatGPT App source art; the terminal uses text-first rendering so it stays portable. |
-
-### Local diagnostics
-
-| Command | Purpose |
-| :--- | :--- |
-| `codex-discord-presence status` | Print current detection state, active sessions, surface, model, plan, context, and session roots. |
-| `codex-discord-presence doctor` | Check Discord IPC, config, assets, session paths, and runtime assumptions. |
-| `codex-discord-presence` | Start the foreground Ratatui dashboard and Discord broadcaster. |
-
-<h2 id="what-makes-it-cool"><img src="assets/readme/icons/brain.png" alt="" width="28" align="center"> &nbsp;What makes it cool</h2>
-
-| Capability | This runtime | Generic presence scripts |
-| :--- | :---: | :---: |
-| Exact CLI / VS Code / desktop identity | ✓ | — |
-| GPT-5.6 effort and session-scoped Fast display | ✓ | — |
-| 372K raw / 353.4K usable context provenance | ✓ | — |
-| Cache hit ratio and cached-input savings | ✓ | — |
-| Ratatui live dashboard | ✓ | — |
-| Local-only session reading | ✓ | varies |
-| Cross-platform Rust daemon | ✓ | varies |
-
-<h2 id="model-context-and-cost-tracking"><img src="assets/readme/icons/gauge.png" alt="" width="28" align="center"> &nbsp;Model, context, and cost tracking</h2>
-
-| Runtime lane | Value | Behavior |
-|:---|---:|:---|
-| GPT-5.6 raw context | 372,000 | Inventory value from the local Codex 0.144.0 model catalog. |
-| GPT-5.6 usable context | 353,400 | Observed App value at 95%; JSONL overrides local cache, which overrides the bundled catalog. |
-| GPT-5.6 cache-write telemetry | Not emitted by Codex JSONL | Known subtotal is marked `partial`; no zero-cost write is invented. |
-| GPT-5.6 Fast economics | Not published | Fast remains visible, but cost completeness is `partial` until a multiplier is verified. |
-| Unknown models | No fallback | Cost is unavailable unless a valid user override exists. |
-
-Example Discord state line:
-
-```text
-GPT-5.6 Sol · Max · ⚡ Fast | Pro 20x ($200/month) · 38.9M tok · Ctx 1% used · 5h 41% · 7d 47%
-```
-
-<h2 id="usage"><img src="assets/readme/icons/play.png" alt="" width="28" align="center"> &nbsp;Usage</h2>
-
-**First launch** → start `codex-discord-presence` → keep using Codex. The daemon scans local session roots and publishes the current activity to Discord.
-
-**Change plan display** → press `P` in the terminal → choose Auto Detect or a manual tier. `Pro 5x ($100/month)` and `Pro 20x ($200/month)` are separate options.
-
-**Change desktop design** → press `D` in the terminal → the persisted schema-13 setting alternates between `Codex App` and `ChatGPT App`.
-
-**Pause or resume Discord** → press `M` in the terminal → schema 13 persists the same `presence_enabled` switch used by Pulse. Pausing clears the current card but keeps local monitoring active.
-
-**Hide sensitive fields** → edit `~/.codex/discord-presence-config.json` and toggle privacy fields such as project, branch, activity, tokens, cost, and limits.
-
-**Use WSL sessions on Windows** → opt in explicitly before launch:
+If your launcher hides the console, open a Windows Terminal window explicitly:
 
 ```powershell
-$env:CODEX_PRESENCE_INCLUDE_WSL = "1"
+wt -w new new-tab .\codex-discord-rich-presence-windows-x64.exe
 ```
 
-<h2 id="configuration"><img src="assets/readme/icons/sliders.png" alt="" width="28" align="center"> &nbsp;Configuration</h2>
+## What it reads and publishes
 
-Config lives at `~/.codex/discord-presence-config.json`.
+The runtime reads local Codex JSONL sessions and local metadata. It can also read supported GPT sessions from OpenCode's local store. Session metadata has priority over launcher hints when identifying Codex App, ChatGPT App, CLI or VS Code activity.
+
+The Discord identity remains Codex-owned. For a desktop analytics UI, arbitrary OpenCode providers and OpenCode Go account limits, use [Pulse](https://github.com/xt0n1-t3ch/Pulse-Claude-Code-Analytics).
+
+| Data | Rule |
+| --- | --- |
+| Model and effort | Preserve the recorded model and supported observed effort |
+| Speed | Explicit session speed wins over local fallback settings |
+| Context | Use observed context before local model cache or catalog defaults |
+| Cost | Keep exact, partial and unavailable states separate |
+| Quotas | Preserve actual provider windows, scope and reset timestamps |
+| Credits | Show only reported balances or explicit unlimited status |
+| Privacy | Publish only the fields enabled in the local configuration |
+
+A formatted `$0.00` is a rounded known amount, not a substitute for missing cost. Unpublished pricing and incomplete telemetry remain unavailable or partial.
+
+## Terminal controls
+
+| Key | Action |
+| --- | --- |
+| `P` | Choose automatic detection or a manual plan label |
+| `D` | Switch the desktop identity between Codex App and ChatGPT App |
+| `M` | Pause or resume Discord publication |
+| `Q` / `Ctrl+C` | Exit the foreground runtime |
+
+Plan and presence settings persist in `~/.codex/discord-presence-config.json`. Pausing publication does not stop local monitoring. The terminal selects its layout from the available width; no terminal image protocol is required.
+
+## Configuration
+
+The runtime keeps configuration under `CODEX_HOME`, or `~/.codex` by default.
 
 | Variable | Purpose |
-|:---|:---|
-| `CODEX_HOME` | Use a custom Codex home directory. |
-| `CODEX_PRESENCE_POLL_SECONDS` | Override daemon poll interval. |
-| `CODEX_PRESENCE_STALE_SECONDS` | Override session stale cutoff. |
-| `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` | Override active-session stickiness window. |
-| `CODEX_PRESENCE_SURFACE` | Explicit fallback identity: `cli`, `vscode`, or `desktop`; active JSONL metadata remains authoritative. |
-| `CODEX_PRESENCE_INCLUDE_WSL=1` | Opt in to scanning WSL Codex session roots on Windows. Off by default. |
-| `CC_PRESENCE_INCLUDE_WSL=1` | Compatibility alias for the same WSL opt-in. |
+| --- | --- |
+| `CODEX_HOME` | Select a Codex home directory |
+| `CODEX_PRESENCE_POLL_SECONDS` | Set the polling interval |
+| `CODEX_PRESENCE_STALE_SECONDS` | Set the stale-session cutoff |
+| `CODEX_PRESENCE_ACTIVE_STICKY_SECONDS` | Set the active-session retention window |
+| `CODEX_PRESENCE_SURFACE` | Set a fallback surface: `cli`, `vscode` or `desktop` |
+| `CODEX_PRESENCE_INCLUDE_WSL=1` | Opt in to WSL transcript discovery on Windows |
+| `CODEX_PRESENCE_EFFICIENCY_MODE=0` | Opt out of Windows Efficiency mode before launch |
 
-<h2 id="project-map"><img src="assets/readme/icons/folder.png" alt="" width="28" align="center"> &nbsp;Project map</h2>
+WSL scanning stays off unless requested. Surface overrides do not replace authoritative session metadata.
 
-| Path | Purpose |
-|:---|:---|
-| `src/app.rs` | Daemon loop, process and surface hints, Discord update cadence. |
-| `src/config.rs` | Runtime configuration, session roots, identity defaults, migration, and WSL opt-in policy. |
-| `src/model.rs` + `src/model_catalog.json` | Model identities, labels, efforts, speed capabilities, context provenance, rates, credits, and sources. |
-| `src/cost.rs` | Cost arithmetic, completeness, overrides, reconciliation, and cache savings. |
-| `src/discord.rs` | Discord IPC payloads, asset policy, and sticky surface branding. |
-| `src/metrics.rs` | Usage, cost, cache, and context metrics. |
-| `src/session.rs` + `src/session/*` | Codex JSONL collection, parsing, activity, and context-window state. |
-| `src/ui.rs` | Ratatui terminal dashboard and layout contracts. |
-| `assets/branding/` | Codex App and ChatGPT App source art, README visuals, and badge policy. |
-| `docs/` | Runtime, UI, and local schema contracts. |
-| `tests/` | Integration map and regression coverage. |
+### Windows Efficiency mode
 
-<h2 id="docs"><img src="assets/readme/icons/info.png" alt="" width="28" align="center"> &nbsp;Documentation</h2>
+On supported Windows versions, the runtime requests EcoQoS and Idle process priority for itself. It does not change the machine's power plan or another application's priority. Windows controls whether Task Manager displays a leaf indicator. Unsupported systems continue without this policy.
 
-- [Runtime API contract](docs/api/codex-presence.md)
-- [Local schema map](docs/database/schema.md)
-- [Terminal UI sitemap](docs/ui/UI_SITEMAP.md)
-- [Test suite map](tests/index.md)
+The read-only verifier checks the actual process flags:
 
-<h2 id="roadmap"><img src="assets/readme/icons/roadmap.png" alt="" width="28" align="center"> &nbsp;Roadmap</h2>
+```powershell
+.\scripts\check-windows-efficiency.ps1 -ProcessId 1234
+```
 
-- **Signed release installers** — publish first-class Windows/macOS/Linux packages with checksums and a cleaner install path.
-- **Discord field presets** — expose Minimal, Standard, Full, and privacy-first templates directly in the standalone runtime.
-- **Terminal screenshots in CI** — render Ratatui buffers as deterministic preview assets for README and release notes.
-- **Pulse sync gate** — keep the standalone Codex core and Pulse mirror in lockstep with a contract diff check.
+Replace `1234` with the running runtime's process ID. See [Windows Efficiency mode](docs/windows-efficiency.md) for the API contract.
 
-<h2 id="contributing"><img src="assets/readme/icons/code.png" alt="" width="28" align="center"> &nbsp;Contributing</h2>
+## Build and validate
 
-PRs are welcome. Please keep changes local-first, tested, and focused. Use the repo-native validators before opening a PR:
+The repository uses local verification for normal development. The manual release workflow additionally validates native platform builds and immutable publication.
 
 ```powershell
 cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo build --release
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo audit --deny warnings
+.\scriptsuild-release.ps1 -Architecture all
 ```
 
-<h2 id="security"><img src="assets/readme/icons/shield.png" alt="" width="28" align="center"> &nbsp;Security</h2>
+The Windows build writes architecture-qualified binaries and SPDX files under `releases/windows/`. Native Windows ARM64 execution is verified by the release workflow; an x64-hosted cross-build alone does not prove it.
 
-This runtime reads local Codex/OpenCode session files and publishes configured Discord Rich Presence fields. Do not include secrets, transcripts, tokens, or private prompts in public issues. Use [GitHub Security Advisories](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/security/advisories/new) for private reports.
+Read the [release procedure](docs/releasing.md) before creating a tag. Releases use annotated tags, an approved exact `main` commit and verified checksums. Published tags and assets are not replaced.
 
-<h2 id="privacy"><img src="assets/readme/icons/lock.png" alt="" width="28" align="center"> &nbsp;Privacy</h2>
+## Privacy and security
 
-Codex Discord Rich Presence is local-first:
+The runtime does not upload transcripts or send analytics telemetry. It publishes the Discord fields you enable and performs the network requests required by its configured integration. Keep credentials and private prompts out of public issues.
 
-- reads local Codex and OpenCode session files;
-- publishes only Discord Rich Presence fields you configure;
-- does not run a telemetry server;
-- does not sync transcripts to a cloud dashboard;
-- keeps WSL scanning disabled unless you opt in.
+See [PRIVACY.md](PRIVACY.md) and report vulnerabilities through [GitHub Security Advisories](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/security/advisories/new).
 
-See [PRIVACY.md](PRIVACY.md) for the short policy.
+## Project map
 
-<h2 id="license"><img src="assets/readme/icons/shield.png" alt="" width="28" align="center"> &nbsp;License</h2>
+- [Runtime contract](docs/api/codex-presence.md)
+- [Local schema](docs/database/schema.md)
+- [Terminal UI](docs/ui/UI_SITEMAP.md)
+- [Test map](tests/index.md)
+- [Model catalog](src/model_catalog.json)
 
-[MIT](LICENSE) © 2026 xt0n1-t3ch.
+## License
 
----
-
-<div align="center">
-<sub>Built with Rust, Ratatui, Discord Rich Presence, and Codex. &nbsp; · &nbsp; <a href="https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence">github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence</a></sub>
-</div>
+[MIT](LICENSE), copyright 2026 xt0n1-t3ch.

@@ -64,6 +64,7 @@ pub struct CatalogContext {
     pub api_tokens: Option<u64>,
     pub long_context_input_threshold: Option<u64>,
     pub max_output_tokens: Option<u64>,
+    pub max_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -649,5 +650,35 @@ mod tests {
         assert_eq!(rates.cached_input_per_million, 1.25);
         assert_eq!(rates.output_per_million, 75.0);
         assert!(red.credit_rates().is_none());
+    }
+}
+
+#[cfg(test)]
+mod astra_tests {
+    use super::*;
+    #[test]
+    fn astra_catalog_display_context_and_rates() {
+        let model = resolve_model("gpt-6-astra").expect("Astra catalog entry");
+        assert_eq!(
+            format_model_display("gpt-6-astra", Some(ReasoningEffort::Max), false),
+            "GPT-6 Astra · Max"
+        );
+        assert_eq!(
+            format_model_display("gpt-6-astra-fast", Some(ReasoningEffort::Ultra), true),
+            "GPT-6 Astra · Ultra · ⚡ Fast"
+        );
+        let context = model.context().unwrap();
+        assert_eq!(context.raw_tokens, 1_050_000);
+        assert_eq!(context.effective_percent, 100);
+        assert_eq!(context.max_input_tokens, Some(922_000));
+        assert_eq!(context.max_output_tokens, Some(128_000));
+        assert_eq!(context.long_context_input_threshold, Some(272_000));
+        assert_eq!(model.fast_usage_multiplier(), Some(2.0));
+        assert!(model.credit_rates().is_none());
+        let rates = model.api_rates().unwrap();
+        assert_eq!(rates.input_per_million, 10.0);
+        assert_eq!(rates.cached_input_per_million, 1.0);
+        assert_eq!(rates.cache_write_per_million, Some(12.5));
+        assert_eq!(rates.output_per_million, 50.0);
     }
 }

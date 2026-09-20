@@ -1011,19 +1011,22 @@ fn presence_lines(
     if config.privacy.show_model
         && let Some(model) = &session.model
     {
-        let label = format!(
-            "{} | {}",
-            format_model_display(
-                model,
-                session.reasoning_effort,
-                if session.speed.known {
-                    session.speed.mode == SpeedMode::Fast
-                } else {
-                    resolved_service_tier.is_fast()
-                },
-            ),
-            resolved_plan.label(config.openai_plan.show_price)
+        let mut label = format_model_display(
+            model,
+            session.reasoning_effort,
+            if session.speed.known {
+                session.speed.mode == SpeedMode::Fast
+            } else {
+                resolved_service_tier.is_fast()
+            },
         );
+        if !matches!(
+            resolved_plan.tier,
+            crate::telemetry::plan::DetectedPlanTier::Unknown
+        ) {
+            label.push_str(" | ");
+            label.push_str(&resolved_plan.label(config.openai_plan.show_price));
+        }
         values.insert(PresenceFieldId::Model, truncate_for_limit(&label, 68));
     }
     if config.privacy.show_cost
@@ -2284,5 +2287,27 @@ mod tests {
     fn desktop_missing_client_status_is_explicit() {
         let status = status_for_client_id(PresenceSurface::Desktop, None);
         assert_eq!(status, "Missing desktop Discord client id");
+    }
+    #[test]
+    fn unknown_account_plan_is_not_published_with_astra() {
+        let mut session = sample_session();
+        session.model = Some("gpt-6-astra".into());
+        session.reasoning_effort = Some(crate::model::ReasoningEffort::High);
+        let plan = ResolvedPlan {
+            tier: DetectedPlanTier::Unknown,
+            ..resolved_plan_pro()
+        };
+        let config = PresenceConfig::default();
+        let (_, state) = presence_lines(
+            &session,
+            None,
+            None,
+            &plan,
+            &resolved_service_tier(false),
+            &config,
+        );
+        assert!(state.contains("GPT-6 Astra"));
+        assert!(!state.contains("Unknown"));
+        assert!(!state.contains(" | "));
     }
 }
