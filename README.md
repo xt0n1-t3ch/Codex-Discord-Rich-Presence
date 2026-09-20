@@ -1,26 +1,24 @@
 # Codex Discord Rich Presence
 
-A local Rust runtime that publishes Codex activity to Discord and shows the same state in a terminal dashboard. Release v1.11.1 adds GPT-6 Astra, Windows Efficiency mode and clearer monetary display.
+A local Rust runtime that publishes Codex activity to Discord and shows the same state in a terminal dashboard. Release v1.11.2 corrects per-event session costs and keeps enabled monetary amounts visible in Discord.
 
 <div align="center">
 <img src="assets/branding/codex-readme-hero.png" alt="Codex Discord Rich Presence" width="100%">
 
-[![Release v1.11.1](https://img.shields.io/badge/Release-v1.11.1-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
+[![Release v1.11.2](https://img.shields.io/badge/Release-v1.11.2-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
 [![MIT](https://img.shields.io/badge/License-MIT-171717)](LICENSE)
 
-[Install](#install) · [What's new](#whats-new-in-v1110) · [Controls](#terminal-controls) · [Configuration](#configuration) · [Documentation](docs/index.md)
+[Install](#install) · [What's new](#whats-new-in-v1112) · [Controls](#terminal-controls) · [Configuration](#configuration) · [Documentation](docs/index.md)
 </div>
 
-## What's New in v1.11.1
+## What's new in v1.11.2
 
-- GPT-6 Astra model identity, observed reasoning effort, a 1,050,000-token total context window, 922,000-token input limit and 128,000-token output limit.
-- Standard/Fast pricing with explicit completeness. Missing request-level evidence does not become an exact total or invented subscription credits.
-- Manual plan overrides take precedence over automatic cache updates. Protocol `pro` maps to Pro 20x and `prolite` to Pro 5x; Edu and explicit aliases are recognized.
-- Unknown plan labels no longer appear as public `Unknown` text in Discord.
-- Monetary display uses two decimal places while calculations retain their original precision.
-- Windows Efficiency mode requests EcoQoS and Idle process priority, with an environment opt-out.
+- Session costs accumulate each observed model, speed and cache-write delta. Repeated cumulative events do not add cost.
+- Long-context pricing uses observed request input instead of accumulated session input.
+- Discord shows enabled known amounts as currency, including partial subtotals. Snapshots retain coverage and provenance; unavailable amounts stay absent.
+- The shared compositor reserves space for enabled cost fields when model labels are long.
 
-The shared `codex-presence-core` API remains version 2.0.0. See the [changelog](CHANGELOG.md) for previous releases.
+The shared `codex-presence-core` version is 2.0.1. Its public API and configuration schema 13 remain compatible. See the [changelog](CHANGELOG.md) for previous releases and rollback.
 
 ## Install
 
