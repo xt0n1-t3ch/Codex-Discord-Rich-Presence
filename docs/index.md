@@ -18,3 +18,11 @@ Root references: [README.md](../README.md), [CHANGELOG.md](../CHANGELOG.md), [te
 | External facts | Include source URL and access date |
 | Release facts | Match `.github/workflows/release.yml` |
 | Scope | Durable contracts only; no plans or handoffs |
+
+## GPT-6 Astra
+
+El catálogo nativo registra Astra con ventana total de 1.050.000 tokens, entrada máxima de 922.000, salida máxima de 128.000 y tarifas Standard/Fast. La telemetría incompleta mantiene costes parciales. Consulte la [ficha oficial](https://developers.openai.com/api/docs/models/gpt-6-astra). El runtime corresponde a v1.11.1.
+
+## Current release v1.11.1
+
+[Windows Efficiency mode](windows-efficiency.md) documents the process policy and read-only validation. See the root README and changelog for the release contract.

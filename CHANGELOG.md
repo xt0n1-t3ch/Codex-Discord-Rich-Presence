@@ -6,6 +6,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-09-05
+
+### Added
+
+- Publish GPT-6 Astra identity, observed effort, context limits and Standard/Fast pricing with honest incomplete-cost handling.
+- Publish process-local Windows Efficiency mode with an environment opt-out and read-only policy verifier.
+
+### Fixed
+
+- Make Windows Efficiency mode initialization an explicit no-op on other operating systems, so warning-denying Linux builds pass without suppressing lints. Windows EcoQoS behavior is unchanged.
+
+The v1.11.0 candidate did not publish release assets. This release includes its Astra, plan-precedence, monetary-display and Windows efficiency changes.
+
+## [1.11.0] - 2026-09-05 (unshipped candidate)
+
+### Added
+
+- GPT-6 Astra identity, observed reasoning effort, a 1,050,000-token total context window, 922,000-token input limit and 128,000-token output limit.
+- Astra Standard/Fast pricing resolution with explicit incomplete coverage and no invented subscription-credit rates.
+- Windows Efficiency mode through process-local EcoQoS and Idle priority, with an environment opt-out and read-only process verifier.
+
+### Fixed
+
+- Manual plan overrides resolve before automatic cache updates. Protocol pro maps to Pro 20x and prolite to Pro 5x; Edu and explicit plan aliases are supported.
+- Unknown plan labels are omitted from public Discord model text when no reliable identification exists.
+- Monetary display rounds to two decimal places while retaining full calculation precision and cost-completeness rules.
+
+### Changed
+
+- README and release documentation explain the standalone terminal interface, source boundaries, Windows process policy and immutable artifact checks.
+- The shared core remains version 2.0.0. Codex identity policy and config schema 13 are unchanged.
+
 ## [1.10.3] - 2026-08-25
 
 ### Changed

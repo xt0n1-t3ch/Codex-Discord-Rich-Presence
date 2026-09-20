@@ -71,3 +71,5 @@ Every pricing catalog change needs a pricing-resolution test and a context-windo
 ## Release Rule
 
 Before saying a Windows exe is fixed, run the build script and verify the produced `releases/windows/codex-discord-rich-presence.exe` with `status` or `doctor`.
+
+Windows Efficiency mode is implemented in src/power.rs and initialized by the binary. CODEX_PRESENCE_EFFICIENCY_MODE=0 opts out. scripts/check-windows-efficiency.ps1 reads process policy without changing it.
