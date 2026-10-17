@@ -25,13 +25,15 @@ mod activity;
 mod costing;
 mod parser;
 
+#[cfg(test)]
+use activity::MAX_PENDING_CALLS;
 use activity::SessionAccumulator;
 pub(crate) use activity::{
     sanitize_domain_target, sanitize_file_target, summarize_command_for_presence,
 };
-use parser::{fetch_git_branch, parse_session_file_cached};
+use parser::{LineBuffer, fetch_git_branch, parse_session_file_cached};
 #[cfg(test)]
-use parser::{parse_new_lines, parse_session_file, parse_utc_timestamp};
+use parser::{MAX_SESSION_LINE_BYTES, parse_new_lines, parse_session_file, parse_utc_timestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ContextWindowSnapshot {
@@ -150,6 +152,8 @@ impl CodexSessionSnapshot {
     }
 }
 
+const LIMIT_TELEMETRY_RETAINED_FILES: usize = 4;
+
 #[derive(Debug, Default)]
 pub struct GitBranchCache {
     ttl: Duration,
@@ -188,6 +192,7 @@ impl SessionParseCache {
 #[derive(Debug, Clone, Default)]
 pub struct SessionCollectionDiagnostics {
     pub session_files_seen: usize,
+    pub skipped_without_open: usize,
     pub dropped_stale: usize,
     pub dropped_outside_sticky: usize,
 }
@@ -199,7 +204,7 @@ struct CachedSessionEntry {
     modified: SystemTime,
     accumulator: SessionAccumulator,
     snapshot: Option<CodexSessionSnapshot>,
-    partial_line_buffer: String,
+    partial_line_buffer: LineBuffer,
 }
 
 impl CachedSessionEntry {
@@ -210,7 +215,7 @@ impl CachedSessionEntry {
             modified,
             accumulator: SessionAccumulator::default(),
             snapshot: None,
-            partial_line_buffer: String::new(),
+            partial_line_buffer: LineBuffer::default(),
         }
     }
 
@@ -253,6 +258,12 @@ impl GitBranchCache {
             },
         );
         value
+    }
+
+    fn retain_paths<'a>(&mut self, active_paths: impl IntoIterator<Item = &'a Path>) {
+        let active: HashSet<&Path> = active_paths.into_iter().collect();
+        self.entries
+            .retain(|path, _| active.contains(path.as_path()));
     }
 }
 
@@ -309,9 +320,11 @@ pub fn collect_active_sessions_multi_with_diagnostics(
         .checked_sub(active_sticky_window)
         .unwrap_or(SystemTime::UNIX_EPOCH);
 
+    let inclusion_cutoff = stale_cutoff.min(sticky_cutoff);
+
     let mut sessions = Vec::new();
-    let mut seen_paths: HashSet<PathBuf> = HashSet::new();
     let mut diagnostics = SessionCollectionDiagnostics::default();
+    let mut files = Vec::new();
 
     for sessions_root in sessions_roots {
         if !sessions_root.exists() {
@@ -322,51 +335,73 @@ pub fn collect_active_sessions_multi_with_diagnostics(
             .into_iter()
             .filter_map(std::result::Result::ok)
         {
-            let path = entry.path();
             if !entry.file_type().is_file() {
                 continue;
             }
-            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            if entry.path().extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
                 continue;
             }
-            seen_paths.insert(path.to_path_buf());
             diagnostics.session_files_seen = diagnostics.session_files_seen.saturating_add(1);
 
-            let metadata = match entry.metadata() {
-                Ok(meta) => meta,
-                Err(_) => continue,
+            let Ok(metadata) = entry.metadata() else {
+                continue;
             };
-            let modified = match metadata.modified() {
-                Ok(m) => m,
-                Err(_) => continue,
+            let Ok(modified) = metadata.modified() else {
+                continue;
             };
-            if let Some(mut snapshot) = parse_session_file_cached(
-                path,
-                &metadata,
-                modified,
-                git_cache,
-                parse_cache,
-                pricing_config,
-            )? {
-                let recency = session_recency(&snapshot, modified);
-                snapshot.last_activity = recency;
-                match session_inclusion_decision(&snapshot, recency, stale_cutoff, sticky_cutoff) {
-                    SessionInclusionDecision::Include => sessions.push(snapshot),
-                    SessionInclusionDecision::DropStale => {
-                        diagnostics.dropped_stale = diagnostics.dropped_stale.saturating_add(1);
-                    }
-                    SessionInclusionDecision::DropOutsideSticky => {
-                        diagnostics.dropped_outside_sticky =
-                            diagnostics.dropped_outside_sticky.saturating_add(1);
-                    }
-                }
+            files.push((entry.into_path(), metadata, modified));
+        }
+    }
+
+    files.sort_by_key(|(_, _, modified)| Reverse(*modified));
+    let mut parsed_paths: HashSet<PathBuf> = HashSet::new();
+
+    for (index, (path, metadata, modified)) in files.iter().enumerate() {
+        let retained_for_limits = index < LIMIT_TELEMETRY_RETAINED_FILES;
+        if *modified < inclusion_cutoff {
+            if *modified < sticky_cutoff {
+                diagnostics.dropped_outside_sticky =
+                    diagnostics.dropped_outside_sticky.saturating_add(1);
+            } else {
+                diagnostics.dropped_stale = diagnostics.dropped_stale.saturating_add(1);
+            }
+            if !retained_for_limits {
+                diagnostics.skipped_without_open =
+                    diagnostics.skipped_without_open.saturating_add(1);
+                continue;
+            }
+        }
+
+        parsed_paths.insert(path.clone());
+        let Some(mut snapshot) =
+            parse_session_file_cached(path, metadata, *modified, parse_cache, pricing_config)?
+        else {
+            continue;
+        };
+        if *modified < inclusion_cutoff {
+            continue;
+        }
+        let recency = session_recency(&snapshot, *modified);
+        snapshot.last_activity = recency;
+        match session_inclusion_decision(&snapshot, recency, stale_cutoff, sticky_cutoff) {
+            SessionInclusionDecision::Include => {
+                snapshot.git_branch = git_cache.get(&snapshot.cwd);
+                sessions.push(snapshot);
+            }
+            SessionInclusionDecision::DropStale => {
+                diagnostics.dropped_stale = diagnostics.dropped_stale.saturating_add(1);
+            }
+            SessionInclusionDecision::DropOutsideSticky => {
+                diagnostics.dropped_outside_sticky =
+                    diagnostics.dropped_outside_sticky.saturating_add(1);
             }
         }
     }
 
     parse_cache
         .entries
-        .retain(|path, _| seen_paths.contains(path));
+        .retain(|path, _| parsed_paths.contains(path));
+    git_cache.retain_paths(sessions.iter().map(|session| session.cwd.as_path()));
     sessions = dedupe_sessions_by_id(sessions);
     sessions.sort_by_key(|session| Reverse(session_rank_key(session)));
     Ok((sessions, diagnostics))
@@ -598,15 +633,9 @@ mod tests {
         let file_path = tmp.path().join("session.jsonl");
         std::fs::write(&file_path, content).expect("write jsonl");
         let modified = SystemTime::now();
-        let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
-        parse_session_file(
-            &file_path,
-            modified,
-            &mut git_cache,
-            &PricingConfig::default(),
-        )
-        .expect("parse")
-        .expect("snapshot")
+        parse_session_file(&file_path, modified, &PricingConfig::default())
+            .expect("parse")
+            .expect("snapshot")
     }
 
     fn policy_snapshot(activity_kind: Option<SessionActivityKind>) -> CodexSessionSnapshot {
@@ -1194,6 +1223,32 @@ mod tests {
     }
 
     #[test]
+    fn uncompleted_calls_expire_by_age_and_stay_bounded() {
+        let start = Utc.with_ymd_and_hms(2026, 2, 9, 12, 0, 0).unwrap();
+        let call = |id: &str, at: DateTime<Utc>| {
+            format!(
+                r#"{{"timestamp":"{}","type":"response_item","payload":{{"type":"function_call","name":"shell_command","arguments":"{{}}","call_id":"{id}"}}}}"#,
+                at.to_rfc3339()
+            )
+        };
+        let mut lines = vec![
+            r#"{"type":"session_meta","payload":{"id":"calls","cwd":"C:\\repo\\app"}}"#.to_string(),
+        ];
+        for index in 0..300 {
+            lines.push(call(&format!("burst-{index}"), start));
+        }
+        let bounded = parse_one(&lines.join("\n"));
+        assert_eq!(
+            bounded.activity.expect("activity").pending_calls,
+            MAX_PENDING_CALLS
+        );
+
+        lines.push(call("late", start + ChronoDuration::hours(3)));
+        let expired = parse_one(&lines.join("\n"));
+        assert_eq!(expired.activity.expect("activity").pending_calls, 1);
+    }
+
+    #[test]
     fn parses_editing_activity_from_apply_patch() {
         let snapshot = parse_one(
             r#"{"type":"session_meta","payload":{"id":"edit","cwd":"C:\\repo\\app"}}
@@ -1683,7 +1738,7 @@ mod tests {
         let file = File::open(&file_path).expect("open");
         let mut reader = BufReader::new(file);
         let mut accumulator = SessionAccumulator::default();
-        let mut partial_line_buffer = String::new();
+        let mut partial_line_buffer = LineBuffer::default();
         parse_new_lines(&mut reader, &mut accumulator, &mut partial_line_buffer).expect("parse");
 
         assert!(
@@ -1691,6 +1746,45 @@ mod tests {
             "partial json line should be retained"
         );
         assert_eq!(accumulator.session_total_tokens, None);
+    }
+
+    #[test]
+    fn oversized_unterminated_line_is_discarded_without_buffering() {
+        use std::io::{Seek as _, SeekFrom, Write as _};
+
+        let tmp = TempDir::new().expect("temp dir");
+        let file_path = tmp.path().join("oversized.jsonl");
+        let mut file = File::create(&file_path).expect("create");
+        writeln!(
+            file,
+            r#"{{"type":"session_meta","payload":{{"id":"oversized","cwd":"C:\\repo\\app"}}}}"#
+        )
+        .expect("meta");
+        write!(file, r#"{{"payload":""#).expect("head");
+        file.write_all(&vec![b'a'; MAX_SESSION_LINE_BYTES + 1])
+            .expect("body");
+        file.flush().expect("flush");
+
+        let mut reader = BufReader::new(File::open(&file_path).expect("open"));
+        let mut accumulator = SessionAccumulator::default();
+        let mut partial_line_buffer = LineBuffer::default();
+        parse_new_lines(&mut reader, &mut accumulator, &mut partial_line_buffer).expect("parse");
+        assert!(partial_line_buffer.is_empty());
+        let cursor = reader.stream_position().expect("cursor");
+
+        writeln!(file, r#"aaaa"}}"#).expect("tail");
+        writeln!(
+            file,
+            r#"{{"timestamp":"2026-02-09T16:35:13Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"total_tokens":210}},"last_token_usage":{{"total_tokens":80}}}}}}}}"#
+        )
+        .expect("event");
+        file.flush().expect("flush");
+
+        let mut reader = BufReader::new(File::open(&file_path).expect("reopen"));
+        reader.seek(SeekFrom::Start(cursor)).expect("seek");
+        parse_new_lines(&mut reader, &mut accumulator, &mut partial_line_buffer).expect("parse2");
+        assert!(partial_line_buffer.is_empty());
+        assert_eq!(accumulator.session_total_tokens, Some(210));
     }
 
     #[test]
@@ -1709,7 +1803,6 @@ mod tests {
         )
         .expect("write initial");
 
-        let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
         let mut parse_cache = SessionParseCache::default();
         let meta1 = std::fs::metadata(&file_path).expect("meta1");
         let modified1 = meta1.modified().expect("modified1");
@@ -1718,7 +1811,6 @@ mod tests {
             &file_path,
             &meta1,
             modified1,
-            &mut git_cache,
             &mut parse_cache,
             &PricingConfig::default(),
         )
@@ -1749,7 +1841,6 @@ mod tests {
             &file_path,
             &meta2,
             modified2,
-            &mut git_cache,
             &mut parse_cache,
             &PricingConfig::default(),
         )
@@ -1773,7 +1864,6 @@ mod tests {
         )
         .expect("write initial");
 
-        let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
         let mut parse_cache = SessionParseCache::default();
         let meta1 = std::fs::metadata(&file_path).expect("metadata1");
         let modified1 = meta1.modified().expect("modified1");
@@ -1782,7 +1872,6 @@ mod tests {
             &file_path,
             &meta1,
             modified1,
-            &mut git_cache,
             &mut parse_cache,
             &PricingConfig::default(),
         )
@@ -1814,7 +1903,6 @@ mod tests {
             &file_path,
             &meta2,
             modified2,
-            &mut git_cache,
             &mut parse_cache,
             &PricingConfig::default(),
         )
@@ -1830,5 +1918,132 @@ mod tests {
         assert_eq!(snapshot2.session_total_tokens, Some(160));
         assert_eq!(snapshot2.last_turn_tokens, Some(60));
         assert_eq!(snapshot2.session_delta_tokens, Some(60));
+    }
+
+    fn write_session_with_mtime(path: &Path, id: &str, modified: SystemTime) {
+        let timestamp = DateTime::<Utc>::from(modified).to_rfc3339();
+        std::fs::write(
+            path,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"cwd\":\"C:\\\\repo\\\\app\"}}}}\n{{\"timestamp\":\"{timestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":100}},\"last_token_usage\":{{\"total_tokens\":40}}}}}}}}\n"
+            ),
+        )
+        .expect("write session");
+        set_mtime(path, modified);
+    }
+
+    fn set_mtime(path: &Path, modified: SystemTime) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("open for mtime")
+            .set_modified(modified)
+            .expect("set mtime");
+    }
+
+    #[test]
+    fn collect_does_not_open_or_retain_files_older_than_inclusion_cutoffs() {
+        let tmp = TempDir::new().expect("temp dir");
+        let now = SystemTime::now();
+        let old_count = LIMIT_TELEMETRY_RETAINED_FILES + 3;
+        for index in 0..old_count {
+            let modified = now - Duration::from_secs(86_400 * (index as u64 + 2));
+            write_session_with_mtime(
+                &tmp.path().join(format!("old-{index}.jsonl")),
+                &format!("old-{index}"),
+                modified,
+            );
+        }
+        write_session_with_mtime(&tmp.path().join("fresh.jsonl"), "fresh", now);
+
+        let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
+        let mut parse_cache = SessionParseCache::default();
+        let (sessions, diagnostics) = collect_active_sessions_multi_with_diagnostics(
+            &[tmp.path().to_path_buf()],
+            Duration::from_secs(90),
+            Duration::from_secs(3_600),
+            &mut git_cache,
+            &mut parse_cache,
+            &PricingConfig::default(),
+        )
+        .expect("collect");
+
+        assert_eq!(
+            sessions
+                .iter()
+                .map(|session| session.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fresh"]
+        );
+        assert_eq!(diagnostics.session_files_seen, old_count + 1);
+        assert_eq!(diagnostics.skipped_without_open, 4);
+        assert_eq!(diagnostics.dropped_outside_sticky, old_count);
+        assert_eq!(parse_cache.entries.len(), LIMIT_TELEMETRY_RETAINED_FILES);
+        assert!(
+            parse_cache
+                .entries
+                .contains_key(&tmp.path().join("fresh.jsonl"))
+        );
+        for index in LIMIT_TELEMETRY_RETAINED_FILES - 1..old_count {
+            assert!(
+                !parse_cache
+                    .entries
+                    .contains_key(&tmp.path().join(format!("old-{index}.jsonl")))
+            );
+        }
+    }
+
+    #[test]
+    fn evicted_file_that_becomes_fresh_is_reparsed_from_the_start() {
+        let tmp = TempDir::new().expect("temp dir");
+        let now = SystemTime::now();
+        for index in 0..LIMIT_TELEMETRY_RETAINED_FILES {
+            write_session_with_mtime(
+                &tmp.path().join(format!("newer-{index}.jsonl")),
+                &format!("newer-{index}"),
+                now - Duration::from_secs(86_400 + index as u64),
+            );
+        }
+        let revived = tmp.path().join("revived.jsonl");
+        write_session_with_mtime(&revived, "revived", now - Duration::from_secs(86_400 * 5));
+
+        let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
+        let mut parse_cache = SessionParseCache::default();
+        let collect = |git_cache: &mut GitBranchCache, parse_cache: &mut SessionParseCache| {
+            collect_active_sessions_multi(
+                &[tmp.path().to_path_buf()],
+                Duration::from_secs(90),
+                Duration::from_secs(3_600),
+                git_cache,
+                parse_cache,
+                &PricingConfig::default(),
+            )
+            .expect("collect")
+        };
+
+        assert!(collect(&mut git_cache, &mut parse_cache).is_empty());
+        assert!(!parse_cache.entries.contains_key(&revived));
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&revived)
+            .expect("open append");
+        use std::io::Write as _;
+        writeln!(
+            file,
+            r#"{{"timestamp":"{}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"total_tokens":160}},"last_token_usage":{{"total_tokens":60}}}}}}}}"#,
+            Utc::now().to_rfc3339()
+        )
+        .expect("append");
+        drop(file);
+        set_mtime(&revived, SystemTime::now());
+
+        let sessions = collect(&mut git_cache, &mut parse_cache);
+        let session = sessions
+            .iter()
+            .find(|session| session.session_id == "revived")
+            .expect("revived session");
+        assert_eq!(session.session_total_tokens, Some(160));
+        assert_eq!(session.session_delta_tokens, Some(60));
     }
 }

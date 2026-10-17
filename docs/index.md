@@ -2,7 +2,7 @@
 
 | Doc | Contract |
 |:---|:---|
-| [api/codex-presence.md](api/codex-presence.md) | Adaptive provider-neutral usage lanes/streams, canonical `account/rateLimits/read` parsing with separate reset credits, dynamic quota windows, credits precedence, Daybreak/GPT-5.6 pricing and context provenance, session-scoped Fast, cost coverage and per-event subtotals, Discord/UI policy, and opt-in live Discord wire proof |
+| [api/codex-presence.md](api/codex-presence.md) | Adaptive provider-neutral usage lanes/streams, canonical `account/rateLimits/read` parsing with separate reset credits, dynamic quota windows, credits precedence, Daybreak/GPT-5.6/GPT-6 pricing and context provenance, session-scoped Fast, cost coverage and per-event subtotals, Discord/UI policy, and opt-in live Discord wire proof |
 | [database/schema.md](database/schema.md) | Schema-12 shared presence control, desktop design, privacy, session speed/surface, cost completeness, metrics, and context provenance |
 | [releasing.md](releasing.md) | Exact-SHA operator approval, annotated tags, immutable publication, and cleanup |
 | [ui/UI_SITEMAP.md](ui/UI_SITEMAP.md) | Ratatui layout modes, widgets, theme, animation, logo fallback, footer behavior |
@@ -21,8 +21,12 @@ Root references: [README.md](../README.md), [CHANGELOG.md](../CHANGELOG.md), [te
 
 ## GPT-6 Astra
 
-El catálogo nativo registra Astra con ventana total de 1.050.000 tokens, entrada máxima de 922.000, salida máxima de 128.000 y tarifas Standard/Fast. La telemetría incompleta mantiene costes parciales. Consulte la [ficha oficial](https://developers.openai.com/api/docs/models/gpt-6-astra). El runtime corresponde a v1.11.2.
+El catálogo nativo registra Astra con ventana total de 1.050.000 tokens, entrada máxima de 922.000, salida máxima de 128.000 y tarifas Standard/Fast. La telemetría incompleta mantiene costes parciales. Consulte la [ficha oficial](https://developers.openai.com/api/docs/models/gpt-6-astra). El runtime corresponde a v1.11.3.
 
-## Current release v1.11.2
+## GPT-6 Sol, Luna y 6.1 Sol
+
+El catálogo registra `gpt-6.1-sol`, `gpt-6-sol` y `gpt-6-luna` con tarifas API verificadas el 2026-10-16, Fast a 2x y el recargo por encima de 272K tokens de entrada. El contexto de respaldo usa la capacidad de Codex, no el máximo de la API. Consulte el [contrato del modelo](api/codex-presence.md#gpt-6-sol-luna-and-61-sol-contract).
+
+## Current release v1.11.3
 
 [Windows Efficiency mode](windows-efficiency.md) documents the process policy and read-only validation. See the root README and changelog for the release contract.

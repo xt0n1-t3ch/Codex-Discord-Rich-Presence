@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.11.3] - 2026-10-17
+
+### Added
+
+- Add GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna to the model catalog with API rates, Fast pricing, the 272K long-context surcharge and API context limits verified on 2026-10-16. The bundled context fallback uses Codex capacity, not the API maximum. GPT-6.1 Sol uses the reported 500K Codex default, which has no OpenAI primary source. Credit rates stay unavailable.
+
+### Fixed
+
+- The session scanner checks file modification times before it opens a file. Files older than the stale and sticky cutoffs are not read. The parse cache keeps only the files that can still be included, plus the four newest files for account limits. A file that becomes active again is parsed from the start.
+- Parse `~/.codex/models_cache.json` once for each modification instead of on every snapshot rebuild.
+- Discard session lines longer than 16 MiB instead of buffering them, and stop copying each line.
+- Expire tool calls that never complete after two hours, and keep at most 256 open calls per session.
+- Resolve Git branches only for included sessions. Each Git probe has a two-second timeout; on expiry the probe is killed and reaped.
+- In wrapper mode, kill and reap the `codex` child on every exit path, including an early error and Ctrl+C. On Windows, a kill-on-close job object also ends its process tree.
+- Single-instance takeover checks that the PID in the instance file still runs the recorded executable before it terminates that process. On Windows, process checks and termination use native APIs instead of `tasklist` and PowerShell.
+
+### Changed
+
+- Replace the unmaintained `fs2` crate with standard-library file locks.
+- Update semver-compatible dependencies, including `thiserror` 2.0.21, and update the `upload-artifact`, `download-artifact` and `rust-toolchain` action pins. Dependabot now proposes minor Cargo updates; major updates stay ignored.
+
+### Compatibility and rollback
+
+- Runtime 1.11.3 keeps `codex-presence-core` 2.0.1, its public API, configuration schema 13, Discord identity rules and privacy controls.
+- GPT-6 Sol, GPT-6 Luna and GPT-6.1 Sol costs are estimates from observed telemetry and the catalog rates. The GPT-6.1 Sol 500K Codex context default has no OpenAI primary source.
+- Restore the previous executable to roll back. This release does not migrate the configuration or rewrite session data.
+
 ## [1.11.2] - 2026-09-19
 
 ### Fixed

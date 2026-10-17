@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -12,31 +12,29 @@ use crate::model;
 
 use super::activity::SessionAccumulator;
 use super::{
-    CachedSessionEntry, CodexSessionSnapshot, ContextWindowSnapshot, GitBranchCache,
-    ReasoningEffort, SessionParseCache,
+    CachedSessionEntry, CodexSessionSnapshot, ContextWindowSnapshot, ReasoningEffort,
+    SessionParseCache,
 };
 
 #[cfg(test)]
 pub(super) fn parse_session_file(
     jsonl_path: &Path,
     last_activity: SystemTime,
-    git_cache: &mut GitBranchCache,
     pricing_config: &PricingConfig,
 ) -> Result<Option<CodexSessionSnapshot>> {
     let file = File::open(jsonl_path)
         .with_context(|| format!("failed to open session file {}", jsonl_path.display()))?;
     let mut reader = BufReader::new(file);
     let mut accumulator = SessionAccumulator::default();
-    let mut partial_line_buffer = String::new();
+    let mut partial_line_buffer = LineBuffer::default();
     parse_new_lines(&mut reader, &mut accumulator, &mut partial_line_buffer)?;
-    Ok(accumulator.build_snapshot(jsonl_path, last_activity, git_cache, pricing_config))
+    Ok(accumulator.build_snapshot(jsonl_path, last_activity, pricing_config))
 }
 
 pub(super) fn parse_session_file_cached(
     jsonl_path: &Path,
     metadata: &std::fs::Metadata,
     last_activity: SystemTime,
-    git_cache: &mut GitBranchCache,
     parse_cache: &mut SessionParseCache,
     pricing_config: &PricingConfig,
 ) -> Result<Option<CodexSessionSnapshot>> {
@@ -74,50 +72,99 @@ pub(super) fn parse_session_file_cached(
     cached.file_len = file_len;
     cached.modified = modified;
 
-    let snapshot =
-        cached
-            .accumulator
-            .build_snapshot(jsonl_path, last_activity, git_cache, pricing_config);
+    let snapshot = cached
+        .accumulator
+        .build_snapshot(jsonl_path, last_activity, pricing_config);
     cached.snapshot = snapshot.clone();
     Ok(snapshot)
+}
+
+pub(super) const MAX_SESSION_LINE_BYTES: usize = 16 * 1024 * 1024;
+const RETAINED_LINE_CAPACITY: usize = 64 * 1024;
+
+#[derive(Debug, Default)]
+pub(super) struct LineBuffer {
+    bytes: Vec<u8>,
+    discarding: bool,
+}
+
+impl LineBuffer {
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.bytes = Vec::new();
+        self.discarding = false;
+    }
+
+    fn finish_line(&mut self) {
+        if self.bytes.capacity() > RETAINED_LINE_CAPACITY {
+            self.bytes = Vec::new();
+        } else {
+            self.bytes.clear();
+        }
+        self.discarding = false;
+    }
+
+    fn append(&mut self, chunk: &[u8]) {
+        if self.discarding {
+            return;
+        }
+        if self.bytes.len() + chunk.len() > MAX_SESSION_LINE_BYTES {
+            self.bytes = Vec::new();
+            self.discarding = true;
+            return;
+        }
+        self.bytes.extend_from_slice(chunk);
+    }
 }
 
 pub(super) fn parse_new_lines(
     reader: &mut BufReader<File>,
     accumulator: &mut SessionAccumulator,
-    partial_line_buffer: &mut String,
+    line: &mut LineBuffer,
 ) -> Result<()> {
-    let mut line = String::new();
     loop {
-        line.clear();
-        let bytes = reader.read_line(&mut line)?;
-        if bytes == 0 {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
             break;
         }
-
-        let line_has_terminator = line.ends_with('\n');
-        let combined = if partial_line_buffer.is_empty() {
-            line.to_string()
-        } else {
-            let mut pending = std::mem::take(partial_line_buffer);
-            pending.push_str(&line);
-            pending
-        };
-
-        let trimmed = combined.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<Value>(trimmed) {
-            Ok(parsed) => accumulator.apply_event(&parsed),
-            Err(_) if !line_has_terminator => {
-                partial_line_buffer.push_str(&combined);
-                break;
+        match available.iter().position(|byte| *byte == b'\n') {
+            Some(newline) => {
+                line.append(&available[..newline]);
+                reader.consume(newline + 1);
+                if !line.discarding {
+                    apply_line(&line.bytes, accumulator);
+                }
+                line.finish_line();
             }
-            Err(_) => continue,
+            None => {
+                let consumed = available.len();
+                line.append(available);
+                reader.consume(consumed);
+            }
         }
     }
+
+    if !line.discarding && !line.bytes.is_empty() && apply_line(&line.bytes, accumulator) {
+        line.finish_line();
+    }
     Ok(())
+}
+
+fn apply_line(bytes: &[u8], accumulator: &mut SessionAccumulator) -> bool {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return true;
+    }
+    match serde_json::from_slice::<Value>(bytes) {
+        Ok(parsed) => {
+            accumulator.apply_event(&parsed);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 pub(super) fn compute_session_delta(
@@ -244,37 +291,30 @@ pub(super) fn parse_utc_timestamp(text: String) -> Option<DateTime<Utc>> {
         .ok()
 }
 
+const GIT_BRANCH_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub(super) fn fetch_git_branch(project_path: &Path) -> Option<String> {
-    let output = crate::util::silent_command("git")
+    let branch = git_rev_parse(project_path, "--abbrev-ref")?;
+    if branch == "HEAD" {
+        return git_rev_parse(project_path, "--short");
+    }
+    Some(branch)
+}
+
+fn git_rev_parse(project_path: &Path, mode: &str) -> Option<String> {
+    let mut command = crate::util::silent_command("git");
+    command
         .arg("-C")
         .arg(project_path)
         .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("HEAD")
-        .output()
-        .ok()?;
-
+        .arg(mode)
+        .arg("HEAD");
+    let output = crate::util::output_with_timeout(&mut command, GIT_BRANCH_TIMEOUT)?;
     if !output.status.success() {
         return None;
     }
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch == "HEAD" {
-        let output = crate::util::silent_command("git")
-            .arg("-C")
-            .arg(project_path)
-            .arg("rev-parse")
-            .arg("--short")
-            .arg("HEAD")
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let short = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return (!short.is_empty()).then_some(short);
-    }
-    (!branch.is_empty()).then_some(branch)
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 pub(super) fn str_at(value: &Value, path: &[&str]) -> Option<String> {

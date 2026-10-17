@@ -22,7 +22,7 @@
 
 | Area | Module/Test seam |
 |:---|:---|
-| Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, Daybreak/Cyber and GPT-5.6 capabilities, runtime/catalog context provenance, prices, credits, and cache policy |
+| Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, Daybreak/Cyber, GPT-5.6 and GPT-6 capabilities, runtime/catalog context provenance, prices, credits, and cache policy |
 | Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, emit currency-only known subtotals, fail closed for unknown models, and clamp cache accounting |
 | Fast mode | `src/session.rs` parses per-session service tier; `tests/integration/model_display.rs` validates Codex App labels and capability gating |
 | Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
@@ -33,6 +33,8 @@
 | Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
 | Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 13, ordered ten-field composition, Credits defaults, enabled-by-default migration, external design/privacy/master reload, invalid-file last-good fallback, and identity normalization |
 | Session parsing | `src/session.rs` and `src/session/*` cover JSONL, activity, latest model/effort changes, session-scoped speed, context provenance, cache bounds, and ranking |
+| Scanner resource bounds | `src/session.rs::collect_does_not_open_or_retain_files_older_than_inclusion_cutoffs`, `evicted_file_that_becomes_fresh_is_reparsed_from_the_start`, `oversized_unterminated_line_is_discarded_without_buffering` and `uncompleted_calls_expire_by_age_and_stay_bounded`; `src/model.rs::local_cache_is_parsed_once_per_modification` |
+| Child processes | `src/util.rs::output_with_timeout_*` bound Git probes; `src/process_guard.rs` covers kill-and-reap on drop, native process queries and image-path checks before takeover |
 | OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
 | Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
 | Windows console safety | `src/util.rs::background_windows_commands_use_silent_launcher` rejects raw background Git, PowerShell, task-list, and dynamic command probes that bypass `CREATE_NO_WINDOW` |
@@ -46,7 +48,7 @@ Rule: bugs that cross module seams get an integration regression; module-local b
 
 ## Regresiones Astra
 
-`cargo test --lib astra` verifica identidad Standard/Fast, contexto, tarifas y coste parcial. `unknown_account_plan_is_not_published_with_astra` comprueba que un plan desconocido no llega a Discord. La política de identidad continúa siendo Codex.
+`cargo test --lib astra` verifica identidad Standard/Fast, contexto, tarifas y coste parcial. `gpt_6_family_has_standard_and_fast_labels`, `gpt_6_sol_luna_prices_context_and_efforts_match_verified_catalog`, `gpt_6_1_sol_context_prefers_observed_then_local_cache_then_bundle` y `gpt_6_1_sol_requests_use_standard_fast_and_long_context_rates` cubren GPT-6 Sol, GPT-6 Luna y GPT-6.1 Sol. `unknown_account_plan_is_not_published_with_astra` comprueba que un plan desconocido no llega a Discord. La política de identidad continúa siendo Codex.
 
 ## Windows efficiency and release validation
 
