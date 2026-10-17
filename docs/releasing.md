@@ -10,9 +10,9 @@ Local implementation does not imply promotion.
 
 ## Version surfaces
 
-`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and both Windows target/artifact/SBOM/PE-machine contracts. For v1.11.2:
+`scripts/release-contract.json` is the machine-readable owner for the candidate product version, core version, config schema, checksum manifest, and both Windows target/artifact/SBOM/PE-machine contracts. For v1.11.3:
 
-- binary/workspace: 1.11.2;
+- binary/workspace: 1.11.3;
 - `codex-presence-core`: 2.0.1;
 - config schema: 13.
 

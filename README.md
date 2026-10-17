@@ -1,22 +1,22 @@
 # Codex Discord Rich Presence
 
-A local Rust runtime that publishes Codex activity to Discord and shows the same state in a terminal dashboard. Release v1.11.2 corrects per-event session costs and keeps enabled monetary amounts visible in Discord.
+A local Rust runtime that publishes Codex activity to Discord and shows the same state in a terminal dashboard. Release v1.11.3 adds GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna and bounds the memory and child processes of the session scanner.
 
 <div align="center">
 <img src="assets/branding/codex-readme-hero.png" alt="Codex Discord Rich Presence" width="100%">
 
-[![Release v1.11.2](https://img.shields.io/badge/Release-v1.11.2-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
+[![Release v1.11.3](https://img.shields.io/badge/Release-v1.11.3-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
 [![MIT](https://img.shields.io/badge/License-MIT-171717)](LICENSE)
 
-[Install](#install) · [What's new](#whats-new-in-v1112) · [Controls](#terminal-controls) · [Configuration](#configuration) · [Documentation](docs/index.md)
+[Install](#install) · [What's new](#whats-new-in-v1113) · [Controls](#terminal-controls) · [Configuration](#configuration) · [Documentation](docs/index.md)
 </div>
 
-## What's new in v1.11.2
+## What's new in v1.11.3
 
-- Session costs accumulate each observed model, speed and cache-write delta. Repeated cumulative events do not add cost.
-- Long-context pricing uses observed request input instead of accumulated session input.
-- Discord shows enabled known amounts as currency, including partial subtotals. Snapshots retain coverage and provenance; unavailable amounts stay absent.
-- The shared compositor reserves space for enabled cost fields when model labels are long.
+- GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna have API rates, Fast pricing, the 272K long-context surcharge and context limits. The bundled context fallback uses Codex capacity, not the API maximum. Credit rates stay unavailable.
+- The session scanner does not open or keep files older than the inclusion cutoffs, discards session lines longer than 16 MiB and bounds open tool calls.
+- Git branch probes run only for included sessions and stop after two seconds.
+- Wrapper mode ends the `codex` child on every exit path. Single-instance takeover checks the recorded executable before it terminates a process.
 
 The shared `codex-presence-core` version is 2.0.1. Its public API and configuration schema 13 remain compatible. See the [changelog](CHANGELOG.md) for previous releases and rollback.
 

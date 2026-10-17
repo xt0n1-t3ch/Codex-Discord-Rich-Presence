@@ -98,6 +98,23 @@ Daybreak Blue has no bundled context, pricing, credit rates, or Fast capability:
 
 No public max-output, long-context threshold, cache-write credit rate, or Fast usage multiplier was verified for Sol, Terra, or Luna on 2026-07-09. Those fields remain absent rather than inheriting older GPT-5 constants.
 
+## GPT-6 Sol, Luna and 6.1 Sol Contract
+
+Verified 2026-10-16 against the official model pages. The bundled `context.raw_tokens` is the Codex-usable fallback; `api_tokens`, `max_input_tokens` and `max_output_tokens` record API capability and never stand in for Codex capacity.
+
+| ID | Label | Bundled Codex fallback (raw / usable) | API context / max input / max output | Codex efforts | Fast |
+|:---|:---|---:|:---|:---|:---:|
+| `gpt-6.1-sol` | `GPT-6.1 Sol` | `500_000` / `475_000` | `1_050_000` / `922_000` / `128_000` | `low`…`max`, `ultra` | Yes |
+| `gpt-6-sol` | `GPT-6 Sol` | `872_000` / `872_000` | `1_050_000` / `922_000` / `128_000` | `low`…`max`, `ultra` | Yes |
+| `gpt-6-luna` | `GPT-6 Luna` | `872_000` / `872_000` | `1_050_000` / `922_000` / `128_000` | `low`…`max` | Yes |
+
+- Context provenance stays observed JSONL, then local `models_cache.json`, then this fallback. The local inventory written 2026-10-03 lists `gpt-6.1-sol` at `272_000` raw with 95% usable, and that value wins over the fallback while it is present.
+- The `gpt-6.1-sol` fallback of `500_000` follows secondary reports (orcarouter.ai, 2026-10-12, citing OpenAI's Thibault Sottiaux) that Codex raised the default from 272K to 500K on 2026-10-12. No OpenAI primary page confirms it. The 95% usable share is carried over from the 272K inventory row.
+- `gpt-6-sol` and `gpt-6-luna` use the local inventory value, 872K at 100%. `gpt-6-astra` still bundles the API-sized 1,050,000 fallback, while the same inventory reports 872K. That documented gap is unchanged.
+- API reasoning efforts are separate from Codex efforts. The API pages list `low`, `medium` (default), `high`, `xhigh` and `max` for 6.1 Sol, and add `none` for 6 Sol and 6 Luna. Codex `ultra` is not an API effort.
+- The API pages price Fast at 2x Standard. The Codex inventory describes Fast as "1.5x speed", which is a speed claim, not a price. 6.1 Sol Ultrafast (`service_tier: "ultrafast"`, 6x Standard) has no runtime speed mode, so the runtime does not price it as Ultrafast.
+- No official Codex credit rate is recorded for the GPT-6 family, so `credit_rates` stays `null`.
+
 ## Presentation
 
 `ReasoningEffort` is owned by `model` and accepts `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`. The `low` display label is `Light`. Unsupported model/effort combinations are omitted from display.
@@ -145,6 +162,11 @@ API rates per one million tokens, verified 2026-07-09:
 | Terra | `$2.50` | `$3.125` | `$0.25` | `$15.00` |
 | Luna | `$1.00` | `$1.25` | `$0.10` | `$6.00` |
 | Cyber Red (verified 2026-08-12) | `$12.50` | `$15.625` | `$1.25` | `$75.00` |
+| GPT-6.1 Sol (verified 2026-10-16) | `$2.00` | `$2.50` | `$0.10` | `$10.00` |
+| GPT-6 Sol (verified 2026-10-16) | `$2.00` | `$2.50` | `$0.20` | `$10.00` |
+| GPT-6 Luna (verified 2026-10-16) | `$0.10` | `$0.125` | `$0.01` | `$0.50` |
+
+For the GPT-6 rows, a request with more than 272K observed input tokens is billed at 2x input and cache and 1.5x output for the full request.
 
 Cyber Blue is intentionally absent from this table because no public pricing contract was verified.
 
@@ -158,7 +180,7 @@ Cyber Blue is intentionally absent from this table because no public pricing con
 
 Unknown models never inherit a fallback rate. Discord emits known subtotals without coverage text and hides unavailable costs. Structured output retains the classification. OpenCode can produce an exact GPT-5.6 total because its database reports cache-write tokens separately.
 
-The session tracker accumulates usage deltas with each observed model and speed. It uses aligned last-request input to resolve the context tier. Cumulative input never acts as a request size. Missing request boundaries keep the known subtotal partial. Astra requests with observed input over 272K use the documented long-context multipliers. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
+The session tracker accumulates usage deltas with each observed model and speed. It uses aligned last-request input to resolve the context tier. Cumulative input never acts as a request size. Missing request boundaries keep the known subtotal partial. Astra, GPT-6 Sol, GPT-6 Luna and GPT-6.1 Sol requests with observed input over 272K use the documented long-context multipliers. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
 
 ## Prompt Cache Policy
 
@@ -177,6 +199,11 @@ The bundled policy records a 1,024-token eligibility minimum and a 30-minute min
 | App capabilities/context | Local Codex 0.144.0 `models_cache.json` | 2026-07-09 |
 | GPT-5.6 Cyber Red context and API pricing | <https://developers.openai.com/api/docs/models/gpt-5.6-cyber> | 2026-08-12 |
 | Daybreak Blue/Red distinction | <https://learn.chatgpt.com/docs/cyber-safety> | 2026-08-12 |
+| GPT-6.1 Sol context, efforts and pricing | <https://developers.openai.com/api/docs/models/gpt-6.1-sol> | 2026-10-16 |
+| GPT-6 Sol context, efforts and pricing | <https://developers.openai.com/api/docs/models/gpt-6-sol> | 2026-10-16 |
+| GPT-6 Luna context, efforts and pricing | <https://developers.openai.com/api/docs/models/gpt-6-luna> | 2026-10-16 |
+| GPT-6 Codex inventory | Local `models_cache.json` written 2026-10-03 | 2026-10-16 |
+| GPT-6.1 Sol 500K Codex default | Secondary: orcarouter.ai blog, 2026-10-12 (not an OpenAI primary page) | 2026-10-16 |
 
 ## Local Files
 

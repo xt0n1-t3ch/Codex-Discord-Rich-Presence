@@ -24,10 +24,7 @@ use super::parser::{
     total_cached_input_tokens_from_info, total_input_tokens_from_info,
     total_output_tokens_from_info, total_tokens_from_info, turn_context_reasoning_effort,
 };
-use super::{
-    CodexSessionSnapshot, GitBranchCache, ReasoningEffort, SessionActivityKind,
-    SessionActivitySnapshot,
-};
+use super::{CodexSessionSnapshot, ReasoningEffort, SessionActivityKind, SessionActivitySnapshot};
 
 #[derive(Debug, Default)]
 pub(super) struct SessionAccumulator {
@@ -69,11 +66,20 @@ struct PendingActivity {
 }
 
 const IDLE_DEBOUNCE_SECS: i64 = 45;
+pub(super) const MAX_PENDING_CALLS: usize = 256;
+const PENDING_CALL_MAX_AGE_SECS: i64 = 2 * 60 * 60;
+
+#[derive(Debug, Clone)]
+struct PendingCall {
+    started_at: Option<DateTime<Utc>>,
+    sequence: u64,
+}
 
 #[derive(Debug, Default)]
 struct ActivityTracker {
     snapshot: Option<SessionActivitySnapshot>,
-    pending_calls: HashMap<String, PendingActivity>,
+    pending_calls: HashMap<String, PendingCall>,
+    next_call_sequence: u64,
     last_event_at: Option<DateTime<Utc>>,
     last_effective_signal_at: Option<DateTime<Utc>>,
 }
@@ -158,9 +164,38 @@ impl ActivityTracker {
         observed_at: Option<DateTime<Utc>>,
     ) {
         if let Some(call_id) = call_id {
-            self.pending_calls.insert(call_id, pending.clone());
+            self.expire_pending_calls(observed_at);
+            if !self.pending_calls.contains_key(&call_id)
+                && self.pending_calls.len() >= MAX_PENDING_CALLS
+                && let Some(oldest) = self
+                    .pending_calls
+                    .iter()
+                    .min_by_key(|(_, call)| call.sequence)
+                    .map(|(id, _)| id.clone())
+            {
+                self.pending_calls.remove(&oldest);
+            }
+            self.next_call_sequence = self.next_call_sequence.wrapping_add(1);
+            self.pending_calls.insert(
+                call_id,
+                PendingCall {
+                    started_at: observed_at,
+                    sequence: self.next_call_sequence,
+                },
+            );
         }
         self.mark_activity(pending.kind, pending.target, observed_at);
+    }
+
+    fn expire_pending_calls(&mut self, observed_at: Option<DateTime<Utc>>) {
+        let Some(now) = observed_at else {
+            return;
+        };
+        self.pending_calls.retain(|_, call| {
+            call.started_at.is_none_or(|started_at| {
+                now.signed_duration_since(started_at).num_seconds() < PENDING_CALL_MAX_AGE_SECS
+            })
+        });
     }
 
     fn complete_call(&mut self, call_id: Option<String>, observed_at: Option<DateTime<Utc>>) {
@@ -519,7 +554,6 @@ impl SessionAccumulator {
         &self,
         jsonl_path: &Path,
         last_activity: SystemTime,
-        git_cache: &mut GitBranchCache,
         pricing_config: &PricingConfig,
     ) -> Option<CodexSessionSnapshot> {
         let activity = self.activity_tracker.finalize(Utc::now());
@@ -552,7 +586,6 @@ impl SessionAccumulator {
             .map(ToString::to_string)
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "unknown-project".to_string());
-        let git_branch = git_cache.get(&cwd);
         let fallback_id = jsonl_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -589,7 +622,7 @@ impl SessionAccumulator {
             session_id: self.session_id.clone().unwrap_or(fallback_id),
             cwd,
             project_name,
-            git_branch,
+            git_branch: None,
             originator: self.originator.clone(),
             source: self.source.clone(),
             model: self.model.clone(),

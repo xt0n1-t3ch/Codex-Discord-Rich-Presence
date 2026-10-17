@@ -1,7 +1,8 @@
 use std::io::{self, Write};
 use std::path::Path;
-use std::process::Command;
-use std::time::Duration;
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, Utc};
 use serde::Serialize;
@@ -28,6 +29,27 @@ pub fn silent_command(program: &str) -> Command {
     #[cfg(not(windows))]
     {
         cmd
+    }
+}
+
+pub fn output_with_timeout(command: &mut Command, timeout: Duration) -> Option<Output> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
     }
 }
 
@@ -286,6 +308,31 @@ mod tests {
         write_text_atomic(&path, "second").expect("write second");
 
         assert_eq!(std::fs::read_to_string(path).expect("read"), "second");
+    }
+
+    #[test]
+    fn output_with_timeout_kills_a_child_that_overruns() {
+        let mut command = if cfg!(windows) {
+            let mut command = silent_command("ping");
+            command.args(["-n", "30", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = silent_command("sleep");
+            command.arg("30");
+            command
+        };
+        let started = std::time::Instant::now();
+        assert!(output_with_timeout(&mut command, Duration::from_millis(200)).is_none());
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn output_with_timeout_returns_stdout_of_a_fast_child() {
+        let mut command = silent_command("git");
+        command.arg("--version");
+        let output = output_with_timeout(&mut command, Duration::from_secs(10)).expect("git");
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("git version"));
     }
 
     #[test]

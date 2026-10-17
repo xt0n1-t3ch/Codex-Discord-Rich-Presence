@@ -177,6 +177,10 @@ pub fn print_status(config: &PresenceConfig) -> Result<()> {
     );
     println!("active_sessions: {}", sessions.len());
     println!("session_files_seen: {}", diagnostics.session_files_seen);
+    println!(
+        "session_files_skipped_without_open: {}",
+        diagnostics.skipped_without_open
+    );
     println!("discarded_stale: {}", diagnostics.dropped_stale);
     println!(
         "discarded_outside_sticky: {}",
@@ -894,7 +898,7 @@ fn run_codex_wrapper(
     args: Vec<String>,
 ) -> Result<()> {
     let stop = install_stop_signal()?;
-    let mut child = spawn_codex_child(args)?;
+    let mut child = process_guard::ChildProcessGuard::new(spawn_codex_child(args)?);
     let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
     let mut discord = DiscordPresence::new(config.effective_client_id());
@@ -907,7 +911,6 @@ fn run_codex_wrapper(
 
     loop {
         if stop.load(Ordering::Relaxed) {
-            let _ = child.kill();
             break;
         }
 

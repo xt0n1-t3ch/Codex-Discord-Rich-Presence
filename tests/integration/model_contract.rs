@@ -14,7 +14,7 @@ use codex_discord_presence::model::{
 fn bundled_catalog_is_machine_readable_and_carries_source_metadata() {
     let catalog = model_catalog();
     assert!(catalog.models.len() >= 7);
-    assert_eq!(catalog.verified_on, "2026-08-12");
+    assert_eq!(catalog.verified_on, "2026-10-16");
     assert!(
         catalog
             .sources
@@ -32,6 +32,17 @@ fn bundled_catalog_is_machine_readable_and_carries_source_metadata() {
             && source.url == "https://developers.openai.com/api/docs/models/gpt-5.6-cyber"
             && source.verified_on == "2026-08-12"
     }));
+    for (kind, id) in [
+        ("openai_gpt_6_1_sol", "gpt-6.1-sol"),
+        ("openai_gpt_6_sol", "gpt-6-sol"),
+        ("openai_gpt_6_luna", "gpt-6-luna"),
+    ] {
+        assert!(catalog.sources.iter().any(|source| {
+            source.kind == kind
+                && source.url == format!("https://developers.openai.com/api/docs/models/{id}")
+                && source.verified_on == "2026-10-16"
+        }));
+    }
     assert!(catalog.sources.iter().any(|source| {
         source.kind == "openai_daybreak_trusted_access"
             && source.url == "https://learn.chatgpt.com/docs/cyber-safety"
@@ -117,6 +128,9 @@ fn gpt_5_6_aliases_capabilities_and_efforts_are_centralized() {
 #[test]
 fn codex_app_model_inventory_matches_current_local_catalog() {
     let cases = [
+        ("gpt-6.1-sol", 500_000, 475_000, true),
+        ("gpt-6-sol", 872_000, 872_000, true),
+        ("gpt-6-luna", 872_000, 872_000, true),
         ("gpt-5.5", 272_000, 258_400, true),
         ("gpt-5.6-sol", 372_000, 353_400, true),
         ("gpt-5.6-terra", 372_000, 353_400, true),
@@ -248,6 +262,76 @@ fn gpt_5_6_prices_and_credits_match_verified_catalog() {
         assert_eq!(credits.output_per_million, credit_output);
         assert_eq!(credits.cache_write_per_million, None);
     }
+}
+
+#[test]
+fn gpt_6_sol_luna_prices_context_and_efforts_match_verified_catalog() {
+    let config = PricingConfig::default();
+    let cases = [
+        ("gpt-6.1-sol", 2.0, 2.5, 0.1, 10.0, true),
+        ("gpt-6-sol", 2.0, 2.5, 0.2, 10.0, true),
+        ("gpt-6-luna", 0.1, 0.125, 0.01, 0.5, false),
+    ];
+
+    for (id, input, write, read, output, ultra) in cases {
+        let resolved = resolve_model_pricing(id, &config);
+        let pricing = resolved.pricing.expect("catalog pricing");
+        assert_eq!(resolved.source, PricingSource::Exact, "source for {id}");
+        assert_eq!(pricing.input_per_million, input, "input for {id}");
+        assert_eq!(
+            pricing.cache_write_per_million,
+            Some(write),
+            "write for {id}"
+        );
+        assert_eq!(pricing.cached_input_per_million, read, "read for {id}");
+        assert_eq!(pricing.output_per_million, output, "output for {id}");
+
+        let model = resolve_model(id).expect("catalog model");
+        assert!(model.credit_rates().is_none(), "credits for {id}");
+        assert_eq!(model.fast_usage_multiplier(), Some(2.0), "Fast for {id}");
+        let long = model.long_context_pricing().expect("long-context pricing");
+        assert_eq!(long.input_and_cache, 2.0);
+        assert_eq!(long.output, 1.5);
+        assert_eq!(model.supports_effort(ReasoningEffort::Ultra), ultra);
+        assert!(model.supports_effort(ReasoningEffort::Max));
+        assert!(!model.supports_effort(ReasoningEffort::Minimal));
+
+        let context = model.context().expect("catalog context");
+        assert_eq!(context.api_tokens, Some(1_050_000));
+        assert_eq!(context.max_input_tokens, Some(922_000));
+        assert_eq!(context.max_output_tokens, Some(128_000));
+        assert_eq!(context.long_context_input_threshold, Some(272_000));
+        assert!(context.raw_tokens < 1_050_000, "Codex fallback for {id}");
+    }
+}
+
+#[test]
+fn gpt_6_1_sol_context_prefers_observed_then_local_cache_then_bundle() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = dir.path().join("models_cache.json");
+    fs::write(
+        &cache,
+        r#"{"models":[{"slug":"gpt-6.1-sol","context_window":272000,"effective_context_window_percent":95}]}"#,
+    )
+    .expect("cache fixture");
+
+    let observed = resolve_context_window_from_cache_path("gpt-6.1-sol", Some(475_000), &cache)
+        .expect("observed context");
+    assert_eq!(observed.effective_tokens, 475_000);
+    assert_eq!(observed.source, ContextSource::ObservedJsonl);
+
+    let local =
+        resolve_context_window_from_cache_path("gpt-6.1-sol", None, &cache).expect("local context");
+    assert_eq!(local.raw_tokens, 272_000);
+    assert_eq!(local.effective_tokens, 258_400);
+    assert_eq!(local.source, ContextSource::LocalModelCache);
+
+    fs::write(&cache, r#"{"models":[]}"#).expect("empty cache");
+    let bundled = resolve_context_window_from_cache_path("gpt-6.1-sol", None, &cache)
+        .expect("bundled context");
+    assert_eq!(bundled.raw_tokens, 500_000);
+    assert_eq!(bundled.effective_tokens, 475_000);
+    assert_eq!(bundled.source, ContextSource::BundledCatalog);
 }
 
 #[test]

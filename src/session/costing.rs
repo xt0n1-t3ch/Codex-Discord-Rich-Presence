@@ -256,6 +256,27 @@ mod tests {
     }
 
     #[test]
+    fn gpt_6_1_sol_requests_use_standard_fast_and_long_context_rates() {
+        let price = |input: u64, last: u64, speed: SessionSpeed| {
+            let mut tracker = SessionCostTracker::default();
+            tracker.observe(&event(input, last, 0), None, Some("gpt-6.1-sol"), speed);
+            tracker.compute(&PricingConfig::default())
+        };
+        let standard = price(100_000, 100_000, speed());
+        assert_eq!(standard.status, PricingStatus::Exact);
+        assert!((standard.total_cost_usd - 0.21).abs() < 1e-9);
+        let fast = price(
+            100_000,
+            100_000,
+            SessionSpeed::explicit(SpeedMode::Fast, SpeedSource::ThreadSettings),
+        );
+        assert!((fast.total_cost_usd - 0.42).abs() < 1e-9);
+        let long = price(300_000, 300_000, speed());
+        assert_eq!(long.status, PricingStatus::Exact);
+        assert!((long.total_cost_usd - 1.245).abs() < 1e-9);
+    }
+
+    #[test]
     fn model_and_speed_changes_keep_each_sample_at_its_observed_rate() {
         let mut tracker = SessionCostTracker::default();
         tracker.observe(

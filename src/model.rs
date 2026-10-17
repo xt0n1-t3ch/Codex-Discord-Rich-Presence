@@ -1,11 +1,14 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
 const MAX_MODEL_CACHE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_CACHED_INVENTORIES: usize = 8;
 const MAX_MODEL_CACHE_ENTRIES: usize = 512;
 const MAX_MODEL_ID_BYTES: usize = 128;
 const MAX_CONTEXT_TOKENS: u64 = 10_000_000;
@@ -405,6 +408,68 @@ fn resolve_pricing_model(model: &'static CatalogModel) -> Option<&'static Catalo
 }
 
 fn context_from_local_cache(model_id: &str, path: &Path) -> Option<ResolvedContextWindow> {
+    let resolution = resolve_model(model_id)?;
+    let inventory = local_inventory(path)?;
+    let entry = inventory
+        .iter()
+        .find(|entry| entry.key == resolution.canonical_id())?;
+    if !valid_context(entry.context_window)
+        || !(1..=100).contains(&entry.effective_context_window_percent)
+    {
+        return None;
+    }
+    Some(context_resolution(
+        entry.context_window,
+        entry.effective_context_window_percent,
+        ContextSource::LocalModelCache,
+    ))
+}
+
+#[derive(Debug)]
+struct LocalInventoryEntry {
+    key: String,
+    context_window: u64,
+    effective_context_window_percent: u8,
+}
+
+#[derive(Debug)]
+struct CachedInventory {
+    modified: SystemTime,
+    len: u64,
+    entries: Option<Arc<Vec<LocalInventoryEntry>>>,
+}
+
+fn local_inventory(path: &Path) -> Option<Arc<Vec<LocalInventoryEntry>>> {
+    static INVENTORIES: OnceLock<Mutex<HashMap<PathBuf, CachedInventory>>> = OnceLock::new();
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let len = metadata.len();
+    let mut inventories = INVENTORIES
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(cached) = inventories.get(path)
+        && cached.modified == modified
+        && cached.len == len
+    {
+        return cached.entries.clone();
+    }
+    let entries = read_local_inventory(path).map(Arc::new);
+    if inventories.len() >= MAX_CACHED_INVENTORIES && !inventories.contains_key(path) {
+        inventories.clear();
+    }
+    inventories.insert(
+        path.to_path_buf(),
+        CachedInventory {
+            modified,
+            len,
+            entries: entries.clone(),
+        },
+    );
+    entries
+}
+
+fn read_local_inventory(path: &Path) -> Option<Vec<LocalInventoryEntry>> {
     let file = File::open(path).ok()?;
     let mut bytes = Vec::new();
     file.take(MAX_MODEL_CACHE_BYTES + 1)
@@ -417,21 +482,18 @@ fn context_from_local_cache(model_id: &str, path: &Path) -> Option<ResolvedConte
     if parsed.models.len() > MAX_MODEL_CACHE_ENTRIES {
         return None;
     }
-    let resolution = resolve_model(model_id)?;
-    let entry = parsed.models.into_iter().find(|entry| {
-        entry.slug.len() <= MAX_MODEL_ID_BYTES
-            && normalize_model_key(&entry.slug) == resolution.canonical_id()
-    })?;
-    if !valid_context(entry.context_window)
-        || !(1..=100).contains(&entry.effective_context_window_percent)
-    {
-        return None;
-    }
-    Some(context_resolution(
-        entry.context_window,
-        entry.effective_context_window_percent,
-        ContextSource::LocalModelCache,
-    ))
+    Some(
+        parsed
+            .models
+            .into_iter()
+            .filter(|entry| entry.slug.len() <= MAX_MODEL_ID_BYTES)
+            .map(|entry| LocalInventoryEntry {
+                key: normalize_model_key(&entry.slug),
+                context_window: entry.context_window,
+                effective_context_window_percent: entry.effective_context_window_percent,
+            })
+            .collect(),
+    )
 }
 
 fn context_resolution(
@@ -605,6 +667,46 @@ mod tests {
         let context = resolve_context_window_from_cache_path("gpt-5.6", None, &path)
             .expect("bundled fallback");
         assert_eq!(context.source, ContextSource::BundledCatalog);
+    }
+
+    #[test]
+    fn local_cache_is_parsed_once_per_modification() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("models_cache.json");
+        let write = |window: u64| {
+            std::fs::write(
+                &path,
+                format!(
+                    r#"{{"models":[{{"slug":"gpt-5.6-sol","context_window":{window},"effective_context_window_percent":95}}]}}"#
+                ),
+            )
+            .expect("fixture");
+        };
+        let mtime = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+        let set_mtime = |modified: std::time::SystemTime| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .expect("open fixture")
+                .set_modified(modified)
+                .expect("set mtime");
+        };
+        let raw = || {
+            resolve_context_window_from_cache_path("gpt-5.6", None, &path)
+                .expect("local context")
+                .raw_tokens
+        };
+
+        write(272_000);
+        set_mtime(mtime);
+        assert_eq!(raw(), 272_000);
+
+        write(500_000);
+        set_mtime(mtime);
+        assert_eq!(raw(), 272_000);
+
+        set_mtime(mtime + std::time::Duration::from_secs(1));
+        assert_eq!(raw(), 500_000);
     }
 
     #[test]
