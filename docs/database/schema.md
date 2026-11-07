@@ -4,7 +4,7 @@ All data stays on the user's machine. The daemon reads Codex/OpenCode local stat
 
 ## Config
 
-Path: `~/.codex/discord-presence-config.json`
+Path: `~/.codex-discord-presence/config.json` (or `$CODEX_PRESENCE_HOME/config.json`). The first start moves the file from `~/.codex`, where releases up to 1.11 kept it.
 
 Current schema version: `13`.
 
@@ -44,7 +44,7 @@ Schemas 11 and 12 migrate atomically to schema 13. Existing visibility choices a
 
 ## Metrics Snapshot
 
-Path: `~/.codex/discord-presence-metrics.json`
+The dashboard keeps this snapshot in memory; it is not written to disk.
 
 | Field | Notes |
 |:---|:---|

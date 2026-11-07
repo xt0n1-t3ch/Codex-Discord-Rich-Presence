@@ -1,18 +1,13 @@
+//! Session-wide token and cost totals for the dashboard, kept in memory.
+
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
-use crate::config;
 use crate::cost::{PricingSource, PricingStatus, format_presentable_cost};
 use crate::session::CodexSessionSnapshot;
-use crate::util::{
-    format_cost, format_tokens, human_duration, write_json_pretty_atomic, write_text_atomic,
-};
-
-const PERSIST_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsSnapshot {
@@ -113,7 +108,6 @@ pub struct MetricsTracker {
     daemon_started_at: DateTime<Utc>,
     started_instant: Instant,
     sessions: HashMap<String, SessionRecord>,
-    last_persist_at: Option<Instant>,
     cached_snapshot: Option<MetricsSnapshot>,
 }
 
@@ -123,7 +117,6 @@ impl MetricsTracker {
             daemon_started_at: Utc::now(),
             started_instant: Instant::now(),
             sessions: HashMap::new(),
-            last_persist_at: None,
             cached_snapshot: None,
         }
     }
@@ -155,21 +148,6 @@ impl MetricsTracker {
 
     pub fn snapshot(&self) -> Option<&MetricsSnapshot> {
         self.cached_snapshot.as_ref()
-    }
-
-    pub fn persist_if_due(&mut self) {
-        if let Some(last) = self.last_persist_at
-            && last.elapsed() < PERSIST_INTERVAL
-        {
-            return;
-        }
-        let Some(snapshot) = self.cached_snapshot.as_ref() else {
-            return;
-        };
-
-        self.last_persist_at = Some(Instant::now());
-        persist_json(snapshot);
-        persist_markdown(snapshot);
     }
 
     fn compute_snapshot(&self, active_sessions: usize) -> MetricsSnapshot {
@@ -366,123 +344,6 @@ impl Default for MetricsTracker {
     }
 }
 
-fn persist_json(snapshot: &MetricsSnapshot) {
-    let path = config::codex_home().join("discord-presence-metrics.json");
-    if let Err(err) = write_json_pretty_atomic(&path, snapshot) {
-        warn!(error = %err, "failed to persist metrics JSON");
-    }
-}
-
-fn persist_markdown(snapshot: &MetricsSnapshot) {
-    let path = config::codex_home().join("discord-presence-metrics.md");
-    let markdown = generate_markdown(snapshot);
-    if let Err(err) = write_text_atomic(&path, &markdown) {
-        warn!(error = %err, "failed to persist metrics markdown");
-    }
-}
-
-fn generate_markdown(snapshot: &MetricsSnapshot) -> String {
-    let now_local = Local::now().format("%b %d, %Y %I:%M %p");
-    let uptime = human_duration(Duration::from_secs(snapshot.uptime_seconds));
-
-    let mut markdown = String::new();
-    markdown.push_str("# Codex Metrics Report\n\n");
-    markdown.push_str(&format!(
-        "*Generated: {} | Uptime: {}*\n\n",
-        now_local, uptime
-    ));
-
-    markdown.push_str("## Totals\n\n");
-    markdown.push_str("| Metric | Value |\n");
-    markdown.push_str("|--------|-------|\n");
-    markdown.push_str(&format!(
-        "| Total Cost | {} |\n",
-        format_metrics_cost(&snapshot.totals)
-    ));
-    markdown.push_str(&format!(
-        "| Cost Completeness | {:?} |\n",
-        snapshot.totals.pricing_status
-    ));
-    markdown.push_str(&format!(
-        "| Incomplete Sessions | {} |\n",
-        snapshot.totals.incomplete_sessions
-    ));
-    markdown.push_str(&format!(
-        "| Provider-Reported Totals | {} |\n",
-        snapshot.totals.pricing_sources.provider_reported
-    ));
-    markdown.push_str(&format!(
-        "| Total Tokens | {} |\n",
-        format_tokens(snapshot.totals.total_tokens)
-    ));
-    markdown.push_str(&format!(
-        "| Input Tokens | {} |\n",
-        format_tokens(snapshot.totals.input_tokens)
-    ));
-    markdown.push_str(&format!(
-        "| Cached Input Tokens | {} |\n",
-        format_tokens(snapshot.totals.cached_input_tokens)
-    ));
-    markdown.push_str(&format!(
-        "| Cache Hit Ratio | {:.1}% |\n",
-        snapshot.totals.cache_hit_ratio * 100.0
-    ));
-    markdown.push_str(&format!(
-        "| Output Tokens | {} |\n",
-        format_tokens(snapshot.totals.output_tokens)
-    ));
-    markdown.push('\n');
-
-    markdown.push_str("## Cost Breakdown\n\n");
-    markdown.push_str("| Type | Cost |\n");
-    markdown.push_str("|------|------|\n");
-    markdown.push_str(&format!(
-        "| Input | {} |\n",
-        format_cost(snapshot.cost_breakdown.input_cost_usd)
-    ));
-    markdown.push_str(&format!(
-        "| Cache Write | {} |\n",
-        format_cost(snapshot.cost_breakdown.cache_write_cost_usd)
-    ));
-    markdown.push_str(&format!(
-        "| Cached Input | {} |\n",
-        format_cost(snapshot.cost_breakdown.cached_input_cost_usd)
-    ));
-    markdown.push_str(&format!(
-        "| Output | {} |\n",
-        format_cost(snapshot.cost_breakdown.output_cost_usd)
-    ));
-    markdown.push_str(&format!(
-        "| Cached Input Savings | {} |\n",
-        format_cost(snapshot.cost_breakdown.cached_input_savings_usd)
-    ));
-    markdown.push('\n');
-
-    if !snapshot.by_model.is_empty() {
-        markdown.push_str("## By Model\n\n");
-        markdown.push_str("| Model | Sessions | Cost | Tokens |\n");
-        markdown.push_str("|-------|----------|------|--------|\n");
-        for model in &snapshot.by_model {
-            let total_tokens = model.input_tokens + model.output_tokens;
-            markdown.push_str(&format!(
-                "| {} | {} | {} | {} |\n",
-                model.model_id,
-                model.session_count,
-                format_presentable_cost(model.known_cost_usd, model.pricing_status)
-                    .unwrap_or_else(|| "unavailable".to_string()),
-                format_tokens(total_tokens)
-            ));
-        }
-        markdown.push('\n');
-    }
-
-    markdown.push_str(&format!(
-        "*Active sessions: {}*\n",
-        snapshot.active_sessions
-    ));
-    markdown
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,65 +496,5 @@ mod tests {
         assert!((snapshot.totals.cache_hit_ratio - 0.25).abs() < 0.0001);
         assert!((snapshot.cost_breakdown.cached_input_savings_usd - 0.05).abs() < 0.0001);
         assert!((snapshot.by_model[0].cache_hit_ratio - 0.25).abs() < 0.0001);
-    }
-
-    #[test]
-    fn markdown_contains_expected_sections() {
-        let snapshot = MetricsSnapshot {
-            daemon_started_at: Utc::now(),
-            snapshot_at: Utc::now(),
-            uptime_seconds: 300,
-            totals: TokenTotals {
-                cost_usd: 1.23,
-                known_cost_usd: Some(1.23),
-                pricing_status: PricingStatus::Exact,
-                complete_sessions: 1,
-                incomplete_sessions: 0,
-                unavailable_sessions: 0,
-                pricing_sources: PricingSourceCounts {
-                    catalog_exact: 1,
-                    ..PricingSourceCounts::default()
-                },
-                input_tokens: 100_000,
-                cached_input_tokens: 60_000,
-                output_tokens: 40_000,
-                total_tokens: 140_000,
-                cache_hit_ratio: 0.6,
-            },
-            cost_breakdown: CostBreakdown {
-                input_cost_usd: 0.7,
-                cache_write_cost_usd: 0.0,
-                cached_input_cost_usd: 0.13,
-                output_cost_usd: 0.4,
-                cached_input_savings_usd: 0.57,
-            },
-            by_model: vec![ModelMetrics {
-                model_id: "gpt-5.2-codex".to_string(),
-                cost_usd: 1.23,
-                known_cost_usd: Some(1.23),
-                pricing_status: PricingStatus::Exact,
-                complete_sessions: 1,
-                incomplete_sessions: 0,
-                unavailable_sessions: 0,
-                pricing_sources: PricingSourceCounts {
-                    catalog_exact: 1,
-                    ..PricingSourceCounts::default()
-                },
-                input_tokens: 100_000,
-                cached_input_tokens: 60_000,
-                output_tokens: 40_000,
-                cache_hit_ratio: 0.6,
-                session_count: 1,
-            }],
-            active_sessions: 1,
-        };
-
-        let markdown = generate_markdown(&snapshot);
-        assert!(markdown.contains("# Codex Metrics Report"));
-        assert!(markdown.contains("## Totals"));
-        assert!(markdown.contains("## Cost Breakdown"));
-        assert!(markdown.contains("## By Model"));
-        assert!(markdown.contains("Cache Hit Ratio"));
-        assert!(markdown.contains("Cached Input Savings"));
     }
 }

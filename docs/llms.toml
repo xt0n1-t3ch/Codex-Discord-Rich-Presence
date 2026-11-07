@@ -1,0 +1,89 @@
+name = "Codex Discord Rich Presence"
+summary = "Local Rust runtime and terminal dashboard for OpenAI Codex, publishing configurable Discord Rich Presence for Codex CLI, the VS Code extension, Codex App, ChatGPT App and supported OpenCode-hosted GPT sessions."
+facts = [
+  "Runtime version 1.15.0 (unreleased; 1.11.3 published); codex-presence-core version 2.0.1; configuration schema 13.",
+  "Reads local Codex JSONL sessions and metadata, plus supported GPT sessions in OpenCode's local store.",
+  "Only Codex/OpenAI identities and assets publish. No transcript uploads, analytics telemetry or cloud storage.",
+  "Unknown prices, limits and context values are unavailable, never zero. Costs preserve coverage and provenance.",
+  "Windows x64/ARM64, Linux x64 and macOS Intel/Apple Silicon release binaries; MIT license.",
+  "Run cargo xtask check for the full local gate; the release workflow is manual-only."
+]
+
+[[section]]
+title = "Docs"
+
+[[section.link]]
+path = "docs/index.md"
+title = "Documentation index"
+description = "Task-based guide to installation, runtime contracts and maintenance."
+
+[[section.link]]
+path = "docs/api/codex-presence.md"
+title = "Runtime contract"
+description = "Identity, model catalog, pricing, context, provider lanes, privacy and Discord output."
+
+[[section.link]]
+path = "docs/database/schema.md"
+title = "Local schemas"
+description = "Configuration schema 13, session snapshots, metrics and source provenance."
+
+[[section.link]]
+path = "docs/ui/UI_SITEMAP.md"
+title = "Terminal UI"
+description = "Responsive layouts, widgets, privacy controls and pause/resume behavior."
+
+[[section.link]]
+path = "docs/windows-efficiency.md"
+title = "Windows Efficiency mode"
+description = "Process-local power policy and read-only verification."
+
+[[section.link]]
+path = "PRIVACY.md"
+title = "Privacy policy"
+description = "Local storage and the fields that leave the machine."
+
+[[section]]
+title = "Development"
+
+[[section.link]]
+path = "CONTRIBUTING.md"
+title = "Contributing"
+description = "Local checks, commits and public compatibility expectations."
+
+[[section.link]]
+path = "tests/index.md"
+title = "Test map"
+description = "Validation commands and dated results when available."
+
+[[section.link]]
+path = "docs/releasing.md"
+title = "Release procedure"
+description = "Exact-SHA approval, native checks, assets and immutable publication."
+
+[[section.link]]
+path = "CHANGELOG.md"
+title = "Changelog"
+description = "Version summaries, compatibility and categorized changes."
+
+[[section]]
+title = "Optional"
+
+[[section.link]]
+path = "assets/branding/README.md"
+title = "Branding assets"
+description = "Codex/OpenAI artwork and brand-use rules."
+
+[[section.link]]
+path = "SECURITY.md"
+title = "Security policy"
+description = "Private vulnerability reporting."
+
+[[section.link]]
+path = "CITATION.cff"
+title = "Citation metadata"
+description = "Software authorship, license and release version."
+
+[[section.link]]
+path = "llms-full.txt"
+title = "Full documentation"
+description = "Generated README and linked documents in manifest order."

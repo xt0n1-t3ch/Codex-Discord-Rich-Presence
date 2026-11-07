@@ -1,0 +1,208 @@
+//! Shared fixtures and the `xtask` process runner for the release tests.
+
+use std::ffi::OsStr;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use serde_json::Value;
+
+static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+pub struct TempDir(PathBuf);
+
+impl TempDir {
+    pub fn new(label: &str) -> Self {
+        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("xtask-{label}-{}-{sequence}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("the temporary directory is created");
+        Self(path)
+    }
+
+    pub fn join(&self, relative: &str) -> PathBuf {
+        self.0.join(relative)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+pub struct Run {
+    pub code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl Run {
+    pub fn succeeds(self) -> Self {
+        assert_eq!(
+            self.code, 0,
+            "expected success\nstdout: {}\nstderr: {}",
+            self.stdout, self.stderr
+        );
+        self
+    }
+
+    pub fn fails_with(self, needle: &str) -> Self {
+        assert_eq!(
+            self.code, 1,
+            "expected exit code 1\nstdout: {}\nstderr: {}",
+            self.stdout, self.stderr
+        );
+        assert!(
+            self.stderr.contains(needle),
+            "stderr does not contain {needle:?}\nstderr: {}",
+            self.stderr
+        );
+        self
+    }
+
+    pub fn json(&self) -> Value {
+        serde_json::from_str(self.stdout.trim()).unwrap_or_else(|error| {
+            panic!("stdout is not one JSON document ({error}): {}", self.stdout)
+        })
+    }
+}
+
+pub struct Xtask(Command);
+
+impl Xtask {
+    pub fn new(subcommand: &str) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_xtask"));
+        command
+            .arg(subcommand)
+            .env_remove("GITHUB_OUTPUT")
+            .env_remove("GITHUB_REF_TYPE");
+        Self(command)
+    }
+
+    pub fn arg(mut self, value: impl AsRef<OsStr>) -> Self {
+        self.0.arg(value);
+        self
+    }
+
+    pub fn flag(self, name: &str, value: impl AsRef<OsStr>) -> Self {
+        self.arg(name).arg(value)
+    }
+
+    pub fn root(self, root: &Path) -> Self {
+        self.flag("--root", root)
+    }
+
+    pub fn env(mut self, key: &str, value: impl AsRef<OsStr>) -> Self {
+        self.0.env(key, value);
+        self
+    }
+
+    pub fn run(mut self) -> Run {
+        let output = self.0.output().expect("the xtask binary starts");
+        Run {
+            code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+}
+
+pub fn write(path: &Path, content: impl AsRef<[u8]>) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("the parent directory is created");
+    }
+    fs::write(path, content).expect("the file is written");
+}
+
+pub fn read(path: &Path) -> String {
+    fs::read_to_string(path).unwrap_or_else(|error| panic!("reading {}: {error}", path.display()))
+}
+
+pub fn repository_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the xtask crate lives inside the repository")
+        .to_path_buf()
+}
+
+pub fn git(directory: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(directory)
+        .args([
+            "-c",
+            "user.name=Release Contract",
+            "-c",
+            "user.email=release-contract@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "tag.gpgsign=false",
+        ])
+        .args(args)
+        .output()
+        .expect("git starts");
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+pub fn pe_image(machine: u16) -> Vec<u8> {
+    let mut bytes = vec![0u8; 128];
+    bytes[0] = b'M';
+    bytes[1] = b'Z';
+    bytes[0x3C..0x40].copy_from_slice(&64u32.to_le_bytes());
+    bytes[64..68].copy_from_slice(b"PE\0\0");
+    bytes[68..70].copy_from_slice(&machine.to_le_bytes());
+    bytes
+}
+
+pub fn release_fixture(parent: &TempDir, name: &str, version: &str, changelog: &str) -> PathBuf {
+    let root = parent.join(name);
+    write(
+        &root.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"release-fixture\"\nversion = \"{version}\"\nedition = \"2024\"\n"
+        ),
+    );
+    write(
+        &root.join("Cargo.lock"),
+        format!(
+            "# This file is automatically @generated by Cargo.\n# It is not intended for manual editing.\nversion = 4\n\n[[package]]\nname = \"release-fixture\"\nversion = \"{version}\"\n"
+        ),
+    );
+    write(&root.join("src/main.rs"), "fn main() {}\n");
+    write(&root.join("CHANGELOG.md"), changelog);
+    write(
+        &root.join("README.md"),
+        format!("# Fixture\n\nRelease v{version}\n\n## What's New in v{version}\n"),
+    );
+    write(&root.join(".github/repository.toml"), REPOSITORY_TOML);
+    root
+}
+
+pub const REPOSITORY_TOML: &str = r#"repository = "xt0n1-t3ch/Codex-Discord-Rich-Presence"
+description = "Fixture description."
+homepage = "https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"
+topics = ["codex", "discord"]
+"#;
+
+pub fn generate_lockfile(root: &Path) {
+    let status = xtask::exec::cargo()
+        .args(["generate-lockfile", "--offline"])
+        .current_dir(root)
+        .status()
+        .expect("cargo starts");
+    assert!(
+        status.success(),
+        "cargo generate-lockfile failed in {}",
+        root.display()
+    );
+}

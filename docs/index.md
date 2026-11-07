@@ -1,32 +1,51 @@
-# Docs
+[Codex Discord Rich Presence](../README.md) / Documentation
 
-| Doc | Contract |
-|:---|:---|
-| [api/codex-presence.md](api/codex-presence.md) | Adaptive provider-neutral usage lanes/streams, canonical `account/rateLimits/read` parsing with separate reset credits, dynamic quota windows, credits precedence, Daybreak/GPT-5.6/GPT-6 pricing and context provenance, session-scoped Fast, cost coverage and per-event subtotals, Discord/UI policy, and opt-in live Discord wire proof |
-| [database/schema.md](database/schema.md) | Schema-12 shared presence control, desktop design, privacy, session speed/surface, cost completeness, metrics, and context provenance |
-| [releasing.md](releasing.md) | Exact-SHA operator approval, annotated tags, immutable publication, and cleanup |
-| [ui/UI_SITEMAP.md](ui/UI_SITEMAP.md) | Ratatui layout modes, widgets, theme, animation, logo fallback, footer behavior |
-| [../assets/branding/README.md](../assets/branding/README.md) | README visual assets, badge crops, section icons, and brand-use notes |
+# Codex Discord Rich Presence documentation
 
-Root references: [README.md](../README.md), [CHANGELOG.md](../CHANGELOG.md), [tests/index.md](../tests/index.md).
+Start with the task you have, then follow the runtime, data or release contract it touches.
+
+**State on 2026-11-07:** runtime 1.15.0 (unreleased; 1.11.3 is the published release), `codex-presence-core` 2.0.1 and configuration schema 13. Windows, Linux and macOS binaries are published; current cross-platform validation results belong in the test map, not inferred from artifact availability.
+
+[Start here](#start-here) · [How it works](#how-it-works) · [Maintain it](#maintain-it) · [Rules](#rules)
+
+## Start here
+
+| I want to... | Read |
+| --- | --- |
+| Install on Windows, macOS or Linux | [README: Installation](../README.md#installation) |
+| Use the dashboard or configure privacy | [README: Features](../README.md#features) · [Terminal UI](ui/UI_SITEMAP.md) |
+| Understand missing cost or context values | [Runtime contract](api/codex-presence.md) |
+| Update or remove the runtime | [Updating](../README.md#updating) · [Removal](../README.md#removal) |
+| Run all local checks | [Test map](../tests/index.md) |
+
+## How it works
+
+| I want to... | Read |
+| --- | --- |
+| Understand GPT-6.1 Terra and other GPT-6 identities, pricing and context | [GPT-6 family contract](api/codex-presence.md#gpt-6-family-contract) · [Canonical model catalog](../src/model_catalog.json) |
+| Understand schema 13, shared control and snapshot provenance | [Local schema](database/schema.md) |
+| Understand layouts, keys and paused state | [Terminal UI](ui/UI_SITEMAP.md) |
+| Inspect Windows EcoQoS and Idle priority | [Windows Efficiency mode](windows-efficiency.md) |
+| Find Codex/OpenAI visual assets | [Branding guide](../assets/branding/README.md) |
+
+## Maintain it
+
+| I want to... | Read |
+| --- | --- |
+| Build and contribute | [Development](../README.md#development) · [Contributing](../CONTRIBUTING.md) |
+| Check regressions and their validation status | [Test map](../tests/index.md) |
+| Prepare an approved, immutable release | [Release procedure](releasing.md) |
+| Review compatibility and version history | [Changelog](../CHANGELOG.md) |
+| Find the documentation map for language models | [llms.txt](../llms.txt) · [Generator manifest](llms.toml) |
+| Cite this project | [CITATION.cff](../CITATION.cff) |
 
 ## Rules
 
-| Rule | Standard |
-|:---|:---|
-| Runtime facts | Backed by source or tests |
-| External facts | Include source URL and access date |
-| Release facts | Match `.github/workflows/release.yml` |
-| Scope | Durable contracts only; no plans or handoffs |
+| I want to... | Read |
+| --- | --- |
+| Know what leaves the machine | [Privacy policy](../PRIVACY.md) |
+| Report a vulnerability privately | [Security policy](../SECURITY.md) |
+| Understand participation expectations | [Code of conduct](../CODE_OF_CONDUCT.md) |
+| Check license terms | [MIT license](../LICENSE) |
 
-## GPT-6 Astra
-
-El catálogo nativo registra Astra con ventana total de 1.050.000 tokens, entrada máxima de 922.000, salida máxima de 128.000 y tarifas Standard/Fast. La telemetría incompleta mantiene costes parciales. Consulte la [ficha oficial](https://developers.openai.com/api/docs/models/gpt-6-astra). El runtime corresponde a v1.11.3.
-
-## GPT-6 Sol, Luna y 6.1 Sol
-
-El catálogo registra `gpt-6.1-sol`, `gpt-6-sol` y `gpt-6-luna` con tarifas API verificadas el 2026-10-16, Fast a 2x y el recargo por encima de 272K tokens de entrada. El contexto de respaldo usa la capacidad de Codex, no el máximo de la API. Consulte el [contrato del modelo](api/codex-presence.md#gpt-6-sol-luna-and-61-sol-contract).
-
-## Current release v1.11.3
-
-[Windows Efficiency mode](windows-efficiency.md) documents the process policy and read-only validation. See the root README and changelog for the release contract.
+Runtime facts must be backed by source or tests. External model facts need a source URL and verification date. Release instructions must match the manual release workflow. Keep plans, local agent state, credentials and private session evidence out of public documentation.

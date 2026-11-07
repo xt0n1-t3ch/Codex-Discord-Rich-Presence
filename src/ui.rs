@@ -1,3 +1,5 @@
+//! Terminal dashboard rendering with ratatui: layout modes, banner, panels and pickers.
+
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -587,13 +589,42 @@ fn render_footer(
         desktop_design_label,
         presence_enabled,
     );
+    let left_width = Span::raw(left.as_str()).width() as u16;
     let mut spans = vec![Span::styled(left, theme::muted())];
     if !right.is_empty() {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(right, Style::default().fg(theme::TEXT)));
+        spans.push(Span::styled(
+            right.clone(),
+            Style::default().fg(theme::TEXT),
+        ));
     }
     let line = Line::from(spans);
     frame.render_widget(Paragraph::new(line), area);
+    if !right.is_empty() {
+        link_cells(
+            frame.buffer_mut(),
+            area.x + left_width + 1,
+            area.y,
+            &right,
+            REPOSITORY_URL,
+        );
+    }
+}
+
+/// Turns already drawn text into one OSC 8 hyperlink, which terminals that
+/// support it (Konsole, Windows Terminal, iTerm2, WezTerm, kitty) open on click.
+/// The whole link lives in its first cell with the text's real width, so the
+/// cells after it keep their characters and are not redrawn over the link.
+fn link_cells(buffer: &mut Buffer, x: u16, y: u16, text: &str, url: &str) {
+    let Some(width) = std::num::NonZeroU16::new(Span::raw(text).width() as u16) else {
+        return;
+    };
+    if !buffer.area.contains(Position::new(x, y)) {
+        return;
+    }
+    buffer[(x, y)]
+        .set_symbol(&format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"))
+        .set_diff_option(ratatui::buffer::CellDiffOption::ForcedWidth(width));
 }
 
 fn render_plan_picker(
@@ -918,7 +949,8 @@ fn footer_parts(
             )
         }
     };
-    let right = author_credit(width);
+    // The shortcuts come first; the credit takes the room that is left.
+    let right = endorse_credit(width.saturating_sub(left.chars().count() + 1));
     if width <= 32 {
         (truncate(&left, width), String::new())
     } else {
@@ -927,14 +959,19 @@ fn footer_parts(
     }
 }
 
-fn author_credit(width: usize) -> String {
-    if width >= 100 {
-        "XT0N1.T3CH | @XT0N1.T3CH | ID 211189703641268224".to_string()
-    } else if width >= 48 {
-        "XT0N1.T3CH | @XT0N1.T3CH".to_string()
-    } else {
-        "XT0N1.T3CH".to_string()
-    }
+/// The repository the footer credit links to.
+const REPOSITORY_URL: &str = "https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence";
+
+const ENDORSE_LONG: &str = "Endorse at github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence";
+const ENDORSE_SHORT: &str = "Endorse on GitHub";
+
+/// The longest footer credit that fits in `room` columns, or none.
+fn endorse_credit(room: usize) -> String {
+    [ENDORSE_LONG, ENDORSE_SHORT]
+        .into_iter()
+        .find(|label| label.len() <= room)
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -1158,10 +1195,35 @@ mod tests {
     }
 
     #[test]
-    fn author_credit_is_responsive() {
-        assert!(author_credit(120).contains("ID 211189703641268224"));
-        assert_eq!(author_credit(60), "XT0N1.T3CH | @XT0N1.T3CH");
-        assert_eq!(author_credit(20), "XT0N1.T3CH");
+    fn endorse_credit_shortens_with_the_terminal() {
+        assert_eq!(
+            endorse_credit(140),
+            "Endorse at github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence"
+        );
+        assert_eq!(endorse_credit(40), "Endorse on GitHub");
+        assert_eq!(endorse_credit(10), "");
+    }
+
+    #[test]
+    fn the_endorse_credit_is_one_clickable_link_to_the_repository() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 140, 1));
+        let label = endorse_credit(140);
+        let x = 140 - label.len() as u16;
+        buffer.set_string(x, 0, &label, Style::default());
+
+        link_cells(&mut buffer, x, 0, &label, REPOSITORY_URL);
+
+        let cell = &buffer[(x, 0)];
+        assert_eq!(
+            cell.symbol(),
+            format!("\x1b]8;;{REPOSITORY_URL}\x1b\\{label}\x1b]8;;\x1b\\")
+        );
+        assert_eq!(
+            cell.diff_option,
+            ratatui::buffer::CellDiffOption::ForcedWidth(
+                std::num::NonZeroU16::new(label.len() as u16).unwrap()
+            )
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@ Windows 11 interprets the execution-speed request as EcoQoS. Task Manager owns t
 
 ## Verify a running process
 
-Use `scripts/check-windows-efficiency.ps1 -ProcessId 1234`, replacing the example ID with the application's PID. A successful enabled state reports `eco_qos: true`, `idle_priority: true` and priority class `64`. The verifier opens a query-only process handle and does not change the process.
+Use `cargo xtask windows-efficiency --pid 1234`, replacing the example ID with the application's PID. A successful enabled state reports `eco_qos: true`, `idle_priority: true` and priority class `64`. The verifier opens a query-only process handle and does not change the process.
 
 ## Opt out
 

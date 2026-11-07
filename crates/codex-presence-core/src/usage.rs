@@ -1,3 +1,5 @@
+//! Codex rate-limit and credit telemetry: envelope parsing, scope classification and limit selection.
+
 use std::{collections::BTreeMap, time::SystemTime};
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -52,6 +54,9 @@ impl UsageSignal {
     }
 }
 
+/// Returns the one usage lane all known signals agree on.
+///
+/// The result is [`UsageLane::Unknown`] when no signal names a lane or two signals disagree.
 pub fn classify_usage_signals(signals: &[UsageSignal]) -> UsageLane {
     let mut lane = None;
     for signal in signals.iter().copied().filter_map(UsageSignal::lane) {
@@ -372,10 +377,15 @@ impl EffectiveLimitSelection {
     }
 }
 
+/// Reports whether `limits` holds at least one window.
 pub fn limits_present(limits: &RateLimits) -> bool {
     !limits.windows.is_empty()
 }
 
+/// Maps a Codex `limit_id` to its scope.
+///
+/// `codex` and the global ids are account-wide, `account` ids are individual, and `codex_*` ids
+/// are model-scoped. Anything else, including a missing id, is [`RateLimitScope::Other`].
 pub fn classify_limit_scope(limit_id: Option<&str>) -> RateLimitScope {
     let normalized = limit_id
         .map(str::trim)
@@ -615,6 +625,7 @@ fn wire_credits(credits: Option<WireCredits>) -> Option<CreditBalance> {
     })
 }
 
+/// Builds a snapshot for `source` from loose envelopes, tagged with `provenance_source`.
 pub fn usage_snapshot_from_envelopes(
     source: UsageSource,
     provenance_source: impl Into<String>,
@@ -624,10 +635,16 @@ pub fn usage_snapshot_from_envelopes(
     snapshot_from_stream_with_provenance(&stream, provenance_source)
 }
 
+/// Builds a snapshot from one stream, with an empty provenance.
 pub fn snapshot_from_stream(stream: &UsageStream) -> UsageSnapshot {
     snapshot_from_stream_with_provenance(stream, "")
 }
 
+/// Builds a snapshot from one stream, tagged with `provenance_source`.
+///
+/// The newest envelope of each scope, id and name is kept. Scopes without windows are dropped and
+/// the rest are listed from the most to the least preferred scope. Credits come from the global
+/// account when any envelope carries them there.
 pub fn snapshot_from_stream_with_provenance(
     stream: &UsageStream,
     provenance_source: impl Into<String>,
@@ -693,6 +710,7 @@ pub fn snapshot_from_stream_with_provenance(
     }
 }
 
+/// Builds one snapshot per stream.
 pub fn snapshots_from_streams(streams: &[UsageStream]) -> UsageSnapshotCollection {
     UsageSnapshotCollection {
         snapshots: streams.iter().map(snapshot_from_stream).collect(),
@@ -705,6 +723,9 @@ impl UsageSnapshotCollection {
     }
 }
 
+/// Picks the best-ranked envelope that carries limits or credits.
+///
+/// Global-account envelopes are preferred over every other scope.
 pub fn select_session_envelope_global_first(
     envelopes: &[RateLimitEnvelope],
 ) -> Option<RateLimitEnvelope> {
@@ -722,6 +743,7 @@ pub fn select_session_envelope_global_first(
     })
 }
 
+/// Picks the best-ranked credit balance, restricted to global-account envelopes when any has one.
 pub fn select_credits_global_first(envelopes: &[RateLimitEnvelope]) -> Option<CreditBalance> {
     let has_global = envelopes
         .iter()
@@ -734,6 +756,11 @@ pub fn select_credits_global_first(envelopes: &[RateLimitEnvelope]) -> Option<Cr
         .and_then(|item| item.credits.clone())
 }
 
+/// Picks the session whose limits apply to the account.
+///
+/// Global-account envelopes win when any exists; ties go to the best-ranked envelope, then to the
+/// most recently active session. Credits are chosen the same way, independently of the limits.
+/// Returns `None` when `candidates` is empty.
 pub fn select_effective_limits_global_first(
     candidates: &[SessionLimitCandidate],
 ) -> Option<EffectiveLimitSelection> {
@@ -795,6 +822,11 @@ impl<'de> Deserialize<'de> for RateLimits {
     }
 }
 
+/// Picks the limits of one usage source.
+///
+/// Only streams with the same lane and stream id as `source` count, and global-account envelopes
+/// win. When the top-ranked envelopes disagree, or `source` is not selectable, the result is
+/// `None` rather than a guess.
 pub fn select_effective_limits_by_source(
     streams: &[UsageStream],
     source: &UsageSource,
@@ -920,6 +952,7 @@ fn select_unique_ranked_ref<'a>(
         .then_some(*best)
 }
 
+/// Formats a window length as days, hours or minutes, such as `7d`, `5h` or `90m`.
 pub fn format_window_label(minutes: u64) -> String {
     if minutes > 0 && minutes.is_multiple_of(1_440) {
         format!("{}d", minutes / 1_440)

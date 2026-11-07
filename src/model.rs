@@ -1,3 +1,5 @@
+//! Bundled Codex model catalog: model resolution, context windows, reasoning effort and Fast-speed detection.
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -179,11 +181,6 @@ pub enum ContextSource {
 }
 
 impl ContextSource {
-    #[allow(non_upper_case_globals)]
-    pub const Event: Self = Self::ObservedJsonl;
-    #[allow(non_upper_case_globals)]
-    pub const Catalog: Self = Self::BundledCatalog;
-
     pub const fn label(self) -> &'static str {
         match self {
             Self::ObservedJsonl => "observed JSONL",

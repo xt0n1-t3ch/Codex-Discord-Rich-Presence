@@ -1,3 +1,5 @@
+//! Shared helpers: tracing setup, process spawning with timeouts, token, cost and model formatting, atomic file writes.
+
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};

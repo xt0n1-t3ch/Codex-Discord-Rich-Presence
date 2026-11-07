@@ -1,3 +1,5 @@
+//! Configuration identity, schema migration, live reload and privacy toggles.
+
 use codex_discord_presence::config::{
     ActivitySmallImageKeys, DEFAULT_DISCORD_CLIENT_ID, DEFAULT_DISCORD_DESKTOP_CLIENT_ID,
     DesktopPresenceDesign, DisplayConfig, PresenceConfig, PrivacyField,

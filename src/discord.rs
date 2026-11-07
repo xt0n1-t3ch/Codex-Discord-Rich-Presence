@@ -1,3 +1,5 @@
+//! Discord IPC publisher: builds the activity payload, throttles updates, reconnects and writes the proof artifact.
+
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
@@ -51,7 +53,10 @@ pub struct DiscordPresence {
 const DISCORD_MIN_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
 const DISCORD_ASSET_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 const DISCORD_ASSET_FETCH_TIMEOUT: Duration = Duration::from_secs(2);
-const DISCORD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
+const DISCORD_ASSET_BODY_LIMIT: u64 = 10 * 1024 * 1024;
+/// An unchanged activity is re-sent this often, so a restarted Discord picks it
+/// up again without flooding its rate limit of five updates per 20 seconds.
+const DISCORD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const DISCORD_ACTIVITY_OPCODE: u8 = 1;
 const DISCORD_ACTIVITY_COMMAND: &str = "SET_ACTIVITY";
 const DISCORD_PROOF_SCHEMA_VERSION: u32 = 1;
@@ -1249,11 +1254,12 @@ struct DiscordAssetResponse {
 
 fn fetch_discord_asset_keys(client_id: &str) -> Result<HashSet<String>> {
     let url = format!("https://discord.com/api/v10/oauth2/applications/{client_id}/assets");
-    let agent = ureq::AgentBuilder::new()
-        .timeout(DISCORD_ASSET_FETCH_TIMEOUT)
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(DISCORD_ASSET_FETCH_TIMEOUT))
+        .build()
+        .into();
     let body = agent
-        .get(&url)
+        .get(url.as_str())
         .call()
         .with_context(|| {
             format!(
@@ -1261,8 +1267,11 @@ fn fetch_discord_asset_keys(client_id: &str) -> Result<HashSet<String>> {
                 client_id
             )
         })?
-        .into_string()
-        .context("failed to decode Discord assets response as UTF-8")?;
+        .into_body()
+        .into_with_config()
+        .limit(DISCORD_ASSET_BODY_LIMIT)
+        .read_to_string()
+        .context("failed to read Discord assets response as UTF-8 text")?;
     parse_discord_asset_keys(&body)
 }
 
@@ -1387,8 +1396,8 @@ mod tests {
                 used_tokens: 15_674,
                 remaining_tokens: 242_726,
                 remaining_percent: 93.94,
-                source: ContextWindowSource::Event,
-                raw_source: ContextWindowSource::Event,
+                source: ContextWindowSource::ObservedJsonl,
+                raw_source: ContextWindowSource::ObservedJsonl,
             }),
             limits: RateLimits::new(vec![
                 UsageWindow {

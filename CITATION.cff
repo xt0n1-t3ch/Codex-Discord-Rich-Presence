@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using this metadata."
+type: software
+title: Codex Discord Rich Presence
+abstract: >-
+  A local Rust runtime and terminal dashboard for OpenAI Codex activity.
+  It publishes configurable Discord Rich Presence fields for Codex CLI,
+  the VS Code extension, Codex App, ChatGPT App and supported OpenCode-hosted
+  GPT sessions, preserving model, effort, context, cost and usage provenance
+  without uploading transcripts or sending analytics telemetry.
+authors:
+  - name: xt0n1-t3ch
+    website: "https://github.com/xt0n1-t3ch"
+repository-code: "https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence"
+license: MIT
+version: 1.15.0
+date-released: 2026-10-17
+keywords:
+  - codex
+  - openai
+  - discord-rich-presence
+  - terminal-dashboard
+  - rust
+  - local-first
+  - token-usage
+  - cost-tracking

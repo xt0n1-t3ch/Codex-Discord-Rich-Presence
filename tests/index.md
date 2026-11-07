@@ -1,59 +1,49 @@
+[Codex Discord Rich Presence](../README.md) / Tests
+
 # Tests
 
-## Commands
+`cargo xtask check` runs the full local gate. Run focused checks while working, then the full gate before proposing a change. Results below are **pending** until the lead records dated validation after merging the parallel lanes.
 
-| Gate | Command | Notes |
-|:---|:---|:---|
-| Format | `cargo --locked fmt --check` | Runs without linker |
-| Lint | `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings` | Requires MSVC `link.exe` on Windows MSVC target |
-| Locked compile | `cargo --locked check --workspace --all-targets --all-features` | Requires MSVC `link.exe` |
-| Full suite | `cargo --locked test --workspace --all-features` | Requires MSVC `link.exe` |
-| Release compile | `cargo --locked build --workspace --release --all-features` | Requires MSVC `link.exe` |
-| Dependency audit | `cargo audit --deny warnings` | Uses pinned `cargo-audit 0.22.2`; rejects vulnerabilities, unmaintained, unsound, and yanked crates |
-| Release metadata | `pwsh -NoProfile -File tests/release_contract.tests.ps1` | Covers SemVer, Cargo parity, changelog, prerelease, build metadata, and generated notes |
-| Release approval | `pwsh -NoProfile -File tests/release_approval.tests.ps1` | Covers the local immutable-release check and exact-SHA approval contract without storing an admin token in Actions |
-| Release target | `pwsh -NoProfile -File tests/release_target.tests.ps1` | Covers annotated tag ancestry, exact-SHA approval, latest protected checks, and latest-release ordering |
-| Release assets | `pwsh -NoProfile -File tests/release_assets.tests.ps1` | Covers ten portable release assets, required x64/ARM64 payloads, and SHA-256 manifest generation |
-| Windows PE | `pwsh -NoProfile -File tests/release_pe.tests.ps1` | Requires x64 machine `0x8664`, ARM64 machine `0xAA64`, and rejects mismatches |
-| Release workflow | `pwsh -NoProfile -File tests/release_workflow.tests.ps1` | Covers Action pins, least privilege, job dependencies, toolchain, lockfile enforcement, and the pinned RustSec gate |
-| Windows artifacts | `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Architecture all` | Produces x64 and ARM64 executables, SBOMs, logos, and checksums |
+[Local gates](#local-gates) · [Runtime regressions](#runtime-regressions) · [Release and documentation](#release-and-documentation)
 
-## Regression Coverage
+## Local gates
 
-| Area | Module/Test seam |
-|:---|:---|
-| Model catalog | `tests/integration/model_contract.rs` validates machine-readable facts, sources, aliases, Daybreak/Cyber, GPT-5.6 and GPT-6 capabilities, runtime/catalog context provenance, prices, credits, and cache policy |
-| Pricing catalog | `src/cost.rs` plus `tests/integration/model_contract.rs` cover exact/partial/unavailable totals, emit currency-only known subtotals, fail closed for unknown models, and clamp cache accounting |
-| Fast mode | `src/session.rs` parses per-session service tier; `tests/integration/model_display.rs` validates Codex App labels and capability gating |
-| Cache accounting | `src/cost.rs` cached-input savings and `src/metrics.rs` cache hit/savings aggregation |
-| Surface identity | `src/session.rs`, `src/app.rs`, and `src/discord.rs` distinguish CLI, VS Code extension-host, VS Code terminal, desktop, OpenCode, sticky idle, launcher lineage, and selected desktop client ids |
-| Discord branding | `src/discord.rs` verifies RPC activity-title overrides, exact surface labels, separated reasoning/speed display, and Codex App / ChatGPT App design assets; `src/session.rs` proves `codex_work_desktop` originators override a misleading VS Code source |
-| Discord live proof | `src/discord.rs` verifies known-subtotal emission and unavailable omission, and the no-`>=` fail-closed contract used by the opt-in `discord-proof` wire seam |
-| Terminal layout | `src/ui.rs` covers layout, monochrome wordmark, plan picker, persisted design/master toggle copy, paused state, footer, spinner, and reserved rows |
-| Plan display tiers | `src/config.rs` + `src/telemetry/plan.rs` cover Pro 5x / Pro 20x presets, legacy `pro` migration, and manual override resolution |
-| Config migration | `src/config.rs` plus `tests/integration/config_migration.rs` cover schema 13, ordered ten-field composition, Credits defaults, enabled-by-default migration, external design/privacy/master reload, invalid-file last-good fallback, and identity normalization |
-| Session parsing | `src/session.rs` and `src/session/*` cover JSONL, activity, latest model/effort changes, session-scoped speed, context provenance, cache bounds, and ranking |
-| Scanner resource bounds | `src/session.rs::collect_does_not_open_or_retain_files_older_than_inclusion_cutoffs`, `evicted_file_that_becomes_fresh_is_reparsed_from_the_start`, `oversized_unterminated_line_is_discarded_without_buffering` and `uncompleted_calls_expire_by_age_and_stay_bounded`; `src/model.rs::local_cache_is_parsed_once_per_modification` |
-| Child processes | `src/util.rs::output_with_timeout_*` bound Git probes; `src/process_guard.rs` covers kill-and-reap on drop, native process queries and image-path checks before takeover |
-| OpenCode | `src/opencode.rs` global workspace collection and live GPT session mapping |
-| Windows WSL safety | `src/config.rs::windows_wsl_roots_are_explicit_opt_in` + `windows_wsl_probe_commands_use_hidden_launcher` keep WSL scanning off by default and hidden when explicitly enabled |
-| Windows console safety | `src/util.rs::background_windows_commands_use_silent_launcher` rejects raw background Git, PowerShell, task-list, and dynamic command probes that bypass `CREATE_NO_WINDOW` |
-| Release integrity | `tests/release_*.tests.ps1` drives metadata, local approval, repository state, workflow, portable artifact, digest, and immutable publication contracts |
-| Privacy controls | `src/config.rs`, `src/discord.rs`, `src/ui.rs`, and `src/app.rs` cover all ten fields, final-payload enforcement, persisted toggles/order, and Ratatui interaction |
-| Shared control | `tests/integration/config_migration.rs`, `src/app.rs`, and `src/discord.rs` cover Pulse-compatible config reload in TUI/headless/wrapper loops plus idempotent pause and fresh resume publication |
+| What it proves | Command | Result |
+| --- | --- | --- |
+| Formatting matches rustfmt | `cargo fmt --all -- --check` | pending |
+| Workspace and targets pass warning-denying lint | `cargo clippy --workspace --all-targets -- -D warnings` | pending |
+| Runtime, shared core and tooling regressions pass | `cargo nextest run --workspace` | pending |
+| Native optimized binary builds | `cargo build --release` | pending |
+| Dependency audit has no unapproved findings | `cargo audit --deny warnings` | pending |
 
-| Adaptive usage contract | `crates/codex-presence-core/src/usage.rs` covers explicit provider-lane classification, stable stream isolation, dynamic/arbitrary windows, Codex used/remaining complements, canonical `account/rateLimits/read` parsing, separate reset-credit count/details with null-versus-empty preservation, missing-percentage and unknown-duration omission, malformed duration and credits-only payloads, global-account credit precedence, deterministic serde, and equal-rank fail-closed selection |
+## Runtime regressions
 
-Rule: bugs that cross module seams get an integration regression; module-local bugs can stay beside the Rust module.
+| What it proves | Command | Result |
+| --- | --- | --- |
+| Catalog identities, aliases, efforts, Standard/Fast pricing and context precedence | `cargo nextest run --test integration model_contract` | pending |
+| Model labels preserve reasoning, speed and Codex-owned identities | `cargo nextest run --test integration model_display` | pending |
+| Schema 13 migration, privacy defaults and external configuration reload | `cargo nextest run --test integration config_migration` | pending |
+| Per-event costs preserve model, speed, cache writes, known subtotals and long-context request boundaries without double counting | `cargo nextest run --lib costing` | pending |
+| Session parsing, incremental reads, activity, ranking and scanner resource bounds | `cargo nextest run --lib session` | pending |
+| Shared provider lanes, quotas, reset credits and deterministic composition stay isolated | `cargo nextest run -p codex-presence-core` | pending |
+| Public Discord fields respect privacy, identity, cost coverage and line limits | `cargo nextest run --lib discord` | pending |
+| Terminal layouts, plan picker, design, privacy editor and pause/resume | `cargo nextest run --lib ui` | pending |
+| Child ownership, takeover and process identity checks | `cargo nextest run --lib process_guard` | pending |
+| Background probes use timeouts and silent Windows launchers | `cargo nextest run --lib util` | pending |
+| OpenCode sessions keep their own usage provenance | `cargo nextest run --lib opencode` | pending |
+| Windows WSL scanning stays opt-in | `cargo nextest run --lib windows_wsl` | pending |
+| Process-local Windows Efficiency mode option and ABI contracts | `cargo nextest run --lib power` | pending |
 
-## Regresiones Astra
+The integration seams live in [integration/](integration/). Module-local tests stay beside their implementation. Tests that cross module boundaries belong in integration regressions. A passing non-Windows build does not prove Windows runtime behavior.
 
-`cargo test --lib astra` verifica identidad Standard/Fast, contexto, tarifas y coste parcial. `gpt_6_family_has_standard_and_fast_labels`, `gpt_6_sol_luna_prices_context_and_efforts_match_verified_catalog`, `gpt_6_1_sol_context_prefers_observed_then_local_cache_then_bundle` y `gpt_6_1_sol_requests_use_standard_fast_and_long_context_rates` cubren GPT-6 Sol, GPT-6 Luna y GPT-6.1 Sol. `unknown_account_plan_is_not_published_with_astra` comprueba que un plan desconocido no llega a Discord. La política de identidad continúa siendo Codex.
+## Release and documentation
 
-## Windows efficiency and release validation
+| What it proves | Command | Result |
+| --- | --- | --- |
+| Release metadata, approval, target, assets, architecture, checksums and workflow contracts | `cargo nextest run -p xtask` | pending |
+| Changelog uses the six standard sections, summaries and ordered version links | `cargo xtask changelog check` | pending |
+| Published body is the version's changelog section without wrapper headings | `cargo xtask release-notes 1.11.3` | pending |
+| Generated language-model maps match their manifest and documents | `cargo xtask llms --check` | pending |
+| GitHub description and topics match repository metadata | `cargo xtask meta --check` | pending |
 
-`src/power.rs` tests option parsing and the Windows ABI layout. `scripts/check-windows-efficiency.ps1` reads the running process policy. Release checks validate versions, PE architecture, software bills of materials and checksums.
-
-## Version 1.11.2 cost regressions
-
-`src/session/costing.rs` covers repeated cumulative events, per-sample cache writes, model/speed changes, unknown-model subtotals, missing request history and observed long-context requests. `crates/codex-presence-core/src/presence.rs` protects enabled cost fields against long model labels while preserving privacy and field order.
+The [release procedure](../docs/releasing.md) owns native smoke checks, PE-machine validation, SPDX software bills of materials, checksums and immutable publication. `discord-proof` is an explicit live operation: it sends an activity and clears it again. It is not part of an offline unit-test run.

@@ -1,3 +1,5 @@
+//! Windows Efficiency mode for the daemon process; a no-op on other platforms.
+
 pub fn requested(value: Option<&str>) -> bool {
     !value.is_some_and(|value| {
         matches!(

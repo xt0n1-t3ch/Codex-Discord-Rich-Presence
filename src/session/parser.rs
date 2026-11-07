@@ -1,7 +1,9 @@
+//! Incremental JSONL reading and field extraction for session transcripts.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -291,30 +293,8 @@ pub(super) fn parse_utc_timestamp(text: String) -> Option<DateTime<Utc>> {
         .ok()
 }
 
-const GIT_BRANCH_TIMEOUT: Duration = Duration::from_secs(2);
-
 pub(super) fn fetch_git_branch(project_path: &Path) -> Option<String> {
-    let branch = git_rev_parse(project_path, "--abbrev-ref")?;
-    if branch == "HEAD" {
-        return git_rev_parse(project_path, "--short");
-    }
-    Some(branch)
-}
-
-fn git_rev_parse(project_path: &Path, mode: &str) -> Option<String> {
-    let mut command = crate::util::silent_command("git");
-    command
-        .arg("-C")
-        .arg(project_path)
-        .arg("rev-parse")
-        .arg(mode)
-        .arg("HEAD");
-    let output = crate::util::output_with_timeout(&mut command, GIT_BRANCH_TIMEOUT)?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!value.is_empty()).then_some(value)
+    crate::git_head::branch(project_path)
 }
 
 pub(super) fn str_at(value: &Value, path: &[&str]) -> Option<String> {

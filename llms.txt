@@ -1,0 +1,33 @@
+# Codex Discord Rich Presence
+
+> Local Rust runtime and terminal dashboard for OpenAI Codex, publishing configurable Discord Rich Presence for Codex CLI, the VS Code extension, Codex App, ChatGPT App and supported OpenCode-hosted GPT sessions.
+
+- Runtime version 1.15.0 (unreleased; 1.11.3 published); codex-presence-core version 2.0.1; configuration schema 13.
+- Reads local Codex JSONL sessions and metadata, plus supported GPT sessions in OpenCode's local store.
+- Only Codex/OpenAI identities and assets publish. No transcript uploads, analytics telemetry or cloud storage.
+- Unknown prices, limits and context values are unavailable, never zero. Costs preserve coverage and provenance.
+- Windows x64/ARM64, Linux x64 and macOS Intel/Apple Silicon release binaries; MIT license.
+- Run cargo xtask check for the full local gate; the release workflow is manual-only.
+
+## Docs
+
+- [Documentation index](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/docs/index.md): Task-based guide to installation, runtime contracts and maintenance.
+- [Runtime contract](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/docs/api/codex-presence.md): Identity, model catalog, pricing, context, provider lanes, privacy and Discord output.
+- [Local schemas](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/docs/database/schema.md): Configuration schema 13, session snapshots, metrics and source provenance.
+- [Terminal UI](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/docs/ui/UI_SITEMAP.md): Responsive layouts, widgets, privacy controls and pause/resume behavior.
+- [Windows Efficiency mode](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/docs/windows-efficiency.md): Process-local power policy and read-only verification.
+- [Privacy policy](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/PRIVACY.md): Local storage and the fields that leave the machine.
+
+## Development
+
+- [Contributing](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/CONTRIBUTING.md): Local checks, commits and public compatibility expectations.
+- [Test map](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/tests/index.md): Validation commands and dated results when available.
+- [Release procedure](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/docs/releasing.md): Exact-SHA approval, native checks, assets and immutable publication.
+- [Changelog](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/CHANGELOG.md): Version summaries, compatibility and categorized changes.
+
+## Optional
+
+- [Branding assets](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/assets/branding/README.md): Codex/OpenAI artwork and brand-use rules.
+- [Security policy](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/SECURITY.md): Private vulnerability reporting.
+- [Citation metadata](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/CITATION.cff): Software authorship, license and release version.
+- [Full documentation](https://raw.githubusercontent.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/main/llms-full.txt): Generated README and linked documents in manifest order.

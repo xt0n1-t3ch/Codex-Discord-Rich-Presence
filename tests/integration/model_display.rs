@@ -1,3 +1,5 @@
+//! Model labels for standard and Fast mode across the GPT model families.
+
 use codex_discord_presence::model::{ReasoningEffort, format_model_display};
 
 #[test]
@@ -66,6 +68,34 @@ fn gpt_6_family_has_standard_and_fast_labels() {
     assert_eq!(
         format_model_display("gpt-6-luna", Some(ReasoningEffort::Ultra), true),
         "GPT-6 Luna · ⚡ Fast"
+    );
+}
+
+#[test]
+fn gpt_6_1_terra_has_standard_fast_and_ultra_labels() {
+    assert_eq!(
+        format_model_display("gpt-6.1-terra", None, false),
+        "GPT-6.1 Terra"
+    );
+    assert_eq!(
+        format_model_display("gpt-6.1-terra", Some(ReasoningEffort::Low), false),
+        "GPT-6.1 Terra · Light"
+    );
+    assert_eq!(
+        format_model_display("gpt-6.1-terra", Some(ReasoningEffort::Max), false),
+        "GPT-6.1 Terra · Max"
+    );
+    assert_eq!(
+        format_model_display("gpt-6.1-terra", None, true),
+        "GPT-6.1 Terra · ⚡ Fast"
+    );
+    assert_eq!(
+        format_model_display("gpt-6.1-terra", Some(ReasoningEffort::Ultra), false),
+        "GPT-6.1 Terra · Ultra"
+    );
+    assert_eq!(
+        format_model_display("gpt-6.1-terra-fast", Some(ReasoningEffort::Ultra), true),
+        "GPT-6.1 Terra · Ultra · ⚡ Fast"
     );
 }
 

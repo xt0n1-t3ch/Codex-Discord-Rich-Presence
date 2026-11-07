@@ -1,3 +1,5 @@
+//! Token cost computation from catalog rates, with exact, partial and unavailable pricing states.
+
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ModelPricingOverride, PricingConfig};
@@ -472,12 +474,12 @@ mod tests {
     }
 
     #[test]
-    fn gpt_5_6_has_no_invented_api_context_or_fast_multiplier() {
+    fn gpt_5_6_has_a_long_context_threshold_but_no_invented_api_context_or_fast_multiplier() {
         let metadata = model_context_metadata("gpt-5.6-sol").expect("metadata");
         assert_eq!(metadata.raw_context_window, 372_000);
         assert_eq!(metadata.oauth_context_window, 353_400);
         assert_eq!(metadata.api_context_window, None);
-        assert_eq!(metadata.long_context_input_threshold, None);
+        assert_eq!(metadata.long_context_input_threshold, Some(272_000));
         assert_eq!(metadata.max_output_tokens, None);
         assert_eq!(speed_multiplier("gpt-5.6-sol", true), 1.0);
     }
