@@ -94,6 +94,30 @@ fn a_stale_readme_badge_fails() {
 }
 
 #[test]
+fn the_local_gate_holds_a_cut_version_to_the_release_contract() {
+    let temp = TempDir::new("contract-checkout");
+    let root = release_fixture(
+        &temp,
+        "checkout",
+        "1.7.2",
+        "# Changelog\n\n## [1.7.2] - 2026-07-09\n\n- Release notes.\n",
+    );
+    xtask::contract::checkout(&root).expect("a ready checkout passes");
+
+    let readme = read(&root.join("README.md"));
+    write(&root.join("README.md"), readme.replace("v1.7.2", "v1.7.1"));
+    let error = xtask::contract::checkout(&root).unwrap_err().to_string();
+    assert!(error.contains("README.md release badge"), "{error}");
+
+    // Before the version is cut in the changelog, the README may still name the last release.
+    write(
+        &root.join("CHANGELOG.md"),
+        "# Changelog\n\n## [1.7.1] - 2026-07-06\n\n- Previous release.\n",
+    );
+    xtask::contract::checkout(&root).expect("an uncut version only needs a consistent contract");
+}
+
+#[test]
 fn a_missing_changelog_section_fails() {
     let temp = TempDir::new("contract-changelog");
     let root = release_fixture(

@@ -47,6 +47,10 @@ CDRP 1.15.0 keeps its files in its own folder instead of `~/.codex`, starts no b
 - Repair the corrupted build-command path in the README and document `cargo xtask build-release`.
 - Stop leaving `-wal` and `-shm` files next to OpenCode's database.
 - Keep tests out of the user's Codex home.
+- Treat a release up to 1.11 that still holds its lock in the Codex home as the running instance, so an upgrade never runs two presences at once, and keep that lock until it is released.
+- Isolate the presence folder (`CODEX_PRESENCE_HOME`) as well as the Codex home in `cargo xtask smoke`, so a smoke run never touches the real configuration.
+- Build the macOS ARM64 release on `macos-15`; GitHub retired the `macos-14` runner.
+- Run the release contract of the checkout and the RustSec audit in `cargo xtask check`, so a release no longer stops at preflight for something the local gate could see.
 
 ### Security
 

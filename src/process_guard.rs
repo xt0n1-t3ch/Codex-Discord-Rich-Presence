@@ -70,11 +70,14 @@ pub fn acquire_or_takeover_single_instance() -> Result<AcquireWithTakeover> {
                     "codex-discord-presence lock appears to be owned by current process; close the existing process and retry"
                 );
             }
-            let exe_path = read_instance_metadata(&config::instance_meta_path())
-                .ok()
-                .flatten()
-                .filter(|metadata| metadata.pid == existing_pid)
-                .and_then(|metadata| metadata.exe_path);
+            let exe_path = [
+                config::instance_meta_path(),
+                crate::storage::legacy_instance_path(&config::codex_home()),
+            ]
+            .iter()
+            .filter_map(|path| read_instance_metadata(path).ok().flatten())
+            .find(|metadata| metadata.pid == existing_pid)
+            .and_then(|metadata| metadata.exe_path);
             if process_exists(existing_pid)
                 && !takeover_target_matches(existing_pid, exe_path.as_deref())
             {
@@ -107,6 +110,11 @@ pub fn acquire_or_takeover_single_instance() -> Result<AcquireWithTakeover> {
 }
 
 pub fn acquire_single_instance() -> Result<AcquireState> {
+    // A release up to 1.11 locks a file in the Codex home instead; while it
+    // runs, it is the existing instance.
+    if let Some(pid) = crate::storage::legacy_holder(&config::codex_home()) {
+        return Ok(AcquireState::AlreadyRunning { pid });
+    }
     let lock_path = config::lock_path();
     if let Some(parent) = lock_path.parent() {
         fs::create_dir_all(parent)
@@ -142,6 +150,9 @@ pub fn acquire_single_instance() -> Result<AcquireState> {
 }
 
 pub fn inspect_running_instance() -> Result<RunningState> {
+    if let Some(pid) = crate::storage::legacy_holder(&config::codex_home()) {
+        return Ok(RunningState::Running { pid });
+    }
     let lock_path = config::lock_path();
     if !lock_path.exists() {
         return Ok(RunningState::NotRunning);
