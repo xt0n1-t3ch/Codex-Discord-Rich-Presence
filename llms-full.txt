@@ -905,7 +905,7 @@ GitHub lets maintainers edit the title and notes of a published immutable releas
 
 ## Required proof
 
-1. Run `cargo xtask check`. It runs `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo nextest run --workspace --all-features`, the changelog check and `llms --check`. The `xtask` tests cover the metadata, approval, target, asset, PE, SBOM, notes and workflow contracts.
+1. Run `cargo xtask check`. It runs `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo nextest run --workspace --all-features`, the changelog check, `llms --check`, the release contract of the checkout (once the changelog has a section for the version, the README must name it) and `cargo audit --deny warnings` (needs `cargo-audit` 0.22.2). These are the preflight's file checks, so a tag cut from a checkout that passes does not stop at preflight. The `xtask` tests cover the metadata, approval, target, asset, PE, SBOM, notes and workflow contracts.
 2. Run the release build and `cargo audit --deny warnings`.
 3. Prove schema 12 to 13 migration and parser fixtures independent of the user profile.
 4. On Windows, exercise `status`, `doctor`, TUI persistence, Fast, semantic quota windows, Credits, and real Discord publication.
