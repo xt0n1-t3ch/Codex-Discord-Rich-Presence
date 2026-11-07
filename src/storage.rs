@@ -40,13 +40,43 @@ const MOVED: &[(&str, &str)] = &[
     ("discord-presence-plan-cache.json", "plan-cache.json"),
 ];
 
+/// The single-instance lock and its PID record of releases up to 1.11.
+const LEGACY_LOCK: &str = "codex-discord-presence.lock";
+const LEGACY_INSTANCE: &str = "codex-discord-presence.instance.json";
+
 /// Files of releases up to 1.11 with no successor.
 const OBSOLETE: &[&str] = &[
     "discord-presence-metrics.json",
     "discord-presence-metrics.md",
-    "codex-discord-presence.lock",
-    "codex-discord-presence.instance.json",
+    LEGACY_LOCK,
+    LEGACY_INSTANCE,
 ];
+
+/// The legacy instance record in `codex_home`, kept for a takeover.
+pub fn legacy_instance_path(codex_home: &Path) -> PathBuf {
+    codex_home.join(LEGACY_INSTANCE)
+}
+
+/// `Some(pid)` while a release up to 1.11 still holds its lock in
+/// `codex_home`; the PID comes from its record when that is readable. Such a
+/// process runs alongside a new one unless both locks are honored.
+pub fn legacy_holder(codex_home: &Path) -> Option<Option<u32>> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(codex_home.join(LEGACY_LOCK))
+        .ok()?;
+    if file.try_lock().is_ok() {
+        let _ = file.unlock();
+        return None;
+    }
+    let pid = fs::read_to_string(legacy_instance_path(codex_home))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|record| record.get("pid")?.as_u64())
+        .and_then(|pid| u32::try_from(pid).ok());
+    Some(pid)
+}
 
 /// Moves this program's files out of the Codex home. A file already in the
 /// new folder wins, and its older copy is removed.
@@ -69,9 +99,13 @@ pub fn migrate_from(codex_home: &Path) -> Result<()> {
         }
         let _ = fs::remove_file(&old);
     }
+    // An older release that is still running keeps its lock and record, so
+    // the single-instance check can see it; a later start removes them.
+    let older_running = legacy_holder(codex_home).is_some();
     for name in OBSOLETE {
-        // A lock still held by an older running instance cannot be removed on
-        // Windows; the next start retries.
+        if older_running && [LEGACY_LOCK, LEGACY_INSTANCE].contains(name) {
+            continue;
+        }
         let _ = fs::remove_file(codex_home.join(name));
     }
     Ok(())
@@ -80,6 +114,39 @@ pub fn migrate_from(codex_home: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lock_held_by_an_older_running_release_is_seen_and_kept() {
+        let _lock = crate::config::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let codex = root.path().join("codex-home");
+        let own = root.path().join("presence-home");
+        fs::create_dir_all(&codex).unwrap();
+        let legacy = codex.join(LEGACY_LOCK);
+        fs::write(
+            codex.join(LEGACY_INSTANCE),
+            r#"{"pid":4242,"exe_path":null}"#,
+        )
+        .unwrap();
+        let held = fs::File::create(&legacy).unwrap();
+        held.lock().unwrap();
+        unsafe { std::env::set_var("CODEX_PRESENCE_HOME", &own) };
+
+        migrate_from(&codex).unwrap();
+        unsafe { std::env::remove_var("CODEX_PRESENCE_HOME") };
+
+        assert_eq!(legacy_holder(&codex), Some(Some(4242)));
+        assert!(legacy.exists(), "a held lock is not removed");
+        assert!(codex.join(LEGACY_INSTANCE).exists());
+
+        held.unlock().unwrap();
+        drop(held);
+        assert_eq!(
+            legacy_holder(&codex),
+            None,
+            "a released lock means no older instance"
+        );
+    }
 
     #[test]
     fn files_leave_the_codex_home_and_the_newer_copy_wins() {

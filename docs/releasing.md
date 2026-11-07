@@ -8,7 +8,7 @@ Every check and release step is a Rust command in the `xtask` crate. PowerShell 
 
 | Task | Command |
 | --- | --- |
-| Full local gate (format, clippy, nextest, changelog, llms) | `cargo xtask check` |
+| Full local gate (format, clippy, nextest, changelog, llms, release contract of the checkout, RustSec audit) | `cargo xtask check` |
 | Release-script tests | `cargo nextest run -p xtask` |
 | Validate the changelog format | `cargo xtask changelog check` |
 | Print one changelog section | `cargo xtask changelog notes <version>` |

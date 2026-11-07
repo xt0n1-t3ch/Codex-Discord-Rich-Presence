@@ -189,6 +189,23 @@ fn check_repository_contract(root: &Path, version: &str, metadata: &Metadata) ->
     Ok(())
 }
 
+/// The release preflight's file checks for the checkout's own version, run by
+/// the local gate so a tag never fails on GitHub for something visible here.
+/// The repository contract always holds; once CHANGELOG.md has a section for
+/// the version, the README must name it too.
+pub fn checkout(root: &Path) -> Result<String> {
+    let metadata = metadata::load(root, Dependencies::Excluded)?;
+    let version = metadata.root_package(root)?.version.clone();
+    check_repository_contract(root, &version, &metadata)?;
+    if changelog::read_section(root, &version).is_err() {
+        return Ok(format!(
+            "Version {version} is consistent; not yet cut in CHANGELOG.md"
+        ));
+    }
+    check_readme(root, &version)?;
+    Ok(format!("Checkout is ready to tag v{version}"))
+}
+
 pub fn check(root: &Path, tag: &str, ref_type: Option<&str>) -> Result<ReleaseMetadata> {
     if let Some(kind) = ref_type.map(str::trim).filter(|kind| !kind.is_empty())
         && kind != "tag"

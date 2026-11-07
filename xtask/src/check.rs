@@ -1,10 +1,12 @@
-//! The full local gate: format, clippy, tests, changelog and llms checks.
+//! The full local gate: format, clippy, tests, changelog, llms, the release
+//! contract of the checkout and the RustSec audit.
 
 use std::path::Path;
 
 use anyhow::Result;
 
 use crate::changelog;
+use crate::contract;
 use crate::exec;
 use crate::llms;
 
@@ -43,6 +45,14 @@ pub fn run(root: &Path) -> Result<()> {
     println!("{}", changelog::run_check(root)?);
     println!("== llms --check ==");
     llms::check(root)?;
+    println!("== release contract (checkout) ==");
+    println!("{}", contract::checkout(root)?);
+    // The release preflight runs the same audit; cargo-audit 0.22.2 must be installed.
+    cargo_step(
+        root,
+        "cargo audit --deny warnings",
+        &["audit", "--deny", "warnings"],
+    )?;
     println!("All local checks passed.");
     Ok(())
 }
