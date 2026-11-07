@@ -2,7 +2,7 @@
 
 > Local Rust runtime and terminal dashboard for OpenAI Codex, publishing configurable Discord Rich Presence for Codex CLI, the VS Code extension, Codex App, ChatGPT App and supported OpenCode-hosted GPT sessions.
 
-- Runtime version 1.15.0 (unreleased; 1.11.3 published); codex-presence-core version 2.0.1; configuration schema 13.
+- Runtime version 1.15.0; codex-presence-core version 2.0.1; configuration schema 13.
 - Reads local Codex JSONL sessions and metadata, plus supported GPT sessions in OpenCode's local store.
 - Only Codex/OpenAI identities and assets publish. No transcript uploads, analytics telemetry or cloud storage.
 - Unknown prices, limits and context values are unavailable, never zero. Costs preserve coverage and provenance.

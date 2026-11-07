@@ -4,7 +4,7 @@
 
 Start with the task you have, then follow the runtime, data or release contract it touches.
 
-**State on 2026-11-07:** runtime 1.15.0 (unreleased; 1.11.3 is the published release), `codex-presence-core` 2.0.1 and configuration schema 13. Windows, Linux and macOS binaries are published; current cross-platform validation results belong in the test map, not inferred from artifact availability.
+**State on 2026-11-07:** runtime 1.15.0, `codex-presence-core` 2.0.1 and configuration schema 13. Windows, Linux and macOS binaries are published; current cross-platform validation results belong in the test map, not inferred from artifact availability.
 
 [Start here](#start-here) · [How it works](#how-it-works) · [Maintain it](#maintain-it) · [Rules](#rules)
 
