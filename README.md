@@ -5,7 +5,7 @@ A local Rust runtime that publishes Codex activity to Discord and shows the same
 <div align="center">
 <img src="assets/branding/codex-readme-hero.png" alt="Codex Discord Rich Presence" width="100%">
 
-[![Release v1.11.3](https://img.shields.io/badge/Release-v1.11.3-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
+[![Release v1.15.0](https://img.shields.io/badge/Release-v1.15.0-171717)](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest)
 [![MIT](https://img.shields.io/badge/License-MIT-171717)](LICENSE)
 
 [Install](#installation) · [Features](#features) · [Controls](#terminal-controls) · [Configuration](#configuration) · [Documentation](docs/index.md)
@@ -17,7 +17,7 @@ The runtime reads local Codex JSONL sessions and metadata. It can also read supp
 
 The Discord identity remains Codex-owned. For a desktop analytics UI, arbitrary OpenCode providers and OpenCode Go account limits, use [Pulse](https://github.com/xt0n1-t3ch/Pulse-Analytics).
 
-Release 1.11.3 adds GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna, bounds scanner memory and limits child-process lifetimes. Its shared `codex-presence-core` is 2.0.1, and configuration schema 13 remains compatible. See the [changelog](CHANGELOG.md) for release details and rollback notes.
+Release 1.15.0 keeps CDRP's files in its own folder instead of `~/.codex`, starts no background processes, adds GPT-6.1 Terra and a clickable footer link, and moves release tooling to `cargo xtask`. Its shared `codex-presence-core` is 2.0.1, and configuration schema 13 remains compatible. See the [changelog](CHANGELOG.md) for release details and rollback notes.
 
 ## Preview
 
