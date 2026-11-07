@@ -1,3 +1,5 @@
+//! Presence field layout and the composer that turns field values into Discord activity lines.
+
 use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -46,6 +48,7 @@ impl PresenceFieldId {
         }
     }
 
+    /// Parses a field name, ignoring case and surrounding spaces; `limits` is an alias of `quotas`.
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "project" => Some(Self::Project),
@@ -163,6 +166,8 @@ impl Default for PresenceLayoutConfig {
 }
 
 impl PresenceLayoutConfig {
+    /// Builds the layout of a preset: `Minimal` shows only activity, project and model, `Full`
+    /// uses descriptive labels, and `Standard` is the default layout.
     pub fn for_preset(preset: PresencePreset) -> Self {
         let mut layout = Self::default();
         match preset {
@@ -182,6 +187,9 @@ impl PresenceLayoutConfig {
         layout
     }
 
+    /// Removes duplicate fields and appends any missing field with its default entry.
+    ///
+    /// Returns `true` when the layout changed.
     pub fn normalize(&mut self) -> bool {
         let mut changed = false;
         let mut seen = HashSet::new();
@@ -196,7 +204,7 @@ impl PresenceLayoutConfig {
                     .fields
                     .into_iter()
                     .find(|item| item.field == field)
-                    .unwrap();
+                    .expect("the default layout lists every field");
                 self.fields.push(default);
                 changed = true;
             }
@@ -209,6 +217,7 @@ impl PresenceLayoutConfig {
 pub struct PresenceValues(pub BTreeMap<PresenceFieldId, String>);
 
 impl PresenceValues {
+    /// Stores the value of a field; blank values are ignored so the field is left out.
     pub fn insert(&mut self, field: PresenceFieldId, value: impl Into<String>) {
         let value = value.into();
         if !value.trim().is_empty() {
@@ -223,6 +232,11 @@ pub struct PresenceLines {
     pub state: String,
 }
 
+/// Composes the Discord `details` and `state` lines from the enabled fields of `layout`.
+///
+/// Fields without a value are skipped. A line with no fields shows the matching fallback text.
+/// Each line is capped at 128 characters: fields that do not fit are left out, and room is kept
+/// for the cost field so earlier fields cannot push it off the line.
 pub fn compose_presence(
     layout: &PresenceLayoutConfig,
     values: &PresenceValues,

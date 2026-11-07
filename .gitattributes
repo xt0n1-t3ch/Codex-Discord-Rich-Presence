@@ -1,1 +1,7 @@
+* text=auto eol=lf
 src/model_catalog.json text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.gif binary
+*.webp binary

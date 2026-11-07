@@ -1,3 +1,5 @@
+//! Codex session snapshots: incremental parsing of JSONL transcripts into activity, token, cost and limit data.
+
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -6,7 +8,6 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use walkdir::WalkDir;
 
 use crate::config::{PresenceSurface, PricingConfig};
 use crate::cost::{CostAttribution, PricingSource, PricingStatus, TokenCostBreakdown};
@@ -24,6 +25,7 @@ use crate::telemetry::limits::{
 mod activity;
 mod costing;
 mod parser;
+mod walk;
 
 #[cfg(test)]
 use activity::MAX_PENDING_CALLS;
@@ -169,6 +171,7 @@ struct CachedBranch {
 #[derive(Debug, Default)]
 pub struct SessionParseCache {
     entries: HashMap<PathBuf, CachedSessionEntry>,
+    walk: walk::SessionWalk,
 }
 
 impl SessionParseCache {
@@ -326,34 +329,27 @@ pub fn collect_active_sessions_multi_with_diagnostics(
     let mut diagnostics = SessionCollectionDiagnostics::default();
     let mut files = Vec::new();
 
-    for sessions_root in sessions_roots {
-        if !sessions_root.exists() {
+    let (candidates, full_walk) = parse_cache.walk.candidates(sessions_roots, Instant::now());
+    for path in candidates {
+        diagnostics.session_files_seen = diagnostics.session_files_seen.saturating_add(1);
+        let Some((metadata, modified)) = walk::modified(&path) else {
             continue;
-        }
-
-        for entry in WalkDir::new(sessions_root)
-            .into_iter()
-            .filter_map(std::result::Result::ok)
-        {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            if entry.path().extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-                continue;
-            }
-            diagnostics.session_files_seen = diagnostics.session_files_seen.saturating_add(1);
-
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            let Ok(modified) = metadata.modified() else {
-                continue;
-            };
-            files.push((entry.into_path(), metadata, modified));
-        }
+        };
+        files.push((path, metadata, modified));
     }
 
     files.sort_by_key(|(_, _, modified)| Reverse(*modified));
+    if full_walk {
+        parse_cache.walk.remember(
+            files
+                .iter()
+                .enumerate()
+                .filter(|(index, (_, _, modified))| {
+                    *index < LIMIT_TELEMETRY_RETAINED_FILES || *modified >= inclusion_cutoff
+                })
+                .map(|(_, (path, _, _))| path.clone()),
+        );
+    }
     let mut parsed_paths: HashSet<PathBuf> = HashSet::new();
 
     for (index, (path, metadata, modified)) in files.iter().enumerate() {
@@ -977,7 +973,8 @@ mod tests {
 
         assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-luna"));
         assert_eq!(snapshot.pricing_status, crate::cost::PricingStatus::Partial);
-        assert!((snapshot.total_cost_usd - 0.01266).abs() < 1e-9);
+        // gpt-5.5: 900 x $5 + 100 x $0.50 + 200 x $30 = $0.01055; luna delta: 900 x $0.20 + 100 x $0.02 + 200 x $1.20 = $0.000422 (per 1M)
+        assert!((snapshot.total_cost_usd - 0.010972).abs() < 1e-9);
     }
 
     #[test]
@@ -1136,7 +1133,7 @@ mod tests {
         assert_eq!(context.used_tokens, 15_674);
         assert_eq!(context.remaining_tokens, 242_726);
         assert!((context.remaining_percent - 93.93).abs() < 0.05);
-        assert_eq!(context.source, ContextWindowSource::Event);
+        assert_eq!(context.source, ContextWindowSource::ObservedJsonl);
     }
 
     #[test]
@@ -1151,7 +1148,7 @@ mod tests {
         assert_eq!(context.used_tokens, 50_000);
         assert_eq!(context.remaining_tokens, 350_000);
         assert!((context.remaining_percent - 87.5).abs() < 0.01);
-        assert_eq!(context.source, ContextWindowSource::Catalog);
+        assert_eq!(context.source, ContextWindowSource::BundledCatalog);
     }
 
     #[test]
@@ -1166,7 +1163,7 @@ mod tests {
         assert_eq!(context.used_tokens, 33_000);
         assert_eq!(context.remaining_tokens, 225_400);
         assert!((context.remaining_percent - 87.23).abs() < 0.05);
-        assert_eq!(context.source, ContextWindowSource::Event);
+        assert_eq!(context.source, ContextWindowSource::ObservedJsonl);
     }
 
     #[test]
@@ -1183,7 +1180,7 @@ mod tests {
         assert_eq!(context.used_tokens, 34_000);
         assert_eq!(context.remaining_tokens, 224_400);
         assert!((context.remaining_percent - 86.84).abs() < 0.05);
-        assert_eq!(context.source, ContextWindowSource::Event);
+        assert_eq!(context.source, ContextWindowSource::ObservedJsonl);
     }
 
     #[test]
@@ -2037,6 +2034,8 @@ mod tests {
         .expect("append");
         drop(file);
         set_mtime(&revived, SystemTime::now());
+        // A resumed file in an old folder is found by the next full walk.
+        parse_cache.walk.expire();
 
         let sessions = collect(&mut git_cache, &mut parse_cache);
         let session = sessions

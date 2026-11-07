@@ -1,6 +1,6 @@
 [package]
 name = "codex-discord-presence"
-version = "1.11.3"
+version = "1.15.0"
 edition = "2024"
 description = "Discord Rich Presence for Codex CLI, Codex VS Code Extension, Codex App, and ChatGPT App sessions"
 license = "MIT"
@@ -8,7 +8,7 @@ keywords = ["codex", "discord", "rich-presence", "cli", "tui"]
 categories = ["command-line-utilities"]
 
 [workspace]
-members = ["crates/codex-presence-core"]
+members = ["crates/codex-presence-core", "xtask"]
 
 [profile.release]
 codegen-units = 1
@@ -17,26 +17,29 @@ panic = "abort"
 strip = true
 
 [dependencies]
-anyhow = "1.0.103"
-chrono = { version = "0.4.42", features = ["clock", "serde"] }
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", features = ["clock", "serde"] }
 codex-presence-core = { path = "crates/codex-presence-core", version = "2.0.1" }
-clap = { version = "4.5.51", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 crossterm = "0.29.0"
 ratatui = { version = "0.30.2", features = ["crossterm"] }
-ctrlc = "3.5.1"
+ctrlc = "3.5.2"
 dirs = "6.0.0"
 discord-rich-presence = "1.1.0"
-rusqlite = { version = "0.32.1", features = ["bundled"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
-tempfile = "3.23.0"
-thiserror = "2.0.17"
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "time"] }
-ureq = { version = "2.12.1", default-features = true }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "time"] }
+ureq = "3.5.1"
 walkdir = "2.5.0"
 
-[build-dependencies]
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.build-dependencies]
 ico = "0.4.0"
-image = { version = "0.25.5", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 winres = "0.1.12"

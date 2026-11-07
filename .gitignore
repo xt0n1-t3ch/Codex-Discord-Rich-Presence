@@ -8,3 +8,7 @@
 /releases/
 /plans/
 .gitnexus
+AGENTS.md
+.impeccable/
+.agents/
+.claude/

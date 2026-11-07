@@ -1,3 +1,5 @@
+//! Reads OpenCode's local SQLite databases (read-only) and maps the GPT sessions it hosts to session snapshots.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -117,8 +119,7 @@ fn collect_from_database(
     active_sticky_window: Duration,
     pricing_config: &PricingConfig,
 ) -> rusqlite::Result<Vec<CodexSessionSnapshot>> {
-    let connection =
-        Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let connection = crate::foreign_sqlite::open_read_only(db_path)?;
     let mut statement = connection.prepare(
         "select id, directory, title, agent, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_created, time_updated from session order by time_updated desc limit 32",
     )?;
@@ -633,8 +634,8 @@ mod tests {
         assert_eq!(context.used_tokens, 231_782);
         assert_eq!(context.remaining_tokens, 26_618);
         assert!((context.remaining_percent - 10.30).abs() < 0.05);
-        assert_eq!(context.source, ContextWindowSource::Catalog);
-        assert_eq!(context.raw_source, ContextWindowSource::Catalog);
+        assert_eq!(context.source, ContextWindowSource::BundledCatalog);
+        assert_eq!(context.raw_source, ContextWindowSource::BundledCatalog);
     }
 
     #[test]

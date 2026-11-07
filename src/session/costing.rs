@@ -1,3 +1,5 @@
+//! Per-event cost accumulation for one session; repeated cumulative events add nothing.
+
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
@@ -274,6 +276,30 @@ mod tests {
         let long = price(300_000, 300_000, speed());
         assert_eq!(long.status, PricingStatus::Exact);
         assert!((long.total_cost_usd - 1.245).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gpt_6_1_terra_requests_use_standard_fast_and_long_context_rates() {
+        let price = |input: u64, last: u64, speed: SessionSpeed| {
+            let mut tracker = SessionCostTracker::default();
+            tracker.observe(&event(input, last, 0), None, Some("gpt-6.1-terra"), speed);
+            tracker.compute(&PricingConfig::default())
+        };
+        // 100k input at $1 + 1k output at $5 per 1M = $0.105.
+        let standard = price(100_000, 100_000, speed());
+        assert_eq!(standard.status, PricingStatus::Exact);
+        assert!((standard.total_cost_usd - 0.105).abs() < 1e-9);
+        let fast = price(
+            100_000,
+            100_000,
+            SessionSpeed::explicit(SpeedMode::Fast, SpeedSource::ThreadSettings),
+        );
+        assert_eq!(fast.status, PricingStatus::Exact);
+        assert!((fast.total_cost_usd - 0.21).abs() < 1e-9);
+        // 300k input at $2 + 3k output at $7.50 per 1M = $0.6225.
+        let long = price(300_000, 300_000, speed());
+        assert_eq!(long.status, PricingStatus::Exact);
+        assert!((long.total_cost_usd - 0.6225).abs() < 1e-9);
     }
 
     #[test]

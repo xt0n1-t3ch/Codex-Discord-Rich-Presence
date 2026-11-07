@@ -1,3 +1,5 @@
+//! Entry point of the `codex-discord-presence` binary: parses the command line and dispatches to the runtime.
+
 use std::process::ExitCode;
 
 use anyhow::Result;
@@ -23,6 +25,7 @@ fn main() -> ExitCode {
 fn run() -> Result<u8> {
     setup_tracing();
     let cli = Cli::parse();
+    codex_discord_presence::storage::migrate_from(&config::codex_home())?;
     let config = PresenceConfig::load_or_init()?;
 
     match cli.command {

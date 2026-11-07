@@ -1,3 +1,5 @@
+//! OpenAI plan detection from Codex rate-limit telemetry, with a manual override from the configuration.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -5,7 +7,6 @@ use std::time::SystemTime;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::config;
 use crate::config::{OpenAiPlanDisplayConfig, OpenAiPlanMode, OpenAiPlanTier};
 use crate::session::CodexSessionSnapshot;
 use crate::telemetry::limits::{RateLimitEnvelope, RateLimitScope};
@@ -160,6 +161,10 @@ struct PlanCacheFile {
 pub struct PlanDetector {
     last_telemetry: Option<ResolvedPlan>,
     cached: Option<ResolvedPlan>,
+    /// `None` keeps the detector in memory only.
+    cache_path: Option<PathBuf>,
+    /// The plan last written, so a repeated observation does not rewrite the file.
+    saved: Option<(DetectedPlanTier, Option<String>)>,
 }
 
 impl Default for PlanDetector {
@@ -170,10 +175,18 @@ impl Default for PlanDetector {
 
 impl PlanDetector {
     pub fn new() -> Self {
-        let cached = load_plan_cache();
+        Self::with_cache_path(Some(crate::storage::plan_cache_path()))
+    }
+
+    pub fn with_cache_path(cache_path: Option<PathBuf>) -> Self {
+        let cached = cache_path.as_deref().and_then(load_plan_cache_from_path);
         Self {
             last_telemetry: None,
+            saved: cached
+                .as_ref()
+                .map(|plan| (plan.tier, plan.raw_plan_type.clone())),
             cached,
+            cache_path,
         }
     }
 
@@ -183,13 +196,7 @@ impl PlanDetector {
         plan_config: &OpenAiPlanDisplayConfig,
     ) -> ResolvedPlan {
         if matches!(plan_config.mode, OpenAiPlanMode::Manual) {
-            let raw_plan_type = plan_config.tier.title().to_ascii_lowercase();
-            return ResolvedPlan {
-                tier: plan_config.tier.into(),
-                source: DetectedPlanSource::Manual,
-                observed_at: None,
-                raw_plan_type: Some(raw_plan_type),
-            };
+            return manual_plan(plan_config.tier);
         }
 
         self.resolve_auto_from_sessions(sessions)
@@ -201,13 +208,7 @@ impl PlanDetector {
         plan_config: &OpenAiPlanDisplayConfig,
     ) -> ResolvedPlan {
         if matches!(plan_config.mode, OpenAiPlanMode::Manual) {
-            let raw_plan_type = plan_config.tier.title().to_ascii_lowercase();
-            return ResolvedPlan {
-                tier: plan_config.tier.into(),
-                source: DetectedPlanSource::Manual,
-                observed_at: None,
-                raw_plan_type: Some(raw_plan_type),
-            };
+            return manual_plan(plan_config.tier);
         }
 
         self.resolve_auto(select_plan_signal_from_envelopes(envelopes))
@@ -228,7 +229,7 @@ impl PlanDetector {
                 raw_plan_type: signal.raw_plan_type,
             };
             self.last_telemetry = Some(resolved.clone());
-            let _ = save_plan_cache(&resolved);
+            self.save_if_changed(&resolved);
             return resolved;
         }
 
@@ -246,6 +247,16 @@ impl PlanDetector {
         }
 
         ResolvedPlan::default()
+    }
+}
+
+fn manual_plan(tier: OpenAiPlanTier) -> ResolvedPlan {
+    let tier = DetectedPlanTier::from(tier);
+    ResolvedPlan {
+        tier,
+        source: DetectedPlanSource::Manual,
+        observed_at: None,
+        raw_plan_type: Some(tier.title().to_ascii_lowercase()),
     }
 }
 
@@ -283,12 +294,18 @@ pub fn is_model_allowed_for_plan(model_id: &str, tier: DetectedPlanTier) -> bool
     matches!(tier, DetectedPlanTier::Pro5x | DetectedPlanTier::Pro20x)
 }
 
-fn plan_cache_path() -> PathBuf {
-    config::codex_home().join("discord-presence-plan-cache.json")
-}
-
-fn load_plan_cache() -> Option<ResolvedPlan> {
-    load_plan_cache_from_path(&plan_cache_path())
+impl PlanDetector {
+    fn save_if_changed(&mut self, plan: &ResolvedPlan) {
+        let key = (plan.tier, plan.raw_plan_type.clone());
+        if self.saved.as_ref() == Some(&key) {
+            return;
+        }
+        if let Some(path) = &self.cache_path
+            && save_plan_cache_to_path(plan, path).is_ok()
+        {
+            self.saved = Some(key);
+        }
+    }
 }
 
 fn load_plan_cache_from_path(path: &Path) -> Option<ResolvedPlan> {
@@ -300,10 +317,6 @@ fn load_plan_cache_from_path(path: &Path) -> Option<ResolvedPlan> {
         observed_at: parsed.observed_at,
         raw_plan_type: parsed.raw_plan_type,
     })
-}
-
-fn save_plan_cache(plan: &ResolvedPlan) -> std::io::Result<()> {
-    save_plan_cache_to_path(plan, &plan_cache_path())
 }
 
 fn save_plan_cache_to_path(plan: &ResolvedPlan, path: &Path) -> std::io::Result<()> {
@@ -440,8 +453,8 @@ mod tests {
                 used_tokens: 1,
                 remaining_tokens: 99,
                 remaining_percent: 99.0,
-                source: ContextWindowSource::Event,
-                raw_source: ContextWindowSource::Event,
+                source: ContextWindowSource::ObservedJsonl,
+                raw_source: ContextWindowSource::ObservedJsonl,
             }),
             limits: RateLimits::default(),
             rate_limit_envelopes: vec![RateLimitEnvelope {
@@ -500,7 +513,7 @@ mod tests {
 
     #[test]
     fn detector_prefers_global_signal() {
-        let mut detector = PlanDetector::new();
+        let mut detector = PlanDetector::with_cache_path(None);
         let sessions = vec![
             sample_session(Some("plus"), RateLimitScope::ModelScoped),
             sample_session(Some("pro"), RateLimitScope::GlobalAccount),
@@ -515,10 +528,7 @@ mod tests {
     fn detector_resolves_plan_from_cached_envelopes_without_active_sessions() {
         let envelopes =
             sample_session(Some("pro"), RateLimitScope::GlobalAccount).rate_limit_envelopes;
-        let mut detector = PlanDetector {
-            last_telemetry: None,
-            cached: None,
-        };
+        let mut detector = PlanDetector::with_cache_path(None);
 
         let resolved =
             detector.resolve_from_envelopes(&envelopes, &OpenAiPlanDisplayConfig::default());
@@ -529,7 +539,7 @@ mod tests {
 
     #[test]
     fn detector_respects_manual_override() {
-        let mut detector = PlanDetector::new();
+        let mut detector = PlanDetector::with_cache_path(None);
         let sessions = vec![sample_session(Some("free"), RateLimitScope::GlobalAccount)];
         let resolved = detector.resolve_from_sessions(
             &sessions,
@@ -546,7 +556,7 @@ mod tests {
 
     #[test]
     fn detector_respects_manual_pro_usage_tiers() {
-        let mut detector = PlanDetector::new();
+        let mut detector = PlanDetector::with_cache_path(None);
         let resolved = detector.resolve_from_sessions(
             &[],
             &OpenAiPlanDisplayConfig {
@@ -579,6 +589,26 @@ mod tests {
             "gpt-5.3-codex",
             DetectedPlanTier::Plus
         ));
+    }
+
+    #[test]
+    fn a_plan_seen_on_every_poll_is_written_once() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("plan-cache.json");
+        let mut detector = PlanDetector::with_cache_path(Some(path.clone()));
+        let sessions = vec![sample_session(Some("pro"), RateLimitScope::GlobalAccount)];
+        detector.resolve_from_sessions(&sessions, &OpenAiPlanDisplayConfig::default());
+        assert!(path.exists());
+
+        fs::remove_file(&path).unwrap();
+        for _ in 0..30 {
+            detector.resolve_from_sessions(&sessions, &OpenAiPlanDisplayConfig::default());
+        }
+        assert!(!path.exists(), "an unchanged plan is not written again");
+
+        let plus = vec![sample_session(Some("plus"), RateLimitScope::GlobalAccount)];
+        detector.resolve_from_sessions(&plus, &OpenAiPlanDisplayConfig::default());
+        assert!(path.exists(), "a changed plan is saved");
     }
 
     #[test]

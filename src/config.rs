@@ -1,3 +1,5 @@
+//! Presence configuration (schema 13): loading, migration, persistence, runtime settings and the Codex file locations.
+
 use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs;
@@ -211,32 +213,6 @@ pub enum OpenAiPlanTier {
     Pro20x,
 }
 
-impl OpenAiPlanTier {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Free => "Free",
-            Self::Go => "Go",
-            Self::Plus => "Plus",
-            Self::Business => "Business",
-            Self::Enterprise => "Enterprise",
-            Self::Edu => "Edu",
-            Self::Pro5x => "Pro 5x",
-            Self::Pro20x => "Pro 20x",
-        }
-    }
-
-    pub fn monthly_price_usd(self) -> Option<u32> {
-        match self {
-            Self::Free => Some(0),
-            Self::Go => Some(8),
-            Self::Plus => Some(20),
-            Self::Pro5x => Some(100),
-            Self::Pro20x => Some(200),
-            Self::Business | Self::Enterprise | Self::Edu => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenAiPlanMode {
@@ -251,18 +227,6 @@ pub struct OpenAiPlanDisplayConfig {
     pub mode: OpenAiPlanMode,
     pub tier: OpenAiPlanTier,
     pub show_price: bool,
-}
-
-impl OpenAiPlanDisplayConfig {
-    // Legacy display helper kept for backwards compatibility; runtime now uses telemetry plan.
-    pub fn label(&self) -> String {
-        if self.show_price
-            && let Some(monthly) = self.tier.monthly_price_usd()
-        {
-            return format!("{} (${monthly}/month)", self.tier.title());
-        }
-        self.tier.title().to_string()
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -788,7 +752,7 @@ pub fn sessions_paths() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         if include_wsl_session_roots() {
-            for candidate in windows_wsl_sessions_candidates() {
+            for candidate in windows_wsl_sessions_candidates_once() {
                 push_unique_path(&mut ordered, &mut seen, candidate);
             }
         }
@@ -805,7 +769,7 @@ pub fn sessions_paths() -> Vec<PathBuf> {
 }
 
 pub fn config_path() -> PathBuf {
-    codex_home().join("discord-presence-config.json")
+    crate::storage::config_path()
 }
 
 pub fn global_state_paths() -> Vec<PathBuf> {
@@ -831,11 +795,19 @@ pub fn global_state_paths() -> Vec<PathBuf> {
 }
 
 pub fn lock_path() -> PathBuf {
-    codex_home().join("codex-discord-presence.lock")
+    crate::storage::lock_path()
 }
 
 pub fn instance_meta_path() -> PathBuf {
-    codex_home().join("codex-discord-presence.instance.json")
+    crate::storage::instance_meta_path()
+}
+
+/// Serializes tests that change process-wide environment variables.
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn env_u64(name: &str, default: u64) -> u64 {
@@ -1066,6 +1038,15 @@ fn parse_bool_flag(value: Option<&str>) -> bool {
     )
 }
 
+/// Listing distros starts `wsl.exe` once per distro, so it runs once per process.
+#[cfg(windows)]
+fn windows_wsl_sessions_candidates_once() -> Vec<PathBuf> {
+    static CANDIDATES: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    CANDIDATES
+        .get_or_init(windows_wsl_sessions_candidates)
+        .clone()
+}
+
 #[cfg(windows)]
 fn windows_wsl_sessions_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
@@ -1170,6 +1151,11 @@ fn decode_windows_text_output(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::telemetry::plan::DetectedPlanTier;
+
+    fn plan_label(plan: &OpenAiPlanDisplayConfig) -> String {
+        DetectedPlanTier::from(plan.tier).label(plan.show_price)
+    }
 
     #[test]
     fn configured_client_id_is_rewritten_to_codex_default() {
@@ -1366,7 +1352,7 @@ mod tests {
         assert_eq!(cfg.openai_plan.mode, OpenAiPlanMode::Auto);
         assert_eq!(cfg.openai_plan.tier, OpenAiPlanTier::Pro20x);
         assert!(cfg.openai_plan.show_price);
-        assert_eq!(cfg.openai_plan.label(), "Pro 20x ($200/month)");
+        assert_eq!(plan_label(&cfg.openai_plan), "Pro 20x ($200/month)");
     }
 
     #[test]
@@ -1393,7 +1379,7 @@ mod tests {
         let plan: OpenAiPlanDisplayConfig = serde_json::from_str(raw).expect("plan");
 
         assert_eq!(plan.tier, OpenAiPlanTier::Pro20x);
-        assert_eq!(plan.label(), "Pro 20x ($200/month)");
+        assert_eq!(plan_label(&plan), "Pro 20x ($200/month)");
     }
 
     #[test]
@@ -1403,7 +1389,7 @@ mod tests {
             tier: OpenAiPlanTier::Go,
             show_price: false,
         };
-        assert_eq!(cfg.label(), "Go");
+        assert_eq!(plan_label(&cfg), "Go");
     }
 
     #[test]

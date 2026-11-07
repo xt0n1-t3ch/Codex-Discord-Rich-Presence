@@ -1,7 +1,11 @@
 {
   "schema_version": 1,
-  "verified_on": "2026-10-16",
+  "verified_on": "2026-11-07",
   "sources": [
+    {"kind": "openai_gpt_6_1_terra", "url": "https://developers.openai.com/api/docs/models/gpt-6.1-terra", "verified_on": "2026-11-07"},
+    {"kind": "openai_api_pricing", "url": "https://developers.openai.com/api/docs/pricing", "verified_on": "2026-11-07"},
+    {"kind": "openai_gpt_5_6_sol_promotional_price_until_2026_11_30", "url": "https://developers.openai.com/api/docs/pricing", "verified_on": "2026-11-07"},
+    {"kind": "codex_models_json_126a0ee92e", "url": "https://github.com/openai/codex/blob/126a0ee92e/codex-rs/models-manager/models.json", "verified_on": "2026-11-07"},
     {"kind": "openai_gpt_6_1_sol", "url": "https://developers.openai.com/api/docs/models/gpt-6.1-sol", "verified_on": "2026-10-16"},
     {"kind": "openai_gpt_6_sol", "url": "https://developers.openai.com/api/docs/models/gpt-6-sol", "verified_on": "2026-10-16"},
     {"kind": "openai_gpt_6_luna", "url": "https://developers.openai.com/api/docs/models/gpt-6-luna", "verified_on": "2026-10-16"},
@@ -66,6 +70,18 @@
       "long_context_pricing": { "input_and_cache": 2.0, "output": 1.5 },
       "context": { "raw_tokens": 500000, "effective_percent": 95, "api_tokens": 1050000, "max_input_tokens": 922000, "max_output_tokens": 128000, "long_context_input_threshold": 272000 },
       "api_pricing": { "input_per_million": 2.0, "cache_write_per_million": 2.5, "cached_input_per_million": 0.1, "output_per_million": 10.0 },
+      "credit_rates": null
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "aliases": [],
+      "display_name": "GPT-6.1 Terra",
+      "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+      "supports_fast": true,
+      "fast_usage_multiplier": 2.0,
+      "long_context_pricing": { "input_and_cache": 2.0, "output": 1.5 },
+      "context": { "raw_tokens": 500000, "effective_percent": 95, "api_tokens": 1050000, "max_input_tokens": 922000, "max_output_tokens": 128000, "long_context_input_threshold": 272000 },
+      "api_pricing": { "input_per_million": 1.0, "cache_write_per_million": 1.25, "cached_input_per_million": 0.05, "output_per_million": 5.0 },
       "credit_rates": null
     },
     {
@@ -154,8 +170,9 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
       "supports_fast": true,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 372000, "effective_percent": 95 },
-      "api_pricing": { "input_per_million": 5.0, "cache_write_per_million": 6.25, "cached_input_per_million": 0.5, "output_per_million": 30.0 },
+      "long_context_pricing": { "input_and_cache": 2.0, "output": 1.5 },
+      "context": { "raw_tokens": 372000, "effective_percent": 95, "long_context_input_threshold": 272000 },
+      "api_pricing": { "input_per_million": 4.0, "cache_write_per_million": 5.0, "cached_input_per_million": 0.4, "output_per_million": 20.0 },
       "credit_rates": { "input_per_million": 125.0, "cache_write_per_million": null, "cached_input_per_million": 12.5, "output_per_million": 750.0 }
     },
     {
@@ -165,8 +182,9 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
       "supports_fast": true,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 372000, "effective_percent": 95 },
-      "api_pricing": { "input_per_million": 2.5, "cache_write_per_million": 3.125, "cached_input_per_million": 0.25, "output_per_million": 15.0 },
+      "long_context_pricing": { "input_and_cache": 2.0, "output": 1.5 },
+      "context": { "raw_tokens": 372000, "effective_percent": 95, "long_context_input_threshold": 272000 },
+      "api_pricing": { "input_per_million": 2.0, "cache_write_per_million": 2.5, "cached_input_per_million": 0.2, "output_per_million": 12.0 },
       "credit_rates": { "input_per_million": 62.5, "cache_write_per_million": null, "cached_input_per_million": 6.25, "output_per_million": 375.0 }
     },
     {
@@ -176,8 +194,9 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"],
       "supports_fast": true,
       "fast_usage_multiplier": null,
-      "context": { "raw_tokens": 372000, "effective_percent": 95 },
-      "api_pricing": { "input_per_million": 1.0, "cache_write_per_million": 1.25, "cached_input_per_million": 0.1, "output_per_million": 6.0 },
+      "long_context_pricing": { "input_and_cache": 2.0, "output": 1.5 },
+      "context": { "raw_tokens": 372000, "effective_percent": 95, "long_context_input_threshold": 272000 },
+      "api_pricing": { "input_per_million": 0.2, "cache_write_per_million": 0.25, "cached_input_per_million": 0.02, "output_per_million": 1.2 },
       "credit_rates": { "input_per_million": 25.0, "cache_write_per_million": null, "cached_input_per_million": 2.5, "output_per_million": 150.0 }
     },
     {
@@ -187,6 +206,7 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": true,
       "fast_usage_multiplier": 2.5,
+      "long_context_pricing": null,
       "context": { "raw_tokens": 272000, "effective_percent": 95, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 5.0, "cache_write_per_million": null, "cached_input_per_million": 0.5, "output_per_million": 30.0 },
       "credit_rates": { "input_per_million": 125.0, "cache_write_per_million": null, "cached_input_per_million": 12.5, "output_per_million": 750.0 }
@@ -209,6 +229,7 @@
       "reasoning_efforts": ["low", "medium", "high", "xhigh"],
       "supports_fast": true,
       "fast_usage_multiplier": 2.0,
+      "long_context_pricing": null,
       "context": { "raw_tokens": 272000, "effective_percent": 95, "api_tokens": 1050000, "long_context_input_threshold": 272000, "max_output_tokens": 128000 },
       "api_pricing": { "input_per_million": 2.5, "cache_write_per_million": null, "cached_input_per_million": 0.25, "output_per_million": 15.0 },
       "credit_rates": { "input_per_million": 62.5, "cache_write_per_million": null, "cached_input_per_million": 6.25, "output_per_million": 375.0 }

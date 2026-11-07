@@ -1,0 +1,25 @@
+repository = "xt0n1-t3ch/Codex-Discord-Rich-Presence"
+description = "Discord Rich Presence for OpenAI Codex: shows your Codex CLI, VS Code extension, Codex App, ChatGPT App and OpenCode sessions on Discord with model, effort, context, cost and plan limits, plus a live terminal dashboard. One local Rust binary for Windows, macOS and Linux, no telemetry."
+homepage = "https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/latest"
+topics = [
+  "codex",
+  "codex-cli",
+  "codex-app",
+  "openai",
+  "chatgpt",
+  "opencode",
+  "vscode",
+  "discord",
+  "discord-rich-presence",
+  "rich-presence",
+  "discord-rpc",
+  "tui",
+  "ratatui",
+  "cli",
+  "rust",
+  "usage-monitor",
+  "cost-tracking",
+  "local-first",
+  "developer-tools",
+  "ai-tools",
+]

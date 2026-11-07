@@ -1,3 +1,5 @@
+//! Command-line definition: the `codex`, `status`, `doctor` and `discord-proof` subcommands.
+
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};

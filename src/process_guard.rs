@@ -1,10 +1,12 @@
+//! Single-instance lock with takeover, and child processes that cannot outlive the daemon.
+
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ExitStatus};
-#[cfg(not(windows))]
-use std::process::{Command, Stdio};
+#[cfg(all(unix, not(target_os = "linux")))]
+use std::process::Stdio;
+use std::process::{Child, Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -34,8 +36,6 @@ pub enum RunningState {
 
 pub struct InstanceGuard {
     file: File,
-    #[allow(dead_code)]
-    lock_path: PathBuf,
     meta_path: PathBuf,
     pid: u32,
 }
@@ -127,7 +127,6 @@ pub fn acquire_single_instance() -> Result<AcquireState> {
             write_instance_metadata(&meta_path, &metadata)?;
             Ok(AcquireState::Acquired(InstanceGuard {
                 file,
-                lock_path,
                 meta_path,
                 pid: metadata.pid,
             }))
@@ -216,23 +215,33 @@ fn terminate_process(pid: u32, _force: bool) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 fn terminate_process(pid: u32, force: bool) -> Result<()> {
     if !process_exists(pid) {
         return Ok(());
     }
-    let signal = if force { "-KILL" } else { "-TERM" };
-    let status = Command::new("kill")
-        .arg(signal)
-        .arg(pid.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .context("failed to execute kill for takeover")?;
-    if !status.success() && process_exists(pid) {
-        bail!("failed to terminate running instance PID {pid} via kill");
+    let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+    if let Err(error) = signal_process(pid, signal)
+        && process_exists(pid)
+    {
+        bail!("failed to terminate running instance PID {pid}: {error}");
     }
     Ok(())
+}
+
+// Pids 0 and below address whole process groups in kill(2), so they never name one process.
+#[cfg(unix)]
+fn signal_process(pid: u32, signal: libc::c_int) -> std::io::Result<()> {
+    let pid = libc::pid_t::try_from(pid)
+        .ok()
+        .filter(|pid| *pid > 0)
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: kill takes two integers and touches no memory of this process.
+    if unsafe { libc::kill(pid, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 #[cfg(windows)]
@@ -240,16 +249,12 @@ fn process_exists(pid: u32) -> bool {
     win32::process_exists(pid)
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
-    Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    match signal_process(pid, 0) {
+        Ok(()) => true,
+        Err(error) => error.raw_os_error() == Some(libc::EPERM),
+    }
 }
 
 #[cfg(windows)]
@@ -283,6 +288,16 @@ pub struct ChildProcessGuard {
 }
 
 impl ChildProcessGuard {
+    /// Spawns `command` so the child cannot outlive this process.
+    ///
+    /// On Linux the kernel sends the child SIGTERM when the spawning thread exits,
+    /// so call this from a thread that lives as long as the process. Windows uses a
+    /// kill-on-close job object. Other Unix systems rely on `Drop` alone.
+    pub fn spawn(command: &mut Command) -> std::io::Result<Self> {
+        die_with_parent(command);
+        command.spawn().map(Self::new)
+    }
+
     pub fn new(child: Child) -> Self {
         #[cfg(windows)]
         {
@@ -294,10 +309,14 @@ impl ChildProcessGuard {
                 .ok();
             Self { child, _job: job }
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
         {
             Self { child }
         }
+    }
+
+    pub fn id(&self) -> u32 {
+        self.child.id()
     }
 
     pub fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
@@ -313,6 +332,33 @@ impl Drop for ChildProcessGuard {
         let _ = self.child.wait();
     }
 }
+
+// The release profile uses panic = "abort", so a crash never runs `Drop`; the kernel has to reap the child.
+#[cfg(target_os = "linux")]
+fn die_with_parent(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    let parent = std::process::id() as libc::pid_t;
+    // SAFETY: the hook runs between fork and exec, where only async-signal-safe calls are
+    // allowed. prctl and getppid are, and the hook allocates nothing.
+    unsafe {
+        command.pre_exec(move || {
+            let signal = libc::SIGTERM as libc::c_ulong;
+            let unused: libc::c_ulong = 0;
+            if libc::prctl(libc::PR_SET_PDEATHSIG, signal, unused, unused, unused) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // A parent that exited before the prctl call above never delivers the signal.
+            if libc::getppid() != parent {
+                return Err(std::io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn die_with_parent(_command: &mut Command) {}
 
 #[cfg(windows)]
 mod win32 {
@@ -485,7 +531,7 @@ mod win32 {
     }
 }
 
-fn open_lock_file(path: &PathBuf) -> Result<File> {
+fn open_lock_file(path: &Path) -> Result<File> {
     OpenOptions::new()
         .create(true)
         .read(true)
@@ -534,13 +580,7 @@ fn remove_instance_metadata_if_owned(expected_pid: u32, path: &Path) {
 mod tests {
     use super::*;
     use std::process::Stdio;
-    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn long_running_command() -> std::process::Command {
         if cfg!(windows) {
@@ -589,15 +629,97 @@ mod tests {
 
     #[test]
     fn child_guard_kills_and_reaps_on_drop() {
-        let child = long_running_command()
+        let mut command = long_running_command();
+        command.stdout(Stdio::null());
+        let guard = ChildProcessGuard::spawn(&mut command).expect("spawn");
+        let pid = guard.id();
+        assert!(process_exists(pid));
+        drop(guard);
+        assert!(!process_exists(pid));
+    }
+
+    #[test]
+    fn liveness_probe_sees_this_process_and_not_a_reaped_child() {
+        assert!(process_exists(std::process::id()));
+
+        let mut child = long_running_command()
             .stdout(Stdio::null())
             .spawn()
             .expect("spawn");
         let pid = child.id();
-        let guard = ChildProcessGuard::new(child);
-        assert!(process_exists(pid));
-        drop(guard);
-        assert!(!process_exists(pid));
+        child.kill().expect("kill");
+        child.wait().expect("reap");
+        assert!(!process_exists(pid), "pid {pid} was reaped");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn liveness_probe_never_addresses_a_process_group() {
+        assert!(!process_exists(0));
+        assert!(!process_exists(u32::MAX));
+        assert!(terminate_process(0, true).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    const PDEATHSIG_HELPER_ENV: &str = "CDRP_TEST_PDEATHSIG_HELPER";
+    #[cfg(target_os = "linux")]
+    const PDEATHSIG_HELPER_TEST: &str =
+        "process_guard::tests::pdeathsig_helper_spawns_a_child_and_exits";
+    #[cfg(target_os = "linux")]
+    const PDEATHSIG_CHILD_PREFIX: &str = "pdeathsig-child-pid=";
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pdeathsig_helper_spawns_a_child_and_exits() {
+        if env::var_os(PDEATHSIG_HELPER_ENV).is_none() {
+            return;
+        }
+        let mut command = long_running_command();
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        let guard = ChildProcessGuard::spawn(&mut command).expect("spawn");
+        println!("{PDEATHSIG_CHILD_PREFIX}{}", guard.id());
+        std::process::exit(0);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn process_is_gone(pid: u32) -> bool {
+        match fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Err(_) => true,
+            Ok(stat) => stat
+                .rsplit_once(')')
+                .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z')),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guarded_child_dies_with_its_parent_when_drop_never_runs() {
+        let output = Command::new(env::current_exe().expect("current exe"))
+            .args(["--exact", PDEATHSIG_HELPER_TEST, "--nocapture"])
+            .env(PDEATHSIG_HELPER_ENV, "1")
+            .output()
+            .expect("run helper process");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "helper failed: {stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let pid: u32 = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix(PDEATHSIG_CHILD_PREFIX))
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or_else(|| panic!("helper printed no child pid: {stdout}"));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !process_is_gone(pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
+        let still_running = !process_is_gone(pid);
+        if still_running {
+            let _ = signal_process(pid, libc::SIGKILL);
+        }
+        assert!(!still_running, "child {pid} outlived its parent");
     }
 
     #[test]
@@ -621,10 +743,10 @@ mod tests {
 
     #[test]
     fn inspect_reports_running_while_lock_is_held() {
-        let _mutex = env_lock().lock().expect("env lock");
+        let _mutex = crate::config::test_env_lock();
         let tmp = TempDir::new().expect("temp dir");
         unsafe {
-            env::set_var("CODEX_HOME", tmp.path());
+            env::set_var("CODEX_PRESENCE_HOME", tmp.path());
         }
 
         let state = acquire_single_instance().expect("acquire instance");
@@ -646,7 +768,7 @@ mod tests {
         }
 
         unsafe {
-            env::remove_var("CODEX_HOME");
+            env::remove_var("CODEX_PRESENCE_HOME");
         }
     }
 }

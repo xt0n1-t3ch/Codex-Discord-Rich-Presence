@@ -1,3 +1,5 @@
+//! Cross-module regression tests for configuration, model labels and the model catalog contract.
+
 #[path = "integration/config_migration.rs"]
 mod config_migration;
 

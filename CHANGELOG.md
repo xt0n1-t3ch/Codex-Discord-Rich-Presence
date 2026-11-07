@@ -2,15 +2,68 @@
 
 All notable changes to this project are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses [Semantic Versioning](https://semver.org/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Version numbers describe compatibility of the CLI and its commands, the configuration schema, the Discord presence output and the `codex-presence-core` API. A major version signals incompatible public changes, a minor version adds compatible behavior, and a patch fixes compatible behavior. The shared core has its own version; each release records core and schema compatibility when established.
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-07
+
+CDRP 1.15.0 keeps its files in its own folder instead of `~/.codex`, starts no background processes, adds GPT-6.1 Terra, and moves release tooling to Rust. The shared core stays at 2.0.1 and configuration schema 13 is unchanged.
+
+### Added
+
+- GPT-6.1 Terra model identity, context limits and Standard/Fast pricing.
+- `cargo xtask` for local checks, documentation, changelog, metadata and release tasks.
+- Generated llms.txt and llms-full.txt documentation maps and CITATION.cff.
+
+### Changed
+
+- Align GPT-5.6 Sol, Terra and Luna rates with the published pricing table.
+- Apply long-context pricing to requests above 272,000 input tokens for GPT-5.6 Sol, Terra and Luna, GPT-5.5 and GPT-5.4: 2x input and cache rates and 1.5x output rates.
+- Match Pulse release notes: one summary paragraph and categorized changes without duplicated titles, asset lists, integrity sections or compare links.
+- Use Rust 1.99.1, rusqlite 0.41 and ureq 3, with faster development builds.
+- Replace PowerShell release scripts and their tests with Rust tooling.
+- Follow Keep a Changelog 2.0.0.
+- Describe every `cargo xtask` command and argument in `--help`, and document every module and the public items of the shared core.
+- Keep every file the program writes in `~/.codex-discord-presence` (`CODEX_PRESENCE_HOME`). The first start moves the config and plan cache out of `~/.codex` and removes the old lock and metrics files; the Codex home is only read.
+- Read the Git branch from `.git/HEAD` instead of running `git` on every poll, list WSL distros once per process, and read the launching process chain from `/proc` on Linux instead of running `ps`.
+- Walk every session folder at most every 30 seconds; polls in between read today's and yesterday's folders and the recent files.
+- Redraw the dashboard only when its content changes, write the plan cache only when the plan changes, and re-send an unchanged Discord activity every 30 seconds instead of every 2.
+- Run without a window when started without a terminal; `CODEX_PRESENCE_OPEN_TERMINAL=1` opens one.
+- Replace the author line in the dashboard footer with a clickable "Endorse at" link to this repository (OSC 8), shortened or dropped when the terminal is narrow.
+
+### Removed
+
+- Unused `ContextSource::Event` and `ContextSource::Catalog` aliases and duplicated OpenAI plan label helpers. Configuration files that use `event` or `catalog` still load.
+- The metrics JSON and Markdown files rewritten every 10 seconds; the dashboard keeps metrics in memory.
+
+### Fixed
+
+- End daemon child processes with their parent on Linux.
+- Check the target operating system instead of the host in build scripts.
+- Repair the corrupted build-command path in the README and document `cargo xtask build-release`.
+- Stop leaving `-wal` and `-shm` files next to OpenCode's database.
+- Keep tests out of the user's Codex home.
+
+### Security
+
+- Update rustls-webpki to 0.103.16 or later and webpki-roots to 1.0.10 or later for RUSTSEC-2026-0381 and RUSTSEC-2026-0382, also proposed in PR #56 by @nekotyy.
+
 ## [1.11.3] - 2026-10-17
+
+GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna support with bounded scanner memory and child processes. Runtime 1.11.3 keeps `codex-presence-core` 2.0.1, its public API, configuration schema 13, Discord identity rules and privacy controls. Costs remain telemetry-based estimates, and the reported GPT-6.1 Sol 500K Codex default had no OpenAI primary source in this release. Restore the previous executable to roll back; configuration and session data are not migrated or rewritten.
 
 ### Added
 
 - Add GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna to the model catalog with API rates, Fast pricing, the 272K long-context surcharge and API context limits verified on 2026-10-16. The bundled context fallback uses Codex capacity, not the API maximum. GPT-6.1 Sol uses the reported 500K Codex default, which has no OpenAI primary source. Credit rates stay unavailable.
+
+### Changed
+
+- Replace the unmaintained `fs2` crate with standard-library file locks.
+- Update semver-compatible dependencies, including `thiserror` 2.0.21, and update the `upload-artifact`, `download-artifact` and `rust-toolchain` action pins. Dependabot now proposes minor Cargo updates; major updates stay ignored.
 
 ### Fixed
 
@@ -22,18 +75,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In wrapper mode, kill and reap the `codex` child on every exit path, including an early error and Ctrl+C. On Windows, a kill-on-close job object also ends its process tree.
 - Single-instance takeover checks that the PID in the instance file still runs the recorded executable before it terminates that process. On Windows, process checks and termination use native APIs instead of `tasklist` and PowerShell.
 
-### Changed
-
-- Replace the unmaintained `fs2` crate with standard-library file locks.
-- Update semver-compatible dependencies, including `thiserror` 2.0.21, and update the `upload-artifact`, `download-artifact` and `rust-toolchain` action pins. Dependabot now proposes minor Cargo updates; major updates stay ignored.
-
-### Compatibility and rollback
-
-- Runtime 1.11.3 keeps `codex-presence-core` 2.0.1, its public API, configuration schema 13, Discord identity rules and privacy controls.
-- GPT-6 Sol, GPT-6 Luna and GPT-6.1 Sol costs are estimates from observed telemetry and the catalog rates. The GPT-6.1 Sol 500K Codex context default has no OpenAI primary source.
-- Restore the previous executable to roll back. This release does not migrate the configuration or rewrite session data.
-
 ## [1.11.2] - 2026-09-19
+
+Per-event session costing and reliable currency display, including partial known subtotals. Runtime 1.11.2 and `codex-presence-core` 2.0.1 preserve the public core API, configuration schema 13, Discord identity rules and privacy controls. Costs remain estimates from observed telemetry and selected rates; snapshots retain coverage and provenance. Restore the previous executable to roll back; configuration and session data are not migrated or rewritten.
 
 ### Fixed
 
@@ -46,13 +90,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Update `rustls` to 0.23.45 to address RUSTSEC-2026-0285, which affects TLS 1.3 handshake validation.
 
-### Compatibility and rollback
-
-- Runtime 1.11.2 and `codex-presence-core` 2.0.1 preserve the public core API, configuration schema 13, Discord identity rules and privacy controls.
-- Costs remain estimates from observed telemetry and selected rates. A currency-only known subtotal can be partial; snapshots retain coverage and provenance.
-- Restore the previous executable to roll back. This release does not migrate the configuration or rewrite session data.
-
 ## [1.11.1] - 2026-09-05
+
+GPT-6 Astra support and Windows Efficiency mode, with warning-denying Linux builds restored. The v1.11.0 candidate did not publish release assets; this release includes its Astra, plan-precedence, monetary-display and Windows efficiency changes.
 
 ### Added
 
@@ -63,9 +103,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Make Windows Efficiency mode initialization an explicit no-op on other operating systems, so warning-denying Linux builds pass without suppressing lints. Windows EcoQoS behavior is unchanged.
 
-The v1.11.0 candidate did not publish release assets. This release includes its Astra, plan-precedence, monetary-display and Windows efficiency changes.
+## [1.11.0] - 2026-09-05
 
-## [1.11.0] - 2026-09-05 (unshipped candidate)
+Unshipped candidate for GPT-6 Astra, plan precedence, monetary display and Windows Efficiency mode. The shared core remains 2.0.0, and Codex identity policy and configuration schema 13 are unchanged. Its changes ship in 1.11.1 instead.
 
 ### Added
 
@@ -73,18 +113,20 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 - Astra Standard/Fast pricing resolution with explicit incomplete coverage and no invented subscription-credit rates.
 - Windows Efficiency mode through process-local EcoQoS and Idle priority, with an environment opt-out and read-only process verifier.
 
+### Changed
+
+- README and release documentation explain the standalone terminal interface, source boundaries, Windows process policy and immutable artifact checks.
+- The shared core remains version 2.0.0. Codex identity policy and config schema 13 are unchanged.
+
 ### Fixed
 
 - Manual plan overrides resolve before automatic cache updates. Protocol pro maps to Pro 20x and prolite to Pro 5x; Edu and explicit plan aliases are supported.
 - Unknown plan labels are omitted from public Discord model text when no reliable identification exists.
 - Monetary display rounds to two decimal places while retaining full calculation precision and cost-completeness rules.
 
-### Changed
-
-- README and release documentation explain the standalone terminal interface, source boundaries, Windows process policy and immutable artifact checks.
-- The shared core remains version 2.0.0. Codex identity policy and config schema 13 are unchanged.
-
 ## [1.10.3] - 2026-08-25
+
+Desktop sessions identified by `codex_work_desktop` retain the selected Codex App or ChatGPT App identity, alongside compatible dependency updates.
 
 ### Changed
 
@@ -97,6 +139,8 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
   Codex App or ChatGPT App desktop identity even when their source is VS Code.
 
 ## [1.10.2] - 2026-08-12
+
+Daybreak Blue and Cyber Red model support and Windows ARM64 packaging, with release-preflight and publication checks corrected. Model contracts, displays, formatting, lint, workspace tests, release builds, Windows PE files, SBOMs and checksums were covered by local validation. Native Windows x64 and ARM64 version and doctor smoke checks remain mandatory in the manual release workflow.
 
 ### Added
 
@@ -111,19 +155,55 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 ### Fixed
 
 - Release preflight clears the expected native-command exit status left by negative contract probes, so a fully passing suite exits successfully on Linux PowerShell.
-- Publication validates the six release jobs that actually run—preflight plus every Linux, macOS, and Windows architecture—instead of requiring retired per-push CI contexts.
+- Publication validates the six release jobs that actually run, preflight plus every Linux, macOS, and Windows architecture, instead of requiring retired per-push CI contexts.
 
 ### Security
 
 - Both Windows binaries receive architecture-specific SPDX 2.3 SBOMs, PE-machine validation, and SHA-256 verification before an immutable release is finalized.
 
-### Validated
+## [1.10.1] - 2026-08-12
 
-- Model contract and display coverage for Daybreak Blue/Red canonical IDs, aliases, efforts, context precedence, and pricing completeness.
-- Local release-contract, formatting, lint, workspace test, release-build, Windows PE, SBOM, and checksum gates.
-- Native Windows x64 and ARM64 `--version` and `doctor` smoke remain mandatory in the manual release workflow.
+Tagged Daybreak Blue, Cyber Red and Windows ARM64 update with the release-preflight exit status corrected. Local validation covered model contracts and displays, formatting, lint, workspace tests, release builds, Windows PE files, SBOMs and checksums. Native Windows x64 and ARM64 smoke checks remain required by the release workflow.
+
+### Added
+
+- Native Daybreak Blue and Cyber Red model identities, canonical aliases, six reasoning efforts, runtime-first Blue context, and published Red context/pricing without invented Fast or credit rates.
+- Windows ARM64 packaging with `codex-discord-rich-presence-windows-arm64.exe`, an architecture-specific SPDX SBOM, PE `0xAA64` validation, and native `windows-11-arm` release smoke.
+
+### Changed
+
+- Release assembly now publishes exactly ten assets: Windows x64 and ARM64 executables/SBOMs, Linux and macOS binaries, two logos, and one checksum manifest.
+- Locked dependencies now resolve `anyhow` 1.0.104, `chrono` 0.4.45, and `thiserror` 2.0.19; transitive `lru` is updated to 0.18.2 to clear RUSTSEC-2026-0253.
+
+### Fixed
+
+- Release preflight clears the expected native-command exit status left by negative contract probes, so a fully passing suite exits successfully on Linux PowerShell.
+
+### Security
+
+- Both Windows binaries receive architecture-specific SPDX 2.3 SBOMs, PE-machine validation, and SHA-256 verification before an immutable release is finalized.
+
+## [1.10.0] - 2026-08-12
+
+Tagged Daybreak Blue, Cyber Red and Windows ARM64 update. Local validation covered model contracts and displays, formatting, lint, workspace tests, release builds, Windows PE files, SBOMs and checksums. Native Windows x64 and ARM64 smoke checks remain required by the release workflow.
+
+### Added
+
+- Native Daybreak Blue and Cyber Red model identities, canonical aliases, six reasoning efforts, runtime-first Blue context, and published Red context/pricing without invented Fast or credit rates.
+- Windows ARM64 packaging with `codex-discord-rich-presence-windows-arm64.exe`, an architecture-specific SPDX SBOM, PE `0xAA64` validation, and native `windows-11-arm` release smoke.
+
+### Changed
+
+- Release assembly now publishes exactly ten assets: Windows x64 and ARM64 executables/SBOMs, Linux and macOS binaries, two logos, and one checksum manifest.
+- Locked dependencies now resolve `anyhow` 1.0.104, `chrono` 0.4.45, and `thiserror` 2.0.19; transitive `lru` is updated to 0.18.2 to clear RUSTSEC-2026-0253.
+
+### Security
+
+- Both Windows binaries receive architecture-specific SPDX 2.3 SBOMs, PE-machine validation, and SHA-256 verification before an immutable release is finalized.
 
 ## [1.9.0] - 2026-08-04
+
+Provider-neutral usage lanes in `codex-presence-core` 2.0.0 and configuration schema 13, with adaptive quotas, Credits and deterministic Discord composition. Recorded validation covered Windows release contracts, locked workspace gates, RustSec, schema migration, privacy, provider lanes and real Discord SET/CLEAR acknowledgements. The release notes also required Linux, macOS and Windows compile/test gates.
 
 ### Added
 
@@ -154,31 +234,45 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 
 - Release artifacts retain immutable tag/SHA approval and checksum verification; the Windows binary additionally receives a validated SPDX 2.3 SBOM.
 
-### Validated
+## [1.8.0] - 2026-07-16
 
-- Windows release-contract suites, locked workspace fmt/clippy/tests/release build, and RustSec audit.
-- Schema migration, adaptive quota, Credits, service-tier, privacy, and provider-lane regression coverage.
-- Real Discord IPC SET/CLEAR proof with exact nonce correlation, sanitized DTO output, partial-cost omission, and activity cleanup.
-- Linux, macOS, and Windows compile/test gates remain enforced by the protected CI and tag-only release workflow.
+Shared `codex-presence-core` 1.0.0, schema 13 and semantic quotas, Credits and presence layout. The published notes retained candidate wording and listed Windows workspace gates, Linux/macOS compile and test gates, and live Fast, quota, Credits, TUI and Discord proof as pending before promotion; they did not record completed validation.
+
+### Added
+
+- `codex-presence-core` 1.0.0 as the UI-free owner of semantic quota scopes/windows, credits, service tier, session selection, and deterministic two-line Discord composition.
+- Schema 13 field layout for project, branch, model, activity, tokens, cost, quotas, credits, context, and systems, including visibility, zone, order, and compact/descriptive presentation.
+- Credits support with explicit zero, unlimited, absent, and malformed input behavior; Credits is enabled in Standard and Full presets and remains individually private.
+- Operational TUI usage and privacy surfaces for semantic quota windows, scoped limits, Credits, and `⚡ Fast` presentation.
+
+### Changed
+
+- Usage windows are named from `window_minutes`; a 10,080-minute weekly window renders as `7d` and never fabricates a `5h` window when none exists.
+- Service-tier authority is active-session evidence first, `config.toml` fallback second, legacy global state third, then explicit unknown/standard behavior.
+- Rich Presence composition preserves all observed global/model quota envelopes, omits unavailable values, and enforces Discord's 128-character line boundary deterministically.
+- Repository governance now uses YAML issue forms, Conventional Commits, runtime-proof PRs, synchronized SemVer/core/schema release gates, Dependabot, and a Windows SPDX SBOM contract.
+
+### Fixed
+
+- Parser tests no longer depend on a developer's real `models_cache.json`.
+- Explicit Standard sessions no longer inherit stale global Fast state.
+
+### Security
+
+- Release artifacts retain immutable tag/SHA approval and checksum verification; the Windows binary additionally receives a validated SPDX 2.3 SBOM.
 
 ## [1.7.6] - 2026-07-10
+
+Silent Windows background probes prevent console flashes without changing interactive children. Recorded validation covered the silent-launcher source contract, a Windows child-process trace, formatting, lint, workspace tests, release build and RustSec audit.
 
 ### Fixed
 
 - Windows background Git branch probes now use the shared `CREATE_NO_WINDOW` launcher, preventing console flashes during session polling.
 - Process-lineage, takeover, task-list, relaunch-wrapper, and command-availability probes use the same silent launcher without changing interactive Codex or terminal children.
 
-### Validated
-
-- Source contract rejects raw background `git`, `powershell`, and `tasklist` launchers
-- Windows runtime child-process trace across repeated polling cycles
-- `cargo --locked fmt --check`
-- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo --locked test --workspace --all-features`
-- `cargo --locked build --workspace --release --all-features`
-- `cargo audit --deny warnings`
-
 ## [1.7.5] - 2026-07-10
+
+Persistent pause/resume control in schema 12 and live configuration reload across foreground, headless and wrapper modes. Schema-11 installations default to enabled. Recorded validation covered migration, last-good reload, all runtime loops, pause/resume transitions, terminal controls and the formatting, lint, test, release-build and audit gates.
 
 ### Added
 
@@ -191,20 +285,9 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 - Disabling presence clears Discord activity once per transition while local session monitoring continues; re-enabling invalidates the prior payload and republishes current state.
 - Invalid, incomplete, missing, or transiently replaced config reads now log the failure and preserve the last valid runtime config instead of crashing a running loop.
 
-### Validated
-
-- Schema 11 to 12 migration and persisted enabled default
-- External config reload plus invalid-replacement last-good behavior
-- TUI, headless, and wrapper shared reload boundary
-- Idempotent pause and resume-to-fresh-publish state transition
-- Ratatui master shortcut, paused copy, and responsive footer
-- `cargo --locked fmt --check`
-- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo --locked test --workspace --all-features`
-- `cargo --locked build --workspace --release --all-features`
-- `cargo audit --deny warnings`
-
 ## [1.7.4] - 2026-07-10
+
+A persistent terminal privacy editor and shared public Discord presentation contract. Recorded validation covered the final-payload privacy matrix, editor rendering and keyboard behavior, formatting, lint, workspace tests, release build and RustSec audit.
 
 ### Added
 
@@ -216,17 +299,9 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 - Context visibility is independent from token visibility, and disabling Systems removes the Discord small activity icon and tooltip instead of leaving a hidden data path active.
 - Discord activity construction now consumes the same public presentation object used by previews, preventing app title, branch, model/reasoning, asset, and privacy drift.
 
-### Validated
-
-- Privacy-field matrix against the final public payload
-- Ratatui privacy editor render and keyboard contract
-- `cargo --locked fmt --check`
-- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo --locked test --workspace --all-features`
-- `cargo --locked build --workspace --release --all-features`
-- `cargo audit --deny warnings`
-
 ## [1.7.3] - 2026-07-09
+
+Selected Discord activity titles and separate model, reasoning and Fast segments now stay consistent across surfaces. Recorded validation covered formatting, lint, workspace tests, release build, RustSec audit, downloaded assets and their checksum manifest.
 
 ### Fixed
 
@@ -234,16 +309,9 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 - GPT model presentation now keeps the exact Codex App label in the factual catalog while rendering the human-facing line as `GPT-5.6 Sol · Max | Pro 20x ($200/month)`. Reasoning and Fast are separate ` · ` segments in Discord, Ratatui, status output, and OpenCode views.
 - Presence payload equality includes the activity title, forcing an immediate republish when the selected design changes.
 
-### Validated
-
-- `cargo --locked fmt --check`
-- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo --locked test --workspace --all-features`
-- `cargo --locked build --workspace --release --all-features`
-- `cargo audit --deny warnings`
-- Downloaded release assets and `SHA256SUMS.txt`
-
 ## [1.7.2] - 2026-07-09
+
+GPT-5.6 catalog support, persistent desktop design selection and stricter telemetry, context and privacy handling. Recorded validation covered formatting, lint, workspace tests, release build, RustSec audit and the release contract, approval, target, asset and workflow suites.
 
 ### Added
 
@@ -271,20 +339,9 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 - Removed the unused `viuer` dependency and its vulnerable/unmaintained AVIF stack, updated `anyhow` to 1.0.103, and made pinned `cargo-audit 0.22.2 --deny warnings` a required CI and release-preflight gate.
 - CI and immutable release publication now use Rust 1.96.1, locked dependencies, pinned Actions, least-privilege permissions, annotated-tag and exact-SHA approval, latest protected-check validation, portable asset names, digest verification, and `SHA256SUMS.txt` across Windows, macOS, and Linux.
 
-### Validated
-
-- `cargo --locked fmt --check`
-- `cargo --locked clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo --locked test --workspace --all-features`
-- `cargo --locked build --workspace --release --all-features`
-- `cargo audit --deny warnings`
-- `pwsh -NoProfile -File tests/release_contract.tests.ps1`
-- `pwsh -NoProfile -File tests/release_approval.tests.ps1`
-- `pwsh -NoProfile -File tests/release_target.tests.ps1`
-- `pwsh -NoProfile -File tests/release_assets.tests.ps1`
-- `pwsh -NoProfile -File tests/release_workflow.tests.ps1`
-
 ## [1.7.1] - 2026-07-06
+
+A monochrome terminal dashboard, opt-in WSL discovery and distinct Pro plan tiers. Recorded validation covered WSL safety, plan behavior and terminal UI tests.
 
 ### Changed
 
@@ -295,12 +352,6 @@ The v1.11.0 candidate did not publish release assets. This release includes its 
 
 - Windows WSL session discovery is now explicit opt-in via `CODEX_PRESENCE_INCLUDE_WSL=1` or `CC_PRESENCE_INCLUDE_WSL=1`; by default the runtime does not invoke `wsl.exe`, and the opt-in path uses the hidden subprocess helper to avoid visible console windows.
 - The terminal plan selector now distinguishes `Pro 5x ($100/month)` from `Pro 20x ($200/month)`, with legacy `pro` config/cache values mapped to `Pro 20x`.
-
-### Validated
-
-- `cargo test windows_wsl`
-- `cargo test plan --lib`
-- `cargo test ui::tests --lib`
 
 ## [1.7.0] - 2026-07-05
 
@@ -353,17 +404,19 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 
 ## [1.5.0] - 2026-05-21
 
+GPT-5.5 and GPT-5.5 Pro pricing and Fast labels, centralized pricing constants and refreshed README visuals. The recorded test suite had 114 passing tests.
+
 ### Added
 
 - Official pricing catalog entries for `gpt-5.5` ($5 / $0.50 / $30 per 1M) and `gpt-5.5-pro` ($30 / $3 / $180 per 1M), so Codex sessions on GPT-5.5 resolve to the correct OpenAI pricing the moment the model is selected.
-- Lightning `⚡` Fast-mode prefix coverage is now confirmed for the entire GPT-5.5 family (inherited from the existing service-tier resolver — no new wiring required).
+- Lightning `⚡` Fast-mode prefix coverage is now confirmed for the entire GPT-5.5 family (inherited from the existing service-tier resolver; no new wiring required).
 - Unit tests covering `gpt-5.5`, `gpt-5.5-pro`, case-and-trim normalization on the new keys, and context-window resolution for the GPT-5.5 family. Test suite total now sits at 114 passing.
 - README highlight banner calling out GPT-5.5 + GPT-5.5 Pro support, including pricing chips, rendered identically on github.com and in local Markdown previews.
 
 ### Changed
 
 - Pricing rows in `src/cost.rs` are now centralized as named `ModelPricing` constants (`GPT_5_5`, `GPT_5_5_PRO`, `GPT_5_4`, `GPT_5_2_FAMILY`, `GPT_5_1_FAMILY`, `GPT_5_MINI_FAMILY`, `GPT_5_NANO`, `CODEX_MINI_LATEST`); the Codex session context window is centralized as `CODEX_CONTEXT_WINDOW: u64 = 400_000`.
-- README badge row upgraded to `for-the-badge` style with real brand logos (GitHub Actions, semver, Rust, Discord, OpenAI) — same visual language across github.com and Markdown previews.
+- README badge row upgraded to `for-the-badge` style with real brand logos (GitHub Actions, semver, Rust, Discord, OpenAI), with the same visual language across github.com and Markdown previews.
 - README model-label examples and Fast-mode visibility examples refer to GPT-5.5.
 
 ### Fixed
@@ -372,6 +425,8 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - `.gitignore` now excludes injected local assistant boilerplate that previously surfaced as untracked.
 
 ## [1.1.0] - 2026-03-07
+
+A full-screen plan selector with Fast mode, reasoning effort and GPT-5.4 pricing support, plus more reliable session selection and incremental parsing.
 
 ### Added
 
@@ -395,7 +450,19 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Incremental JSONL parsing safely retains partial lines across updates.
 - Legacy `gpt-5.3-codex -> gpt-5.2-codex` pricing aliasing is migrated away; Spark variants now map to `gpt-5.3-codex`.
 
+## [1.0.0] - 2026-03-04
+
+README and branding refresh with semantic-version release tags and clearer cross-platform assets and changelog deltas.
+
+### Changed
+
+- Redesign README visuals and branding assets.
+- Switch releases to semantic-version tags.
+- Clarify cross-platform release assets and changelog deltas.
+
 ## [0.2.2] - 2026-02-10
+
+A focused packaging release with archive-only distribution and checksum files for easier automated verification.
 
 ### Changed
 
@@ -403,11 +470,15 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 
 ## [0.2.1] - 2026-02-10
 
+A compatibility release for CI and release stability, moving the macOS Intel runner to `macos-15-intel`.
+
 ### Changed
 
 - Release workflow macOS x64 runner updated to `macos-15-intel` for current GitHub Actions compatibility.
 
 ## [0.2.0] - 2026-02-10
+
+A major UX and runtime foundation update with incremental session parsing, live activity, clearer telemetry and configurable terminal logos.
 
 ### Added
 
@@ -456,6 +527,8 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 
 ## [0.1.2] - 2026-02-09
 
+Session token metrics, remaining-limit semantics and an error-aware Discord update pipeline, with a redesigned terminal layout.
+
 ### Added
 
 - Session token metrics from Codex JSONL:
@@ -480,6 +553,8 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 
 ## [0.1.1] - 2026-02-09
 
+Configuration schema 2, project branding and authoritative single-instance takeover, with terminal relaunch before headless fallback.
+
 ### Added
 
 - Config schema v2 with project defaults:
@@ -499,6 +574,8 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 
 ## [0.1.0] - 2026-02-09
 
+The initial single-binary Rust runtime with smart foreground, Codex wrapper, status and doctor commands, local session parsing and cross-platform Discord IPC.
+
 ### Added
 
 - Initial Rust implementation with single-binary UX.
@@ -513,12 +590,32 @@ Codex App parity for OpenCode is here. The runtime now reads OpenCode's local SQ
 - Single-instance lock handling.
 - Open source docs and CI/release workflows.
 
-[1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
+[Unreleased]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.11.3...v1.15.0
+[1.11.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.11.2...v1.11.3
+[1.11.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.11.1...v1.11.2
+[1.11.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.11.0...v1.11.1
+[1.11.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.10.3...v1.11.0
 [1.10.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.10.2...v1.10.3
-[1.10.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.9.0...v1.10.2
-[1.9.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...v1.9.0
+[1.10.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.10.1...v1.10.2
+[1.10.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.10.0...v1.10.1
+[1.10.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.6...v1.8.0
+[1.7.6]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.5...v1.7.6
 [1.7.5]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.4...v1.7.5
 [1.7.4]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.1.0...v1.5.0
+[1.1.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v0.2.2...v1.0.0
+[0.2.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/releases/tag/v0.2.0
+[0.1.2]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/commit/a4c6d9f6206a9dcbe3a941d27ce6aa08beeaf9bb
+[0.1.1]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/commit/a4c6d9f6206a9dcbe3a941d27ce6aa08beeaf9bb
+[0.1.0]: https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence/commit/a4c6d9f6206a9dcbe3a941d27ce6aa08beeaf9bb

@@ -96,15 +96,18 @@ The raw context is `372_000`; Codex App exposes 95% as usable context. Context r
 
 Daybreak Blue has no bundled context, pricing, credit rates, or Fast capability: observed runtime context wins, and missing economics stay unavailable. Cyber Red uses the published `gpt-5.6-cyber` contract: 400K context, 128K max output, and a 272K long-context threshold. Cumulative session telemetry cannot prove which individual request crossed that threshold, so totals above it remain partial lower bounds rather than receiving an invented surcharge.
 
-No public max-output, long-context threshold, cache-write credit rate, or Fast usage multiplier was verified for Sol, Terra, or Luna on 2026-07-09. Those fields remain absent rather than inheriting older GPT-5 constants.
+No public max-output, API context, cache-write credit rate, or Fast usage multiplier was verified for Sol, Terra, or Luna, so those fields remain absent rather than inheriting older GPT-5 constants. The OpenAI pricing page lists a long-context tier for all three (2x input and cache, 1.5x output above 272K input tokens in one request, checked 2026-11-07), so the catalog carries that threshold and the multipliers.
 
-## GPT-6 Sol, Luna and 6.1 Sol Contract
+GPT-5.6 Sol is on a promotional price until 2026-11-30. The catalog keeps the promotional rates and does not guess the price after that date; re-verify the pricing page then. The Codex credit rates of the three models come from the 2026-07-09 rate card and were not re-verified on 2026-11-07.
 
-Verified 2026-10-16 against the official model pages. The bundled `context.raw_tokens` is the Codex-usable fallback; `api_tokens`, `max_input_tokens` and `max_output_tokens` record API capability and never stand in for Codex capacity.
+## GPT-6 family contract
+
+Verified 2026-10-16 against the official model pages for GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna, and 2026-11-07 for GPT-6.1 Terra. The bundled `context.raw_tokens` is the Codex-usable fallback; `api_tokens`, `max_input_tokens` and `max_output_tokens` record API capability and never stand in for Codex capacity.
 
 | ID | Label | Bundled Codex fallback (raw / usable) | API context / max input / max output | Codex efforts | Fast |
 |:---|:---|---:|:---|:---|:---:|
 | `gpt-6.1-sol` | `GPT-6.1 Sol` | `500_000` / `475_000` | `1_050_000` / `922_000` / `128_000` | `low`…`max`, `ultra` | Yes |
+| `gpt-6.1-terra` | `GPT-6.1 Terra` | `500_000` / `475_000` | `1_050_000` / `922_000` / `128_000` | `low`…`max`, `ultra` | Yes |
 | `gpt-6-sol` | `GPT-6 Sol` | `872_000` / `872_000` | `1_050_000` / `922_000` / `128_000` | `low`…`max`, `ultra` | Yes |
 | `gpt-6-luna` | `GPT-6 Luna` | `872_000` / `872_000` | `1_050_000` / `922_000` / `128_000` | `low`…`max` | Yes |
 
@@ -114,6 +117,7 @@ Verified 2026-10-16 against the official model pages. The bundled `context.raw_t
 - API reasoning efforts are separate from Codex efforts. The API pages list `low`, `medium` (default), `high`, `xhigh` and `max` for 6.1 Sol, and add `none` for 6 Sol and 6 Luna. Codex `ultra` is not an API effort.
 - The API pages price Fast at 2x Standard. The Codex inventory describes Fast as "1.5x speed", which is a speed claim, not a price. 6.1 Sol Ultrafast (`service_tier: "ultrafast"`, 6x Standard) has no runtime speed mode, so the runtime does not price it as Ultrafast.
 - No official Codex credit rate is recorded for the GPT-6 family, so `credit_rates` stays `null`.
+- `gpt-6.1-terra` was released on 2026-10-26. Its bundled fallback is the Codex catalog value `context_window` `500_000` at the default 95% usable share (`475_000`); the same catalog entry allows up to `872_000` through `max_context_window`, which the runtime does not use. The efforts `low`, `medium`, `high`, `xhigh`, `max` and `ultra` and the `fast` speed tier come from that Codex entry (openai/codex commit `126a0ee92e`, `codex-rs/models-manager/models.json`). Its Fast price is 2x Standard.
 
 ## Presentation
 
@@ -142,7 +146,7 @@ Config schema 13 stores the shared `presence_enabled` master switch, `display.de
 
 CLI and VS Code always use the shared `1470480085453770854` identity. Pressing `D` in Ratatui toggles and saves the desktop value; Discord reconnects when the selected client id changes.
 
-Foreground TUI, headless, and Codex-wrapper loops reload `~/.codex/discord-presence-config.json` before every poll. Valid external edits from Pulse replace the complete runtime config together. Invalid, missing, or transiently replaced files are logged and ignored so the process keeps its last valid configuration.
+Foreground TUI, headless, and Codex-wrapper loops reload `~/.codex-discord-presence/config.json` before every poll. Valid external edits replace the complete runtime config together. Invalid, missing, or transiently replaced files are logged and ignored so the process keeps its last valid configuration.
 
 `presence_enabled` defaults to `true` during schema-11 migration. Pressing `M` in Ratatui or changing the same field in Pulse clears Discord activity once and reports `Paused`; session parsing, metrics, and the terminal dashboard continue locally. Re-enabling forces a fresh publish from the current session.
 
@@ -154,19 +158,29 @@ Quota labels come only from each dynamic window's `window_minutes` value; an abs
 
 ## Pricing
 
-API rates per one million tokens, verified 2026-07-09:
+Standard API rates per one million tokens, checked against the OpenAI pricing page on 2026-11-07. Cache write is the 30-minute rate; `n/a` means the model has no separate cache-write price.
 
-| Model | Input | Cache write | Cache read | Output |
-|:---|---:|---:|---:|---:|
-| Sol | `$5.00` | `$6.25` | `$0.50` | `$30.00` |
-| Terra | `$2.50` | `$3.125` | `$0.25` | `$15.00` |
-| Luna | `$1.00` | `$1.25` | `$0.10` | `$6.00` |
-| Cyber Red (verified 2026-08-12) | `$12.50` | `$15.625` | `$1.25` | `$75.00` |
-| GPT-6.1 Sol (verified 2026-10-16) | `$2.00` | `$2.50` | `$0.10` | `$10.00` |
-| GPT-6 Sol (verified 2026-10-16) | `$2.00` | `$2.50` | `$0.20` | `$10.00` |
-| GPT-6 Luna (verified 2026-10-16) | `$0.10` | `$0.125` | `$0.01` | `$0.50` |
+| Model | Input | Cache write | Cache read | Output | Long input / cache read / output |
+|:---|---:|---:|---:|---:|:---|
+| `gpt-6-astra` | `$10.00` | `$12.50` | `$1.00` | `$50.00` | `$20.00` / `$2.00` / `$75.00` |
+| `gpt-6.1-sol` | `$2.00` | `$2.50` | `$0.10` | `$10.00` | `$4.00` / `$0.20` / `$15.00` |
+| `gpt-6.1-terra` | `$1.00` | `$1.25` | `$0.05` | `$5.00` | `$2.00` / `$0.10` / `$7.50` |
+| `gpt-6-luna` | `$0.10` | `$0.125` | `$0.01` | `$0.50` | `$0.20` / `$0.02` / `$0.75` |
+| `gpt-6-sol` | `$2.00` | `$2.50` | `$0.20` | `$10.00` | `$4.00` / `$0.40` / `$15.00` |
+| `gpt-5.6-sol` (promotional until 2026-11-30) | `$4.00` | `$5.00` | `$0.40` | `$20.00` | `$8.00` / `$0.80` / `$30.00` |
+| `gpt-5.6-terra` | `$2.00` | `$2.50` | `$0.20` | `$12.00` | `$4.00` / `$0.40` / `$18.00` |
+| `gpt-5.6-luna` | `$0.20` | `$0.25` | `$0.02` | `$1.20` | `$0.40` / `$0.04` / `$1.80` |
+| `gpt-5.6-cyber` (Cyber Red) | `$12.50` | `$15.625` | `$1.25` | `$75.00` | none |
+| `gpt-5.5` | `$5.00` | n/a | `$0.50` | `$30.00` | `$10.00` / `$1.00` / `$45.00` |
+| `gpt-5.4` | `$2.50` | n/a | `$0.25` | `$15.00` | `$5.00` / `$0.50` / `$22.50` |
+| `gpt-5.4-mini` | `$0.75` | n/a | `$0.075` | `$4.50` | none |
+| `gpt-5.3-codex` | `$1.75` | n/a | `$0.175` | `$14.00` | none |
+| `gpt-5.2` | `$1.75` | n/a | `$0.175` | `$14.00` | none |
+| `gpt-5.1`, `gpt-5` | `$1.25` | n/a | `$0.125` | `$10.00` | none |
+| `gpt-5-mini` | `$0.25` | n/a | `$0.025` | `$2.00` | none |
+| `gpt-5-nano` | `$0.05` | n/a | `$0.005` | `$0.40` | none |
 
-For the GPT-6 rows, a request with more than 272K observed input tokens is billed at 2x input and cache and 1.5x output for the full request.
+A request with more than 272K observed input tokens is billed at the long-context rates for the full request: 2x input and cache and 1.5x output. GPT-5.5 and GPT-5.4 publish long-context API rates too, but their Codex context window is 272K, the threshold itself, so no Codex request reaches them and the catalog does not apply them. `gpt-5.5-pro` and `codex-mini-latest` are also bundled but were not part of the 2026-11-07 check. Fast is 2x Standard for the GPT-6 family; GPT-5.5 and GPT-5.4 keep their catalog multipliers, and GPT-5.6 has no verified Fast multiplier, so a Fast GPT-5.6 cost stays partial.
 
 Cyber Blue is intentionally absent from this table because no public pricing contract was verified.
 
@@ -180,7 +194,7 @@ Cyber Blue is intentionally absent from this table because no public pricing con
 
 Unknown models never inherit a fallback rate. Discord emits known subtotals without coverage text and hides unavailable costs. Structured output retains the classification. OpenCode can produce an exact GPT-5.6 total because its database reports cache-write tokens separately.
 
-The session tracker accumulates usage deltas with each observed model and speed. It uses aligned last-request input to resolve the context tier. Cumulative input never acts as a request size. Missing request boundaries keep the known subtotal partial. Astra, GPT-6 Sol, GPT-6 Luna and GPT-6.1 Sol requests with observed input over 272K use the documented long-context multipliers. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
+The session tracker accumulates usage deltas with each observed model and speed. It uses aligned last-request input to resolve the context tier. Cumulative input never acts as a request size. Missing request boundaries keep the known subtotal partial. Requests with observed input over 272K use the documented long-context multipliers for Astra, GPT-6 Sol, GPT-6 Luna, GPT-6.1 Sol, GPT-6.1 Terra, GPT-5.6 Sol, Terra and Luna, GPT-5.5 and GPT-5.4. GPT-5.3 Codex Spark remains unavailable instead of inheriting GPT-5.3 Codex rates because its current Codex credit rates are explicitly non-final.
 
 ## Prompt Cache Policy
 
@@ -191,7 +205,10 @@ The bundled policy records a 1,024-token eligibility minimum and a 30-minute min
 | Fact | Source | Verified |
 |:---|:---|:---|
 | Family IDs and alias | <https://developers.openai.com/api/docs/guides/latest-model> | 2026-07-09 |
-| API rates | <https://openai.com/index/previewing-gpt-5-6-sol/> | 2026-07-09 |
+| GPT-5.6 launch | <https://openai.com/index/previewing-gpt-5-6-sol/> | 2026-07-09 |
+| Standard and long-context API rates for every priced model, GPT-5.6 Sol promotional price until 2026-11-30 | <https://developers.openai.com/api/docs/pricing> | 2026-11-07 |
+| GPT-6.1 Terra context, efforts and pricing | <https://developers.openai.com/api/docs/models/gpt-6.1-terra> | 2026-11-07 |
+| GPT-6.1 Terra Codex context, efforts and Fast tier | <https://github.com/openai/codex/blob/126a0ee92e/codex-rs/models-manager/models.json> (commit `126a0ee92e`, 2026-10-26) | 2026-11-07 |
 | Current model rates and API windows | <https://developers.openai.com/api/docs/models> | 2026-07-09 |
 | Prompt caching | <https://developers.openai.com/api/docs/guides/prompt-caching> | 2026-07-09 |
 | Codex credit rates | <https://help.openai.com/en/articles/20001106-codex-rate-card-2> | 2026-07-09 |
@@ -210,14 +227,16 @@ The bundled policy records a 1,024-token eligibility minimum and a 30-minute min
 | File | Purpose |
 |:---|:---|
 | `~/.codex/models_cache.json` | Current Codex App model context metadata |
-| `~/.codex/discord-presence-config.json` | Runtime config and pricing overrides |
-| `~/.codex/discord-presence-metrics.json` | Latest metrics snapshot |
-| `~/.codex/discord-presence-metrics.md` | Human-readable metrics report |
-| `~/.codex/sessions/**/*.jsonl` | Codex sessions |
-| `~/.local/share/opencode/opencode*.db` | OpenCode-hosted Codex sessions |
+| `~/.codex/sessions/**/*.jsonl` | Codex sessions, read only. A full walk runs every 30 seconds; polls in between read today's and yesterday's folders and the recent files |
+| `~/.local/share/opencode/opencode*.db` | OpenCode-hosted Codex sessions, opened read-only and as immutable when OpenCode is closed, so no `-wal` or `-shm` file appears |
+| `~/.codex-discord-presence/config.json` | Runtime config and pricing overrides |
+| `~/.codex-discord-presence/plan-cache.json` | Last detected plan, written only when it changes |
+| `~/.codex-discord-presence/instance.lock`, `instance.json` | Single-instance lock and its owner |
+
+`~/.codex` is only read. The Git branch comes from `.git/HEAD` and the dashboard redraws only when its content changes. Without a terminal (autostart, a launcher) the program runs with no window; set `CODEX_PRESENCE_OPEN_TERMINAL=1` to open one instead.
 
 ## Unreleased session-cost corrections
 
 `src/session/costing.rs` owns event accumulation, repeated-event rejection, cache-write totals and multimodel subtotals. `cache_write_input_tokens` and `cache_write_tokens` remain optional. Missing model tariffs do not erase previously known cost.
 
-The shared compositor reserves space for enabled cost fields when a preceding model label fills the Discord line. The field-order and privacy contracts stay unchanged. The [Astra model card](https://developers.openai.com/api/docs/models/gpt-6-astra) and [per-run cost arithmetic](https://developers.openai.com/cookbook/articles/per_run_spending_controller_responses_api) were checked on 2026-09-20 for request-level context multipliers and disjoint token categories. Existing catalog rows keep their original verification dates.
+The shared compositor reserves space for enabled cost fields when a preceding model label fills the Discord line. The field-order and privacy contracts stay unchanged. The [Astra model card](https://developers.openai.com/api/docs/models/gpt-6-astra) and [per-run cost arithmetic](https://developers.openai.com/cookbook/articles/per_run_spending_controller_responses_api) were checked on 2026-09-20 for request-level context multipliers and disjoint token categories.

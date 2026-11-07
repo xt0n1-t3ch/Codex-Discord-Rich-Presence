@@ -1,3 +1,5 @@
+//! Folds transcript events into one session's activity, usage, speed and limit state.
+
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

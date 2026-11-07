@@ -1,6 +1,8 @@
+//! Runtime orchestration: the terminal dashboard, the headless loop, `status`, `doctor` and the Discord proof.
+
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -35,6 +37,9 @@ use crate::util::{
 };
 
 const RELAUNCH_GUARD_ENV: &str = "CODEX_PRESENCE_TERMINAL_RELAUNCHED";
+/// Opt-in: without a terminal (autostart, a launcher) the program runs with no
+/// window unless this is set, so starting it never pops up a terminal.
+const OPEN_TERMINAL_ENV: &str = "CODEX_PRESENCE_OPEN_TERMINAL";
 
 #[derive(Debug, Clone)]
 pub enum AppMode {
@@ -340,7 +345,9 @@ pub fn doctor(config: &PresenceConfig) -> Result<u8> {
 fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> Result<()> {
     let stop = install_stop_signal()?;
     if !io::stdout().is_terminal() {
-        if maybe_relaunch_in_terminal()? {
+        if open_terminal_requested(env::var(OPEN_TERMINAL_ENV).ok().as_deref())
+            && maybe_relaunch_in_terminal()?
+        {
             return Ok(());
         }
         return run_headless_foreground(config, runtime, stop);
@@ -438,7 +445,13 @@ fn run_foreground_tui(mut config: PresenceConfig, runtime: RuntimeSettings) -> R
                     logo_mode: config.display.terminal_logo_mode.clone(),
                     logo_path: config.display.terminal_logo_path.as_deref(),
                     desktop_design_label: config.display.desktop_presence_design.label(),
-                    banner_phase: ((started.elapsed().as_millis() / 450) % 8) as u8,
+                    // The spinner moves only while a session works, so an idle
+                    // dashboard keeps the same frame and is not redrawn.
+                    banner_phase: if active.is_some() {
+                        ((started.elapsed().as_millis() / 450) % 8) as u8
+                    } else {
+                        0
+                    },
                     active,
                     effective_limits: snapshot.effective_limits(),
                     effective_credits: snapshot.effective_credits(),
@@ -745,6 +758,15 @@ fn run_headless_foreground(
     Ok(())
 }
 
+fn open_terminal_requested(value: Option<&str>) -> bool {
+    value.map(str::trim).is_some_and(|value| {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
 fn maybe_relaunch_in_terminal() -> Result<bool> {
     if env::var_os(RELAUNCH_GUARD_ENV).is_some() {
         return Ok(false);
@@ -898,7 +920,7 @@ fn run_codex_wrapper(
     args: Vec<String>,
 ) -> Result<()> {
     let stop = install_stop_signal()?;
-    let mut child = process_guard::ChildProcessGuard::new(spawn_codex_child(args)?);
+    let mut child = spawn_codex_child(args)?;
     let mut git_cache = GitBranchCache::new(Duration::from_secs(30));
     let mut parse_cache = SessionParseCache::default();
     let mut discord = DiscordPresence::new(config.effective_client_id());
@@ -941,15 +963,14 @@ fn run_codex_wrapper(
     Ok(())
 }
 
-fn spawn_codex_child(args: Vec<String>) -> Result<Child> {
+fn spawn_codex_child(args: Vec<String>) -> Result<process_guard::ChildProcessGuard> {
     let mut command = Command::new("codex");
     command
         .args(args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    command
-        .spawn()
+    process_guard::ChildProcessGuard::spawn(&mut command)
         .context("failed to spawn `codex` child process")
 }
 
@@ -977,7 +998,6 @@ fn collect_runtime_snapshot(
         &config.pricing,
     ));
     metrics_tracker.update(&sessions);
-    metrics_tracker.persist_if_due();
     let cached_limits = parse_cache.latest_limits_source();
     let cached_envelopes = parse_cache.rate_limit_envelopes();
     Ok(RuntimeSnapshot::from_sessions(
@@ -1115,7 +1135,40 @@ $lines -join "`n""#
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-#[cfg(not(windows))]
+/// The process and up to seven ancestors as `comm args` lines, read from
+/// `/proc` without starting a process.
+#[cfg(target_os = "linux")]
+fn process_lineage_text() -> Option<String> {
+    let mut process_id = std::process::id();
+    let mut lineage = Vec::new();
+    for _ in 0..8 {
+        let dir = std::path::PathBuf::from(format!("/proc/{process_id}"));
+        let Ok(stat) = std::fs::read_to_string(dir.join("stat")) else {
+            break;
+        };
+        let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
+        let args = std::fs::read(dir.join("cmdline"))
+            .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', " "))
+            .unwrap_or_default();
+        let entry = format!("{} {}", comm.trim(), args.trim());
+        if !entry.trim().is_empty() {
+            lineage.push(entry.trim().to_string());
+        }
+        // `stat` is `pid (comm) state ppid ...`; comm may hold spaces and parentheses.
+        let parent_id = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().nth(1))
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+        if parent_id == 0 || parent_id == process_id {
+            break;
+        }
+        process_id = parent_id;
+    }
+    (!lineage.is_empty()).then(|| lineage.join("\n"))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
 fn process_lineage_text() -> Option<String> {
     let mut process_id = std::process::id();
     let mut lineage = Vec::new();
@@ -1392,6 +1445,31 @@ fn request_redraw(force_redraw: &mut bool, last_tick: &mut Instant, poll_interva
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_lineage_starts_with_this_process_and_needs_no_ps() {
+        let lineage = process_lineage_text().expect("lineage from /proc");
+        let own = std::fs::read_to_string("/proc/self/comm").expect("own comm");
+        assert!(
+            lineage
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .starts_with(own.trim())
+        );
+        assert!(lineage.lines().count() >= 2, "the parent is listed too");
+    }
+
+    #[test]
+    fn a_terminal_opens_only_when_asked() {
+        for value in [None, Some(""), Some("0"), Some("false"), Some("no")] {
+            assert!(!open_terminal_requested(value), "{value:?}");
+        }
+        for value in ["1", "true", " YES ", "on"] {
+            assert!(open_terminal_requested(Some(value)), "{value}");
+        }
+    }
 
     #[test]
     fn opencode_process_lineage_selects_codex_app_surface() {

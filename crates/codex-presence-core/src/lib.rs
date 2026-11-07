@@ -1,3 +1,8 @@
+//! Presence layout and usage-limit logic shared by Codex Discord Rich Presence and Pulse.
+//!
+//! [`presence`] composes the Discord activity lines from user-selected fields. [`usage`] parses
+//! Codex rate-limit telemetry and picks the limits worth showing.
+
 pub mod presence;
 pub mod usage;
 
